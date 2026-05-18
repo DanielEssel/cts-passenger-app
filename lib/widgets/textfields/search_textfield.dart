@@ -12,13 +12,13 @@ class SearchTextField extends StatelessWidget {
   final IconData icon;
 
   const SearchTextField({
-    Key? key,
+    super.key,
     this.hint = 'Search...',
     required this.controller,
     this.onChanged,
     this.onSearch,
     this.icon = Icons.search,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

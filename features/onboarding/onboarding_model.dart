@@ -17,7 +17,7 @@ final List<OnboardingModel> onboardingPages = [
     id: 1,
     title: 'Book a Ride',
     subtitle: 'Request a ride and get picked up in minutes',
-    imagePath: 'assets/images/onboarding_1.png',
+    imagePath: 'assets/images/onboard.png',
   ),
   OnboardingModel(
     id: 2,

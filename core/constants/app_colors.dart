@@ -19,11 +19,19 @@ class AppColors {
   // Background Colors
   static const Color backgroundColor = Color(0xFFFFFFFF); // White
   static const Color backgroundLightColor = Color(0xFFF5F5F5); // Light Grey
-  static const Color backgroundDarkColor = Color(0xFFFAFAFA); // Slightly Darker White
+  static const Color backgroundDarkColor =
+      Color(0xFFFAFAFA); // Slightly Darker White
 
   // Additional Colors for Status
   static const Color activeColor = Color(0xFF4CAF50); // Green
   static const Color inactiveColor = Color(0xFFBDBDBD); // Grey
   static const Color cancelledColor = Color(0xFFF44336); // Red
   static const Color pendingColor = Color(0xFFFFC107); // Amber
+
+  static const Color textPrimary = Color(0xFF1A1A1A);
+  static const Color textSecondary = Color(0xFF6B7280);
+  static const Color textTertiary = Color(0xFF9CA3AF);
+  static const Color textDisabled = Color(0xFFD1D5DB);
+
+  static const Color white = Colors.white;
 }

@@ -5,36 +5,79 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.0.0
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
-  google_fonts: ^6.1.0
-  provider: ^6.0.0
-  firebase_core: ^2.24.0
-  firebase_auth: ^4.15.0
-  cloud_firestore: ^4.13.0
-  geolocator: ^10.0.0
-  google_maps_flutter: ^2.5.0
-  shared_preferences: ^2.2.0
-  dio: ^5.3.0
-  image_picker: ^1.0.0
-  intl: ^0.19.0
-  permission_handler: ^11.0.0
+
+  equatable: ^2.0.7
+  dartz: ^0.10.1
+  flutter_riverpod: ^3.3.1
+  riverpod: ^3.0.0
+  state_notifier: ^1.0.0
+  riverpod_annotation: ^4.0.2
+
+  firebase_app_check: ^0.4.4
+
+  share_plus: ^10.0.0
+
+  http: ^1.2.1
+
+
+  # ── UI & Fonts ──────────────────────────────────
+  cupertino_icons: ^1.0.8
+  google_fonts: ^8.1.0
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.1
+  lottie: ^3.1.0
+
+  # ── State Management ────────────────────────────
+  provider: ^6.1.2
+
+  # ── Firebase ────────────────────────────────────
+  firebase_core: ^4.7.0
+  firebase_auth: ^6.0.0
+  cloud_firestore: ^6.0.0
+  firebase_storage: ^13.0.0
+  firebase_messaging: ^16.2.0
+  cloud_functions: ^6.2.0
+  firebase_analytics: ^12.0.0
+  webview_flutter: ^4.4.0
+  flutter_local_notifications: ^21.0.0  # Show FCM alerts in foreground
+
+  # ── Maps & Location ─────────────────────────────
+  geolocator: ^14.0.2
+  google_maps_flutter: 2.6.1
+  flutter_polyline_points: ^3.1.0   # Draw route lines on the map
+  geocoding: ^3.0.0
+
+  # ── Networking ──────────────────────────────────
+  dio: ^5.7.0
+  connectivity_plus: ^7.1.1         # Detect online/offline state
+
+  # ── Storage & Preferences ───────────────────────
+  shared_preferences: ^2.3.2
+
+  # ── Utilities ───────────────────────────────────
+  intl: ^0.20.2
+  uuid: ^4.5.1                      # Generate unique IDs client-side
+  permission_handler: ^12.0.1       # Runtime permissions (location, camera)
+  image_picker: ^1.1.2              # Pick/capture profile photos
+  url_launcher: ^6.3.1              # Open phone dialler, maps, etc.
+  package_info_plus: ^9.0.1         # App version in Settings screen
+  go_router: ^17.2.3
+  fpdart: ^1.2.0
+
+
+
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  flutter_lints: ^3.0.0
-
-  # ============================================
-  # TESTING
-  # ============================================
-  mockito: ^5.4.0
-  build_runner: ^2.4.0
+  flutter_lints: ^6.0.0
+  riverpod_generator: ^4.0.3 # Required to turn annotations into code
+  build_runner: ^2.5.4
 
 flutter:
   uses-material-design: true
@@ -49,10 +92,23 @@ flutter:
 
   # ============================================
   # FONTS (Optional - For Custom Fonts)
-  # ============================================
+  # ==========================================
   # fonts:
+  #   - family: Poppins
+  #     fonts:
+  #       - asset: assets/fonts/Poppins-Regular.ttf
+  #         weight: 400
+  #       - asset: assets/fonts/Poppins-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/Poppins-SemiBold.ttf
+  #         weight: 600
+  #       - asset: assets/fonts/Poppins-Bold.ttf
+  #         weight: 700
   #   - family: Inter
   #     fonts:
   #       - asset: assets/fonts/Inter-Regular.ttf
+  #         weight: 400
+  #       - asset: assets/fonts/Inter-Medium.ttf
+  #         weight: 500
   #       - asset: assets/fonts/Inter-Bold.ttf
   #         weight: 700

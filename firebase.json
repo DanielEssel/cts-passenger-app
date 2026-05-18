@@ -1,0 +1,29 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "ctstransportapp",
+          "appId": "1:67007923864:android:0d57b9d174c999c7de72ed",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "ctstransportapp",
+          "configurations": {
+            "android": "1:67007923864:android:0d57b9d174c999c7de72ed",
+            "ios": "1:67007923864:ios:067c5510a8cc82c4de72ed",
+            "macos": "1:67007923864:ios:067c5510a8cc82c4de72ed",
+            "web": "1:67007923864:web:3b9dadd72fc1fab9de72ed",
+            "windows": "1:67007923864:web:3b9dadd72fc1fab9de72ed"
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,79 +2,119 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
 class AppTextStyles {
-  // Heading Styles
-  static const TextStyle headingXLarge = TextStyle(
-    fontSize: 32,
-    fontWeight: FontWeight.bold,
-    color: AppColors.textPrimaryColor,
-  );
+  static const String _fontFamily = 'Inter';
 
-  static const TextStyle headingLarge = TextStyle(
+  // Display
+  static const TextStyle display = TextStyle(
+    fontFamily: _fontFamily,
     fontSize: 28,
-    fontWeight: FontWeight.bold,
-    color: AppColors.textPrimaryColor,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary,
+    letterSpacing: -0.5,
   );
 
-  static const TextStyle headingMedium = TextStyle(
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimaryColor,
+  // Headings
+  static const TextStyle heading1 = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary,
   );
 
-  static const TextStyle headingSmall = TextStyle(
+  static const TextStyle heading2 = TextStyle(
+    fontFamily: _fontFamily,
     fontSize: 20,
     fontWeight: FontWeight.w600,
-    color: AppColors.textPrimaryColor,
+    color: AppColors.textPrimary,
   );
 
-  // Body Styles
+  static const TextStyle heading3 = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  static const TextStyle heading4 = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  // Body
   static const TextStyle bodyLarge = TextStyle(
+    fontFamily: _fontFamily,
     fontSize: 16,
-    fontWeight: FontWeight.w500,
-    color: AppColors.textPrimaryColor,
+    fontWeight: FontWeight.w400,
+    color: AppColors.textPrimary,
+    height: 1.5,
   );
 
   static const TextStyle bodyMedium = TextStyle(
+    fontFamily: _fontFamily,
     fontSize: 14,
-    fontWeight: FontWeight.w500,
-    color: AppColors.textPrimaryColor,
+    fontWeight: FontWeight.w400,
+    color: AppColors.textPrimary,
+    height: 1.5,
   );
 
   static const TextStyle bodySmall = TextStyle(
-    fontSize: 12,
+    fontFamily: _fontFamily,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
-    color: AppColors.textSecondaryColor,
+    color: AppColors.textSecondary,
   );
 
-  // Caption Styles
-  static const TextStyle captionLarge = TextStyle(
+  // Labels
+  static const TextStyle labelLarge = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  static const TextStyle labelMedium = TextStyle(
+    fontFamily: _fontFamily,
     fontSize: 12,
     fontWeight: FontWeight.w500,
-    color: AppColors.textSecondaryColor,
+    color: AppColors.textSecondary,
   );
 
-  static const TextStyle captionSmall = TextStyle(
-    fontSize: 10,
+  static const TextStyle caption = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 11,
     fontWeight: FontWeight.w400,
-    color: AppColors.textDisabledColor,
+    color: AppColors.textTertiary,
   );
 
-  // Button Styles
-  static const TextStyle buttonLarge = TextStyle(
-    fontSize: 16,
+  // Buttons
+  static const TextStyle button = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 15,
     fontWeight: FontWeight.w600,
-    color: Colors.white,
-  );
-
-  static const TextStyle buttonMedium = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    color: Colors.white,
+    color: AppColors.background,
   );
 
   static const TextStyle buttonSmall = TextStyle(
-    fontSize: 12,
+    fontFamily: _fontFamily,
+    fontSize: 13,
     fontWeight: FontWeight.w600,
-    color: Colors.white,
+    color: AppColors.background,
+  );
+
+  // Money
+  static const TextStyle amount = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 26,
+    fontWeight: FontWeight.w700,
+    color: AppColors.background,
+  );
+
+  static const TextStyle amountSmall = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary,
   );
 }

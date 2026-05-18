@@ -18,7 +18,7 @@ class CustomTextField extends StatefulWidget {
   final String? errorText;
 
   const CustomTextField({
-    Key? key,
+    super.key,
     required this.label,
     this.hint,
     required this.controller,
@@ -30,7 +30,7 @@ class CustomTextField extends StatefulWidget {
     this.minLines = 1,
     this.onChanged,
     this.errorText,
-  }) : super(key: key);
+  });
 
   @override
   State<CustomTextField> createState() => _CustomTextFieldState();

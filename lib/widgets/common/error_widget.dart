@@ -11,11 +11,11 @@ class ErrorWidget extends StatelessWidget {
   final String retryLabel;
 
   const ErrorWidget({
-    Key? key,
+    super.key,
     required this.message,
     this.onRetry,
     this.retryLabel = 'Try Again',
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +25,7 @@ class ErrorWidget extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.errorColor),
+            const Icon(Icons.error_outline, size: 64, color: AppColors.errorColor),
             const SizedBox(height: 16),
             Text(
               message,

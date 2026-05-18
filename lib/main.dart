@@ -1,46 +1,389 @@
-// riders_app/lib/main.dart
+// UPDATE: main.dart
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
+import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // Add this
 import 'core/constants/app_colors.dart';
 import 'core/routes/app_routes.dart';
+
+// AUTH FLOW
 import 'features/splash/splash_screen.dart';
-import 'features/onboarding/onboarding_screen.dart';  // ✅ ADD THIS
-import 'features/home/presentation/home_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/signup_screen.dart';
 import 'features/auth/presentation/otp_verification_screen.dart';
-import 'features/auth/presentation/role_selection_screen.dart';
 
-void main() {
-  runApp(const RiderApp());
+// MAIN SHELL
+import 'features/root/passenger_root_shell.dart';
+
+// NON-TAB SCREENS
+import 'features/ride/presentation/book_ride_screen.dart';
+import 'features/delivery/presentation/delivery_screen.dart';
+import 'features/delivery/presentation/delivery_vehicle_screen.dart'; // Add this
+// Add this
+import 'features/gas/presentation/screens/gas_order_screen.dart'; // Add this
+import 'features/notification/presentation/notifications_screen.dart';
+import 'features/ride_tracking/ride_tracking_screen.dart';
+
+// PROFILE SUB-SCREENS
+import 'features/profile/presentation/edit_profile_screen.dart';
+import 'features/profile/presentation/saved_places_screen.dart';
+import 'features/profile/presentation/payment_methods_screen.dart';
+import 'features/profile/presentation/promotions_screen.dart';
+import 'features/profile/presentation/help_support_screen.dart';
+import 'features/profile/presentation/about_screen.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔥 REQUIRED: Initialize Firebase before Riverpod & App start
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  runApp(
+    const ProviderScope(
+      child: RiderApp(),
+    ),
+  );
 }
 
 class RiderApp extends StatelessWidget {
-  const RiderApp({Key? key}) : super(key: key);
+  const RiderApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CTS Transport - Rider',
+      
+      title: 'CTS Passenger',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: AppColors.primaryColor,
-        scaffoldBackgroundColor: AppColors.backgroundColor,
-        useMaterial3: true,
-      ),
+      theme: _buildLightTheme(),
+      themeMode: ThemeMode.light,
       initialRoute: AppRoutes.splash,
-      routes: {
-        // Auth Routes
-        AppRoutes.splash: (context) => const SplashScreen(),
-        AppRoutes.onboarding: (context) => const OnboardingScreen(),  // ✅ ADD THIS
-        AppRoutes.login: (context) => const LoginScreen(),
-        AppRoutes.signup: (context) => const SignupScreen(),
-        AppRoutes.otpVerification: (context) => const OtpVerificationScreen(),
-        AppRoutes.roleSelection: (context) => const RoleSelectionScreen(),
-        
-        // Rider Routes
-        AppRoutes.riderHome: (context) => const RiderHomeScreen(),
-      },
+      routes: _buildRoutes(),
+      onGenerateRoute: _onGenerateRoute,
+      onUnknownRoute: _onUnknownRoute,
+    );
+  }
+
+  ThemeData _buildLightTheme() {
+    // ... keep your existing theme setup exactly as is ...
+    const String primaryFont = 'Poppins';
+    const String secondaryFont = 'Inter';
+
+    return ThemeData(
+      fontFamily: secondaryFont,
+      primaryColor: AppColors.primaryColor,
+      scaffoldBackgroundColor: AppColors.background,
+      useMaterial3: true,
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primaryColor,
+        primary: AppColors.primaryColor,
+        secondary: AppColors.primaryColor,
+        brightness: Brightness.light,
+      ),
+      appBarTheme: const AppBarTheme(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: false,
+        backgroundColor: Colors.transparent,
+        foregroundColor: AppColors.textPrimaryColor,
+      ),
+      textTheme: const TextTheme(
+        headlineLarge: TextStyle(
+            fontFamily: primaryFont, fontSize: 32, fontWeight: FontWeight.bold),
+        headlineMedium: TextStyle(
+            fontFamily: primaryFont, fontSize: 28, fontWeight: FontWeight.w600),
+        headlineSmall: TextStyle(
+            fontFamily: primaryFont, fontSize: 24, fontWeight: FontWeight.w600),
+        bodyLarge: TextStyle(fontFamily: secondaryFont, fontSize: 16),
+        bodyMedium: TextStyle(fontFamily: secondaryFont, fontSize: 14),
+        bodySmall: TextStyle(fontFamily: secondaryFont, fontSize: 12),
+        labelLarge: TextStyle(
+            fontFamily: secondaryFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600),
+        labelMedium: TextStyle(
+            fontFamily: secondaryFont,
+            fontSize: 12,
+            fontWeight: FontWeight.w500),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          backgroundColor: AppColors.primaryColor,
+          foregroundColor: Colors.white,
+          textStyle: const TextStyle(
+            fontFamily: secondaryFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.primaryColor,
+          textStyle: const TextStyle(
+            fontFamily: secondaryFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primaryColor,
+          side: const BorderSide(color: AppColors.primaryColor),
+          textStyle: const TextStyle(
+            fontFamily: secondaryFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.primaryColor, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.errorColor),
+        ),
+        labelStyle: const TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
+        hintStyle: TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 14,
+          color: Colors.grey.shade400,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        color: Colors.white,
+      ),
+      chipTheme: ChipThemeData(
+        labelStyle: const TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        type: BottomNavigationBarType.fixed,
+        elevation: 0,
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
+        selectedLabelStyle: TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 10,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        labelStyle: TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        titleTextStyle: const TextStyle(
+          fontFamily: primaryFont,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimaryColor,
+        ),
+        contentTextStyle: const TextStyle(
+          fontFamily: secondaryFont,
+          fontSize: 14,
+          color: AppColors.textSecondaryColor,
+        ),
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
+    );
+  }
+
+  Map<String, WidgetBuilder> _buildRoutes() {
+  return {
+    // Auth Flow
+    AppRoutes.splash: (_) => const SplashScreen(),
+    AppRoutes.onboarding: (_) => const OnboardingScreen(),
+    AppRoutes.login: (_) => const LoginScreen(),
+    AppRoutes.signup: (_) => const SignupScreen(),
+    AppRoutes.otpVerification: (_) => const OtpVerificationScreen(),
+
+    // Main Shell
+    AppRoutes.shell: (_) => const PassengerRootShell(),
+
+    // Profile sub-screens
+    AppRoutes.notifications: (_) => const NotificationsScreen(),
+    AppRoutes.editProfile: (_) => const EditProfileScreen(),
+    AppRoutes.savedPlaces: (_) => const SavedPlacesScreen(),
+    AppRoutes.paymentMethods: (_) => const PaymentMethodsScreen(),
+    AppRoutes.promotions: (_) => const PromotionsScreen(),
+    AppRoutes.privacySecurity: (_) => const PrivacySecurityScreen(),
+    AppRoutes.helpSupport: (_) => const HelpSupportScreen(),
+    AppRoutes.about: (_) => const AboutScreen(),
+    
+    // Ride & Delivery Screens - ADD THESE
+    AppRoutes.bookRide: (_) => const BookRideScreen(),
+    AppRoutes.delivery: (_) => const DeliveryScreen(),
+    AppRoutes.gasOrder: (_) => const GasOrderScreen(), // ADD THIS LINE
+  };
+}
+
+  Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
+    debugPrint('🎯 Generating route: ${settings.name}');
+
+    switch (settings.name) {
+      case AppRoutes.bookRide:
+        return MaterialPageRoute(
+          builder: (context) => const BookRideScreen(),
+          settings: settings,
+        );
+
+      case AppRoutes.delivery:
+        return MaterialPageRoute(
+          builder: (context) => const DeliveryScreen(),
+          settings: settings,
+        );
+
+      case AppRoutes.deliveryVehicle:
+        // ✅ Guard against null args
+        final args = settings.arguments as Map<String, dynamic>? ?? {};
+        return MaterialPageRoute(
+          builder: (context) => DeliveryVehicleScreen(
+            pickup: args['pickup'],
+            dropoff: args['dropoff'], // ✅ was missing
+            weightTier: args['weightTier'],
+            weightRange: args['weightRange'],
+            eligibleVehicles: args['eligibleVehicles'],
+            parcelType: args['parcelType'],
+            isFragile: args['isFragile'] ?? false,
+            requiresHelpers: args['requiresHelpers'] ?? false,
+            hasPhoto: args['hasPhoto'] ?? false,
+            receiverPhone: args['receiverPhone'] ?? '',
+            notes: args['notes'] ?? '',
+          ),
+          settings: settings,
+        );
+
+      case AppRoutes.rideTracking:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (context) => RideTrackingScreen(
+            rideId: args?['rideId'] ??
+                '', // ✅ was 'tripId', must match constructor param name
+          ),
+          settings: settings,
+        );
+
+      case AppRoutes.gasOrder:
+      debugPrint('✅ Creating GasOrderScreen');
+      return MaterialPageRoute(
+        builder: (context) => const GasOrderScreen(),
+        settings: settings,
+      );
+
+      default:
+      debugPrint('⚠️ Unknown route in onGenerateRoute: ${settings.name}');
+      return null;
+    }
+  }
+
+  Route<dynamic> _onUnknownRoute(RouteSettings settings) {
+    debugPrint('⚠️ Unknown route: ${settings.name}');
+    return MaterialPageRoute(
+      builder: (context) => Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                size: 64,
+                color: AppColors.errorColor,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Route not found',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${settings.name}',
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textSecondaryColor,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    AppRoutes.shell,
+                    (route) => false,
+                  );
+                },
+                child: const Text('Go to Home'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

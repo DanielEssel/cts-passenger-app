@@ -1,161 +1,252 @@
 // features/auth/presentation/login_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_strings.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/routes/app_routes.dart';
-import '../../../widgets/buttons/primary_button.dart';
-import '../../../widgets/textfields/custom_textfield.dart';
+import '../providers/auth_providers.dart';
+import '../../auth/widgets/auth_widgets.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+class LoginScreen extends ConsumerStatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _phoneKey = GlobalKey<PhoneInputFieldState>();
   final _formKey = GlobalKey<FormState>();
-  bool _isLoading = false;
+
+  late final AnimationController _animController;
+  late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
+
+  @override
+  void initState() {
+    super.initState();
+
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+    ));
+
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _fadeAnim = CurvedAnimation(
+      parent: _animController,
+      curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+    );
+    _slideAnim = Tween(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animController,
+      curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+    ));
+    _animController.forward();
+  }
 
   @override
   void dispose() {
     _phoneController.dispose();
-    _passwordController.dispose();
+    _animController.dispose();
     super.dispose();
   }
 
-  void _login() {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          setState(() => _isLoading = false);
-          Navigator.of(context).pushReplacementNamed(AppRoutes.roleSelection);
-        }
-      });
-    }
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _requestOtp() async {
+    if (!_formKey.currentState!.validate()) return;
+    HapticFeedback.mediumImpact();
+
+    // ✅ Use E.164 number from PhoneInputField (includes country code)
+    final phone = _phoneKey.currentState?.fullNumber
+        ?? _phoneController.text.trim();
+
+    await ref.read(authProvider.notifier).sendOtp(
+      phone: phone,
+      onCodeSent: () {
+        if (!mounted) return;
+        Navigator.pushNamed(
+          context,
+          AppRoutes.otpVerification,
+          arguments: {'phone': phone},
+        );
+      },
+      onError: (msg) {
+        if (mounted) _showError(msg);
+      },
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      ),
+    );
   }
 
   String? _validatePhone(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
+    if (value == null || value.trim().isEmpty) {
+      return 'Phone number is required';
     }
-    if (value.length < 10) {
-      return AppStrings.errorInvalidPhone;
-    }
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 9) return 'Enter a valid phone number';
     return null;
   }
 
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return AppStrings.errorEmptyField;
-    }
-    if (value.length < 6) {
-      return AppStrings.errorPasswordTooShort;
-    }
-    return null;
-  }
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
+    final isLoading = ref.watch(authProvider).isLoading;
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
-      backgroundColor: AppColors.backgroundColor,
-      appBar: AppBar(
-        backgroundColor: AppColors.backgroundColor,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimaryColor),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(AppStrings.loginTitle, style: AppTextStyles.headingMedium),
-                const SizedBox(height: 8),
-                Text(
-                  AppStrings.loginSubtitle,
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: AppColors.textSecondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                CustomTextField(
-                  label: AppStrings.loginPhone,
-                  hint: '+233 XX XXX XXXX',
-                  controller: _phoneController,
-                  validator: _validatePhone,
-                  keyboardType: TextInputType.phone,
-                  prefixIcon: const Icon(
-                    Icons.phone,
-                    color: AppColors.textSecondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                CustomTextField(
-                  label: AppStrings.loginPassword,
-                  hint: 'Enter your password',
-                  controller: _passwordController,
-                  validator: _validatePassword,
-                  isPassword: true,
-                  prefixIcon: const Icon(
-                    Icons.lock,
-                    color: AppColors.textSecondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () {},
-                    child: Text(
-                      AppStrings.loginForgotPassword,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.primaryColor,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-                PrimaryButton(
-                  label: AppStrings.loginButton,
-                  onPressed: _login,
-                  isLoading: _isLoading,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      AppStrings.loginNoAccount,
-                      style: AppTextStyles.bodyMedium,
-                    ),
-                    TextButton(
-                      onPressed: () =>
-                          Navigator.of(context).pushNamed(AppRoutes.signup),
-                      child: Text(
-                        AppStrings.loginSignUp,
-                        style: AppTextStyles.bodyMedium.copyWith(
-                          color: AppColors.primaryColor,
-                          fontWeight: FontWeight.bold,
+      backgroundColor: AppColors.background,
+      resizeToAvoidBottomInset: true,
+      body: Stack(
+        children: [
+          // Background glows
+          Positioned(
+            top: -80,
+            right: -60,
+            child: AuthGlow(
+                color: AppColors.primary, size: 260, opacity: 0.18),
+          ),
+          Positioned(
+            bottom: size.height * 0.3,
+            left: -80,
+            child: AuthGlow(
+                color: AppColors.secondary, size: 200, opacity: 0.12),
+          ),
+
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: _slideAnim,
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 24),
+                        const AuthBackButton(),
+                        SizedBox(height: size.height * 0.06),
+                        const AuthLogo(),
+                        const SizedBox(height: 36),
+
+                        Text(
+                          'Welcome\nback',
+                          style: AppTextStyles.heading1.copyWith(
+                            fontSize: 42,
+                            height: 1.1,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Enter your phone number to\ncontinue your journey.',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.textSecondary,
+                            height: 1.6,
+                          ),
+                        ),
+                        const SizedBox(height: 48),
+
+                        const AuthFieldLabel('PHONE NUMBER'),
+                        const SizedBox(height: 10),
+
+                        // ✅ PhoneInputField with country picker
+                        PhoneInputField(
+                          key: _phoneKey,
+                          controller: _phoneController,
+                          validator: _validatePhone,
+                          enabled: !isLoading,
+                        ),
+                        const SizedBox(height: 40),
+
+                        AuthCtaButton(
+                          label: 'Continue',
+                          isLoading: isLoading,
+                          onTap: _requestOtp,
+                        ),
+                        const SizedBox(height: 32),
+
+                        Row(children: [
+                          const Expanded(
+                              child: Divider(color: AppColors.border)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16),
+                            child: Text(
+                              'New to CTS?',
+                              style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.textTertiary),
+                            ),
+                          ),
+                          const Expanded(
+                              child: Divider(color: AppColors.border)),
+                        ]),
+                        const SizedBox(height: 24),
+
+                        GestureDetector(
+                          onTap: () => Navigator.pushNamed(
+                              context, AppRoutes.signup),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 16),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border:
+                                  Border.all(color: AppColors.border),
+                            ),
+                            child: Center(
+                              child: Text(
+                                'Create an account',
+                                style: AppTextStyles.button.copyWith(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          height:
+                              MediaQuery.of(context).padding.bottom + 32,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

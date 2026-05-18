@@ -1,0 +1,165 @@
+rules_version = "2";
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function isParty(passengerId, driverId) {
+      return isAuth() && (
+        request.auth.uid == passengerId ||
+        request.auth.uid == driverId
+      );
+    }
+
+    match /drivers/{driverId} {
+      allow read, write: if isOwner(driverId);
+      allow read: if isAuth();
+      match /notifications/{notifId} {
+        allow read, write: if isOwner(driverId);
+      }
+      match /earnings/{document=**} {
+        allow read, write: if isOwner(driverId);
+      }
+      match /stats/{document=**} {
+        allow read, write: if isOwner(driverId);
+      }
+      match /settings/{document=**} {
+        allow read, write: if isOwner(driverId);
+      }
+      match /withdrawals/{document=**} {
+        allow read, write: if isOwner(driverId);
+      }
+      match /dismissed_requests/{document=**} {
+        allow read, write: if isOwner(driverId);
+      }
+    }
+
+    match /passengers/{userId} {
+      allow read, write: if isOwner(userId);
+      match /savedPlaces/{placeId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /wallets/{userId} {
+      allow read: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.balance <= resource.data.balance;
+      match /transactions/{txId} {
+        allow read, create: if isOwner(userId);
+        allow update, delete: if false;
+      }
+    }
+
+    match /transactions/{txId} {
+      allow read: if isAuth()
+        && resource.data.userId == request.auth.uid;
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /tip_transactions/{txId} {
+      allow read: if isAuth()
+        && resource.data.userId == request.auth.uid;
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /trips/{tripId} {
+      allow create: if isAuth()
+        && request.resource.data.passengerId == request.auth.uid;
+      allow read, update: if isParty(
+        resource.data.passengerId,
+        resource.data.driverId
+      );
+      allow delete: if false;
+    }
+
+    match /rideRequests/{requestId} {
+      allow create: if isAuth();
+      allow read: if isAuth();
+      allow update: if isAuth()
+        && (resource.data.passengerId == request.auth.uid
+            || resource.data.driverId == request.auth.uid
+            || resource.data.driverId == null);
+      allow delete: if false;
+    }
+
+    match /rides/{rideId} {
+      allow create: if isAuth();
+      allow read, update: if isParty(
+        resource.data.passengerId,
+        resource.data.driverId
+      );
+      allow delete: if false;
+    }
+
+    match /active_trips/{tripId} {
+      allow create: if isAuth();
+      allow read, update: if isParty(
+        resource.data.passengerId,
+        resource.data.driverId
+      );
+      allow delete: if isAuth()
+        && resource.data.driverId == request.auth.uid;
+    }
+
+    match /deliveries/{deliveryId} {
+      allow create: if isAuth()
+        && request.resource.data.passengerId == request.auth.uid;
+      allow read, update: if isParty(
+        resource.data.passengerId,
+        resource.data.driverId
+      );
+      allow delete: if false;
+    }
+
+    match /gas_orders/{orderId} {
+      allow create: if isAuth()
+        && request.resource.data.passengerId == request.auth.uid;
+      allow read: if isParty(
+          resource.data.passengerId,
+          resource.data.driverId
+        )
+        || (isAuth()
+            && resource.data.status == "pendingApproval"
+            && resource.data.driverId == null);
+      allow update: if isParty(
+          resource.data.passengerId,
+          resource.data.driverId
+        )
+        || (isAuth()
+            && resource.data.driverId == null
+            && request.resource.data.driverId == request.auth.uid);
+      allow delete: if false;
+    }
+
+    match /driver_alerts/{alertId} {
+      allow read, write: if isAuth();
+      allow delete: if false;
+    }
+
+    match /supportTickets/{ticketId} {
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow read: if isAuth()
+        && resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /promotions/{promoId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+  }
+}

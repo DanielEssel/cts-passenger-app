@@ -1,0 +1,11 @@
+{
+  "configurations": [
+    {
+      "name": "Flutter",
+      "type": "dart",
+      "request": "launch",
+      "args": ["--dart-define=PLACES_API_KEY=YOUR_KEY_HERE",
+               "--dart-define=MAPS_API_KEY=YOUR_KEY_HERE"]
+    }
+  ]
+}
