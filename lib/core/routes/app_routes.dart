@@ -35,4 +35,6 @@ class AppRoutes {
 
   static const String destinationSearch = '/destinationSearch';
   static const String profile = '/profile';
+
+  static const String deliveryTracking = '/delivery-tracking';
 }

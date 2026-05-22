@@ -1,249 +1,203 @@
+// lib/features/notifications/presentation/notifications_screen.dart
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../widgets/common/shared_widgets.dart';
+import '../models/notification_item.dart';
+import '../providers/notification_providers.dart';
 
-class NotificationsScreen extends StatefulWidget {
+class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
   @override
-  State<NotificationsScreen> createState() => _NotificationsScreenState();
-}
-
-class _NotificationsScreenState extends State<NotificationsScreen> {
-  final List<_NotifGroup> _groups = [
-    _NotifGroup(
-      label: 'Today',
-      items: [
-        _NotifItem(
-          icon: Icons.directions_car_rounded,
-          iconColor: AppColors.primary,
-          iconBg: const Color(0xFFFFF1EC),
-          title: 'Driver arrived 🚗',
-          body: 'Ahmed K. is waiting at your pickup location on Osu.',
-          time: '2m ago',
-          isRead: false,
-        ),
-        _NotifItem(
-          icon: Icons.card_giftcard_rounded,
-          iconColor: const Color(0xFF9333EA),
-          iconBg: const Color(0xFFF3E8FF),
-          title: 'Promo unlocked 🎉',
-          body: "You've earned 20% off your next 3 rides this week!",
-          time: '1h ago',
-          isRead: false,
-        ),
-        _NotifItem(
-          icon: Icons.inventory_2_rounded,
-          iconColor: AppColors.info,
-          iconBg: AppColors.infoLight,
-          title: 'Delivery confirmed 📦',
-          body: 'Your parcel to East Legon has been picked up by Kofi M.',
-          time: '3h ago',
-          isRead: false,
-        ),
-      ],
-    ),
-    _NotifGroup(
-      label: 'Yesterday',
-      items: [
-        _NotifItem(
-          icon: Icons.check_circle_rounded,
-          iconColor: AppColors.success,
-          iconBg: AppColors.successLight,
-          title: 'Ride completed ✓',
-          body: 'Your trip to Accra Mall was GHS 18.00. Rate your driver.',
-          time: '1d ago',
-          isRead: true,
-        ),
-        _NotifItem(
-          icon: Icons.account_balance_wallet_rounded,
-          iconColor: AppColors.success,
-          iconBg: AppColors.successLight,
-          title: 'Top up successful 💳',
-          body: 'GHS 100.00 has been added to your CTSRide wallet.',
-          time: '1d ago',
-          isRead: true,
-        ),
-        _NotifItem(
-          icon: Icons.people_rounded,
-          iconColor: AppColors.warning,
-          iconBg: AppColors.warningLight,
-          title: 'Referral bonus 🎁',
-          body: 'Your friend Ama joined CTSRide! GHS 5 added to your wallet.',
-          time: '2d ago',
-          isRead: true,
-        ),
-      ],
-    ),
-    _NotifGroup(
-      label: 'Earlier',
-      items: [
-        _NotifItem(
-          icon: Icons.local_offer_rounded,
-          iconColor: AppColors.primary,
-          iconBg: const Color(0xFFFFF1EC),
-          title: 'Weekend special 🌟',
-          body: 'Get 15% off all Okada rides this Saturday and Sunday.',
-          time: '3d ago',
-          isRead: true,
-        ),
-        _NotifItem(
-          icon: Icons.security_rounded,
-          iconColor: AppColors.textSecondary,
-          iconBg: AppColors.surfaceAlt,
-          title: 'New login detected',
-          body: 'We noticed a new sign-in to your account from Accra.',
-          time: '4d ago',
-          isRead: true,
-        ),
-      ],
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final unreadCount =
-        _groups.expand((g) => g.items).where((i) => !i.isRead).length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifAsync = ref.watch(notificationsStreamProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: CTSRideAppBar(
-        title: 'Notifications',
-        actions: [
-          if (unreadCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: GestureDetector(
-                onTap: _markAllRead,
-                child: Text(
-                  'Mark all read',
-                  style: AppTextStyles.caption.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-        ],
+      appBar: _buildAppBar(context, ref, notifAsync.value ?? []),
+      body: notifAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error:   (e, _) => _ErrorState(message: e.toString()),
+        data:    (items) => items.isEmpty
+            ? const _EmptyState()
+            : _NotifList(items: items),
       ),
-      body: unreadCount == 0 &&
-              _groups.every((g) => g.items.every((i) => i.isRead))
-          ? _buildEmpty()
-          : ListView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              children: _groups.map((group) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _GroupHeader(label: group.label),
-                    ...group.items.map((item) => _NotifTile(
-                          item: item,
-                          onTap: () => setState(() => item.isRead = true),
-                          onDismiss: () =>
-                              setState(() => group.items.remove(item)),
-                        )),
-                  ],
-                );
-              }).toList(),
-            ),
     );
   }
 
-  void _markAllRead() {
-    setState(() {
-      for (final group in _groups) {
-        for (final item in group.items) {
-          item.isRead = true;
-        }
-      }
-    });
-  }
+  PreferredSizeWidget _buildAppBar(
+    BuildContext context,
+    WidgetRef ref,
+    List<NotificationItem> items,
+  ) {
+    final unread = items.where((n) => !n.isRead).length;
 
-  Widget _buildEmpty() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+    return AppBar(
+      backgroundColor:  AppColors.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: false,
+      title: Row(
         children: [
-          Icon(Icons.notifications_off_rounded,
-              size: 56, color: AppColors.textTertiary),
-          SizedBox(height: 12),
-          Text('All caught up!', style: AppTextStyles.heading4),
-          SizedBox(height: 6),
-          Text('No new notifications', style: AppTextStyles.bodySmall),
+          Text('Notifications', style: AppTextStyles.heading4),
+          if (unread > 0) ...[
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$unread',
+                style: AppTextStyles.captionSmall.copyWith(
+                  color:      Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
         ],
+      ),
+      actions: [
+        if (unread > 0)
+          TextButton(
+            onPressed: () async {
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              if (uid == null) return;
+              await markAllNotificationsRead(uid, items);
+            },
+            child: Text(
+              'Mark all read',
+              style: AppTextStyles.caption.copyWith(
+                color:      AppColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
+      bottom: const PreferredSize(
+        preferredSize: Size.fromHeight(0.5),
+        child: Divider(height: 0.5, thickness: 0.5),
       ),
     );
   }
 }
+
+// ─────────────────────────────────────────────
+// Notification list with grouping
+// ─────────────────────────────────────────────
+
+class _NotifList extends StatelessWidget {
+  final List<NotificationItem> items;
+  const _NotifList({required this.items});
+
+  Map<String, List<NotificationItem>> get _grouped {
+    final map = <String, List<NotificationItem>>{};
+    const order = ['Today', 'Yesterday', 'This week', 'Earlier'];
+    for (final key in order) {
+      final group = items.where((n) => n.groupKey == key).toList();
+      if (group.isNotEmpty) map[key] = group;
+    }
+    return map;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = _grouped;
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        for (final entry in grouped.entries) ...[
+          _GroupHeader(label: entry.key),
+          for (final item in entry.value)
+            _NotifTile(item: item),
+        ],
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Group header
+// ─────────────────────────────────────────────
 
 class _GroupHeader extends StatelessWidget {
   final String label;
   const _GroupHeader({required this.label});
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Text(
-        label,
-        style: AppTextStyles.caption.copyWith(
-          color: AppColors.textSecondary,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+        child: Text(
+          label.toUpperCase(),
+          style: AppTextStyles.captionSmall.copyWith(
+            color:         AppColors.textTertiary,
+            fontWeight:    FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
-class _NotifTile extends StatelessWidget {
-  final _NotifItem item;
-  final VoidCallback onTap;
-  final VoidCallback onDismiss;
+// ─────────────────────────────────────────────
+// Notification tile
+// ─────────────────────────────────────────────
 
-  const _NotifTile({
-    required this.item,
-    required this.onTap,
-    required this.onDismiss,
-  });
+class _NotifTile extends ConsumerWidget {
+  final NotificationItem item;
+  const _NotifTile({required this.item});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Dismissible(
-      key: ValueKey(item.title + item.time),
+      key:       ValueKey(item.id),
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: AppColors.error,
-        child: const Icon(Icons.delete_rounded,
-            color: AppColors.background, size: 22),
+        padding:   const EdgeInsets.only(right: 20),
+        color:     AppColors.error,
+        child:     const Icon(Icons.delete_rounded,
+            color: Colors.white, size: 22),
       ),
-      onDismissed: (_) => onDismiss(),
-      child: GestureDetector(
-        onTap: onTap,
+      onDismissed: (_) async {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          await deleteNotification(uid, item.id);
+        }
+      },
+      child: InkWell(
+        onTap: () => _handleTap(context),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          color:
-              item.isRead ? AppColors.surface : AppColors.primary.withValues(),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          color: item.isRead
+              ? AppColors.surface
+              : AppColors.primary.withValues(alpha: 0.04),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon
+              // ── Icon ──
               Container(
-                width: 42,
-                height: 42,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: item.iconBg,
-                  borderRadius: BorderRadius.circular(12),
+                  color:         item.iconBg,
+                  borderRadius:  BorderRadius.circular(13),
                 ),
-                child: Icon(item.icon, color: item.iconColor, size: 20),
+                child: Icon(item.icon,
+                    color: item.iconColor, size: 21),
               ),
               const SizedBox(width: 12),
-              // Content
+
+              // ── Content ──
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -251,32 +205,36 @@ class _NotifTile extends StatelessWidget {
                     Text(
                       item.title,
                       style: AppTextStyles.labelLarge.copyWith(
-                        fontWeight:
-                            item.isRead ? FontWeight.w500 : FontWeight.w700,
-                        color: item.isRead
-                            ? AppColors.textSecondary
-                            : AppColors.textPrimary,
+                        fontWeight: item.isRead
+                            ? FontWeight.w500
+                            : FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       item.body,
                       style: AppTextStyles.caption.copyWith(
-                        color: item.isRead
+                        color:  item.isRead
                             ? AppColors.textTertiary
                             : AppColors.textSecondary,
-                        height: 1.4,
+                        height: 1.45,
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              // Time + unread dot
+
+              // ── Time + unread dot ──
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(item.time, style: AppTextStyles.caption),
+                  Text(
+                    item.timeAgo,
+                    style: AppTextStyles.captionSmall.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   if (!item.isRead)
                     Container(
@@ -295,30 +253,133 @@ class _NotifTile extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _handleTap(BuildContext context) async {
+    // Mark as read
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && !item.isRead) {
+      await markNotificationRead(uid, item.id);
+    }
+
+    // Navigate to route
+    if (!context.mounted || item.route == null) return;
+    _navigateToRoute(context, item.route!, item);
+  }
+
+  void _navigateToRoute(
+    BuildContext context,
+    String route,
+    NotificationItem item,
+  ) {
+    // Parse route and navigate with correct arguments
+    if (route.contains('ride-tracking')) {
+      final tripId = item.metadata['tripId'] as String?;
+      if (tripId != null) {
+        Navigator.pushNamed(context, '/ride-tracking',
+            arguments: {'rideId': tripId});
+      }
+      return;
+    }
+
+    if (route.contains('gas-tracking')) {
+      final orderId = item.metadata['orderId'] as String?;
+      if (orderId != null) {
+        Navigator.pushNamed(context, '/gas-tracking',
+            arguments: {'orderId': orderId});
+      }
+      return;
+    }
+
+    if (route.contains('delivery-tracking')) {
+      final deliveryId = item.metadata['deliveryId'] as String?;
+      if (deliveryId != null) {
+        Navigator.pushNamed(context, '/delivery-tracking',
+            arguments: {'deliveryId': deliveryId});
+      }
+      return;
+    }
+
+    if (route.contains('trip-complete')) {
+      final tripId = item.metadata['tripId'] as String?;
+      if (tripId != null) {
+        Navigator.pushNamed(context, '/trip-complete',
+            arguments: {'tripId': tripId});
+      }
+      return;
+    }
+
+    if (route == '/shell') {
+      Navigator.pushNamedAndRemoveUntil(
+          context, '/shell', (_) => false);
+      return;
+    }
+
+    // Fallback — push the raw route
+    Navigator.pushNamed(context, route);
+  }
 }
 
-class _NotifGroup {
-  final String label;
-  final List<_NotifItem> items;
-  _NotifGroup({required this.label, required this.items});
+// ─────────────────────────────────────────────
+// Empty & error states
+// ─────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(
+                Icons.notifications_off_rounded,
+                size: 34,
+                color: AppColors.textTertiary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('All caught up!',
+                style: AppTextStyles.heading4),
+            const SizedBox(height: 6),
+            Text(
+              'No notifications yet.\nWe\'ll let you know when something happens.',
+              style: AppTextStyles.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
 }
 
-class _NotifItem {
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final String title;
-  final String body;
-  final String time;
-  bool isRead;
+class _ErrorState extends StatelessWidget {
+  final String message;
+  const _ErrorState({required this.message});
 
-  _NotifItem({
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    required this.title,
-    required this.body,
-    required this.time,
-    required this.isRead,
-  });
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.cloud_off_rounded,
+                  size: 40, color: AppColors.textTertiary),
+              const SizedBox(height: 12),
+              const Text('Could not load notifications',
+                  style: AppTextStyles.heading4),
+              const SizedBox(height: 6),
+              Text(message,
+                  style: AppTextStyles.caption,
+                  textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
 }

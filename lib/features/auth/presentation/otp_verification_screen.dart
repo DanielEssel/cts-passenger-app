@@ -2,6 +2,8 @@
 
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -92,8 +94,12 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
 
   @override
   void dispose() {
-    for (final c in _controllers) c.dispose();
-    for (final n in _focusNodes) n.dispose();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final n in _focusNodes) {
+      n.dispose();
+    }
     _resendTimer?.cancel();
     _animController.dispose();
     super.dispose();
@@ -122,28 +128,78 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
       _controllers.map((c) => c.text).join();
 
   Future<void> _verifyOtp() async {
-    final code = _currentOtp;
-    if (code.length < _otpLength) {
-      _showError('Please enter the complete $_otpLength-digit code');
+  final code = _currentOtp;
+  if (code.length < _otpLength) {
+    _showError('Please enter the complete $_otpLength-digit code');
+    return;
+  }
+
+  HapticFeedback.mediumImpact();
+
+  final success = await ref.read(authProvider.notifier).verifyOtp(
+    smsCode:        code,
+    pendingProfile: _pendingProfile,
+    onError:        (msg) { if (mounted) _showError(msg); },
+  );
+
+  if (!success || !mounted) return;
+
+  HapticFeedback.heavyImpact();
+
+  // ── If sign-up flow → always go to shell (profile was just created) ──
+  if (_isSignUp) {
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.shell, (_) => false,
+    );
+    return;
+  }
+
+  // ── Login flow → check if user document exists ──
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) {
+    _showError('Authentication failed. Please try again.');
+    return;
+  }
+
+  try {
+    // Check users collection (where AuthNotifier writes)
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+
+    if (!mounted) return;
+
+    if (!userDoc.exists) {
+      // No account found — redirect to signup
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'No account found. Please sign up first.'),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        ),
+      );
+      // Sign out the Firebase Auth session
+      await FirebaseAuth.instance.signOut();
+      // Go back to login
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.login, (_) => false,
+      );
       return;
     }
 
-    HapticFeedback.mediumImpact();
-
-    final success = await ref.read(authProvider.notifier).verifyOtp(
-      smsCode:        code,
-      pendingProfile: _pendingProfile,
-      onError:        (msg) { if (mounted) _showError(msg); },
+    // User exists → go to shell
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.shell, (_) => false,
     );
-
-    if (success && mounted) {
-      HapticFeedback.heavyImpact();
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        AppRoutes.shell,
-        (_) => false,
-      );
-    }
+  } catch (e) {
+    if (mounted) _showError('Something went wrong. Please try again.');
   }
+}
 
   Future<void> _resendOtp() async {
     if (_countdown > 0) return;
@@ -171,7 +227,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   }
 
   void _clearFields() {
-    for (final c in _controllers) c.clear();
+    for (final c in _controllers) {
+      c.clear();
+    }
     _focusNodes.first.requestFocus();
   }
 

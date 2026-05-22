@@ -14,74 +14,77 @@ class WalletModel extends Wallet {
     required super.status,
   });
 
-  /// Firestore → Model
-  factory WalletModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  // ── Factories ──────────────────────────────────────────────────────────────
 
+  factory WalletModel.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
     return WalletModel(
-      userId: doc.id,
-      balance: (data['balance'] ?? 0).toDouble(),
-      cashBalance: (data['cashBalance'] ?? 0).toDouble(),
-      mobileMoneyBalance: (data['mobileMoneyBalance'] ?? 0).toDouble(),
-      cardBalance: (data['cardBalance'] ?? 0).toDouble(),
-      currency: data['currency'] ?? 'GHS',
-      createdAt:
-          (data['createdAt'] as Timestamp?)?.toDate() ??
-          DateTime.now(),
-      lastUpdated:
-          (data['lastUpdated'] as Timestamp?)?.toDate() ??
-          DateTime.now(),
-      status: data['status'] ?? 'active',
+      userId:             doc.id,
+      balance:            (data['balance']            as num?)?.toDouble() ?? 0.0,
+      cashBalance:        (data['cashBalance']        as num?)?.toDouble() ?? 0.0,
+      mobileMoneyBalance: (data['mobileMoneyBalance'] as num?)?.toDouble() ?? 0.0,
+      cardBalance:        (data['cardBalance']        as num?)?.toDouble() ?? 0.0,
+      currency:           data['currency']            as String? ?? 'GHS',
+      status:             data['status']              as String? ?? 'active',
+      createdAt:          _parseDate(data['createdAt']),
+      lastUpdated:        _parseDate(data['lastUpdated'] ?? data['updatedAt']),
     );
   }
 
-  /// JSON → Model
   factory WalletModel.fromJson(Map<String, dynamic> json) {
     return WalletModel(
-      userId: json['userId'] ?? '',
-      balance: (json['balance'] ?? 0).toDouble(),
-      cashBalance: (json['cashBalance'] ?? 0).toDouble(),
-      mobileMoneyBalance:
-          (json['mobileMoneyBalance'] ?? 0).toDouble(),
-      cardBalance: (json['cardBalance'] ?? 0).toDouble(),
-      currency: json['currency'] ?? 'GHS',
-      createdAt:
-          DateTime.tryParse(json['createdAt'] ?? '') ??
-          DateTime.now(),
-      lastUpdated:
-          DateTime.tryParse(json['lastUpdated'] ?? '') ??
-          DateTime.now(),
-      status: json['status'] ?? 'active',
+      userId:             json['userId']             as String? ?? '',
+      balance:            (json['balance']            as num?)?.toDouble() ?? 0.0,
+      cashBalance:        (json['cashBalance']        as num?)?.toDouble() ?? 0.0,
+      mobileMoneyBalance: (json['mobileMoneyBalance'] as num?)?.toDouble() ?? 0.0,
+      cardBalance:        (json['cardBalance']        as num?)?.toDouble() ?? 0.0,
+      currency:           json['currency']            as String? ?? 'GHS',
+      status:             json['status']              as String? ?? 'active',
+      createdAt:          _parseDate(json['createdAt']),
+      lastUpdated:        _parseDate(json['lastUpdated'] ?? json['updatedAt']),
     );
   }
 
-  /// Model → Map
-  Map<String, dynamic> toMap() {
-    return {
-      'userId': userId,
-      'balance': balance,
-      'cashBalance': cashBalance,
-      'mobileMoneyBalance': mobileMoneyBalance,
-      'cardBalance': cardBalance,
-      'currency': currency,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'lastUpdated': Timestamp.fromDate(lastUpdated),
-      'status': status,
-    };
-  }
+  // ── Serialisation ──────────────────────────────────────────────────────────
 
-  /// Model → Entity
-  Wallet toEntity() {
-    return Wallet(
-      userId: userId,
-      balance: balance,
-      cashBalance: cashBalance,
-      mobileMoneyBalance: mobileMoneyBalance,
-      cardBalance: cardBalance,
-      currency: currency,
-      createdAt: createdAt,
-      lastUpdated: lastUpdated,
-      status: status,
-    );
+  Map<String, dynamic> toMap() => {
+        'userId':             userId,
+        'balance':            balance,
+        'cashBalance':        cashBalance,
+        'mobileMoneyBalance': mobileMoneyBalance,
+        'cardBalance':        cardBalance,
+        'currency':           currency,
+        'status':             status,
+        'createdAt':          Timestamp.fromDate(createdAt),
+        'lastUpdated':        Timestamp.fromDate(lastUpdated),
+      };
+
+  Wallet toEntity() => Wallet(
+        userId:             userId,
+        balance:            balance,
+        cashBalance:        cashBalance,
+        mobileMoneyBalance: mobileMoneyBalance,
+        cardBalance:        cardBalance,
+        currency:           currency,
+        createdAt:          createdAt,
+        lastUpdated:        lastUpdated,
+        status:             status,
+      );
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  static DateTime _parseDate(dynamic value) {
+    if (value == null)      return DateTime.now();
+    if (value is Timestamp) return value.toDate();
+    if (value is String)    return DateTime.tryParse(value) ?? DateTime.now();
+    if (value is Map) {
+      // Firestore Timestamp serialized from Cloud Function response
+      // as {_seconds: int, _nanoseconds: int}
+      final seconds = value['_seconds'] as int?
+                   ?? value['seconds']  as int?
+                   ?? 0;
+      return DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+    }
+    return DateTime.now();
   }
 }

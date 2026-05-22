@@ -3,14 +3,18 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../widgets/common/shared_widgets.dart';
 import 'delivery_matching_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/delivery_request.dart';
+import '../../delivery/providers/delivery_provider.dart';
+import 'package:geolocator/geolocator.dart';
 
-/// Vehicle + fare preview screen.
-/// Shows only the vehicles eligible for the chosen weight tier.
-/// For Aboboya and Mini Truck, driver can add a preset surcharge
-/// which the rider must approve before confirming.
-class DeliveryVehicleScreen extends StatefulWidget {
+class DeliveryVehicleScreen extends ConsumerStatefulWidget {
   final String pickup;
+  final GeoPoint pickupGeoPoint; // ← NEW
   final String dropoff;
+  final GeoPoint dropoffGeoPoint; // ← NEW
   final String weightTier;
   final String weightRange;
   final List<String> eligibleVehicles;
@@ -19,12 +23,16 @@ class DeliveryVehicleScreen extends StatefulWidget {
   final bool requiresHelpers;
   final bool hasPhoto;
   final String receiverPhone;
+  final String receiverName; // ← NEW
   final String notes;
+  final String? photoUrl;
 
   const DeliveryVehicleScreen({
     super.key,
     required this.pickup,
+    required this.pickupGeoPoint,
     required this.dropoff,
+    required this.dropoffGeoPoint,
     required this.weightTier,
     required this.weightRange,
     required this.eligibleVehicles,
@@ -33,14 +41,17 @@ class DeliveryVehicleScreen extends StatefulWidget {
     required this.requiresHelpers,
     required this.hasPhoto,
     required this.receiverPhone,
+    required this.receiverName,
     required this.notes,
+    this.photoUrl,
   });
 
   @override
-  State<DeliveryVehicleScreen> createState() => _DeliveryVehicleScreenState();
+  ConsumerState<DeliveryVehicleScreen> createState() =>
+      _DeliveryVehicleScreenState();
 }
 
-class _DeliveryVehicleScreenState extends State<DeliveryVehicleScreen> {
+class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
   int _selectedVehicleIndex = 0;
 
   // All possible vehicles — filtered by eligibleVehicles
@@ -83,8 +94,37 @@ class _DeliveryVehicleScreenState extends State<DeliveryVehicleScreen> {
     },
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _calculateDistance();
+  }
+
+  Future<void> _calculateDistance() async {
+    try {
+      final metres = Geolocator.distanceBetween(
+        widget.pickupGeoPoint.latitude,
+        widget.pickupGeoPoint.longitude,
+        widget.dropoffGeoPoint.latitude,
+        widget.dropoffGeoPoint.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _distanceKm = metres / 1000;
+        _calculatingDistance = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _distanceKm = 5.0; // safe fallback
+        _calculatingDistance = false;
+      });
+    }
+  }
+
   // Mock distance
-  final double _distanceKm = 8.2;
+  double _distanceKm = 0.0;
+  bool _calculatingDistance = true;
 
   // Driver surcharges (Aboboya / Mini Truck only)
   final List<Map<String, dynamic>> _surchargeOptions = [
@@ -115,7 +155,7 @@ class _DeliveryVehicleScreenState extends State<DeliveryVehicleScreen> {
   double get _totalFare =>
       _baseFare + _surchargeAmount + _fragileAddon + _helpersAddon;
 
-  String get _fareRange {
+  String get fareRange {
     final low = _baseFare + _fragileAddon + _helpersAddon;
     final high = low + 15; // max possible surcharge
     return 'GHS ${low.toStringAsFixed(0)}–${high.toStringAsFixed(0)}';
@@ -401,30 +441,80 @@ class _DeliveryVehicleScreenState extends State<DeliveryVehicleScreen> {
     );
   }
 
-  Widget _buildConfirmButton() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-      ),
-      child: PrimaryButton(
-        label:
-            'Confirm ${_selected['name']} — GHS ${_totalFare.toStringAsFixed(2)}',
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DeliveryMatchingScreen(
-                vehicleName: _selected['name'],
-                dropoff: widget.dropoff,
-                fare: 'GHS ${_totalFare.toStringAsFixed(2)}',
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  bool _isCreating = false;
+
+  Widget _buildConfirmButton() => Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
+        ),
+        child: PrimaryButton(
+          label: _calculatingDistance
+              ? 'Calculating fare…'
+              : _isCreating
+                  ? 'Placing order…'
+                  : 'Confirm ${_selected['name']} — GHS ${_totalFare.toStringAsFixed(2)}',
+          onTap: _calculatingDistance || _isCreating ? null : _confirmDelivery,
+        ),
+      );
+
+  Future<void> _confirmDelivery() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isCreating = true);
+
+    try {
+      final request = DeliveryRequest(
+        id: '',
+        passengerId: uid,
+        status: DeliveryStatus.pending,
+        pickupLocation: widget.pickupGeoPoint,
+        dropoffLocation: widget.dropoffGeoPoint,
+        pickupAddress: widget.pickup,
+        photoUrl: widget.photoUrl,
+        dropoffAddress: widget.dropoff,
+        parcelType: widget.parcelType,
+        weightTier: widget.weightTier,
+        weightRange: widget.weightRange,
+        isFragile: widget.isFragile,
+        requiresHelpers: widget.requiresHelpers,
+        notes: widget.notes.isEmpty ? null : widget.notes,
+        vehicleType: _selected['name'],
+        receiverPhone:
+            widget.receiverPhone.isEmpty ? null : widget.receiverPhone,
+        receiverName: widget.receiverName.isEmpty ? null : widget.receiverName,
+        estimatedFare: _totalFare,
+        createdAt: DateTime.now(),
+        paymentMethod: 'wallet',
+      );
+
+      final repo = ref.read(deliveryRepositoryProvider);
+      final deliveryId = await repo.createDelivery(request);
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DeliveryMatchingScreen(
+            deliveryId: deliveryId,
+            vehicleName: _selected['name'],
+            dropoff: widget.dropoff,
+            fare: 'GHS ${_totalFare.toStringAsFixed(2)}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.toString()),
+        backgroundColor: AppColors.error,
+      ));
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
   }
 }
 

@@ -79,3 +79,21 @@ function haversineKm(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+// ── New: wallet functions ──
+const wallet = require("./wallet");
+exports.createWallet               = wallet.createWallet;
+exports.getWalletBalance           = wallet.getWalletBalance;
+exports.initializePaystackPayment  = wallet.initializePaystackPayment;
+exports.verifyPaystackPayment      = wallet.verifyPaystackPayment;
+exports.deductWalletBalance        = wallet.deductWalletBalance;
+exports.getTransactionHistory      = wallet.getTransactionHistory;
+
+
+const notifications = require("./notifications");
+exports.onTripStatusChanged       = notifications.onTripStatusChanged;
+exports.onGasOrderStatusChanged   = notifications.onGasOrderStatusChanged;
+exports.onGasOrderCreated         = notifications.onGasOrderCreated;
+exports.onDeliveryStatusChanged   = notifications.onDeliveryStatusChanged;
+exports.onWalletChanged           = notifications.onWalletChanged;
+exports.onDeliveryCompleted = notifications.onDeliveryCompleted;exports.requestWithdrawal = require('./wallet').requestWithdrawal;

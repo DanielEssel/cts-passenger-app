@@ -2,11 +2,17 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Add this
 import 'core/constants/app_colors.dart';
+import 'core/providers/navigation_providers.dart';
 import 'core/routes/app_routes.dart';
+import 'package:cts_transport_app/features/home/services/notification_service.dart';
 
 // AUTH FLOW
 import 'features/splash/splash_screen.dart';
@@ -35,28 +41,33 @@ import 'features/profile/presentation/promotions_screen.dart';
 import 'features/profile/presentation/help_support_screen.dart';
 import 'features/profile/presentation/about_screen.dart';
 
+
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 🔥 REQUIRED: Initialize Firebase before Riverpod & App start
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  await FirebaseAppCheck.instance.activate(
+    providerAndroid:
+        kDebugMode ? AndroidDebugProvider() : AndroidPlayIntegrityProvider(),
+    providerApple:
+        kDebugMode ? AppleDebugProvider() : AppleDeviceCheckProvider(),
   );
 
-  runApp(
-    const ProviderScope(
-      child: RiderApp(),
-    ),
-  );
+  await NotificationService.instance.initialize(appNavigatorKey); // ← ADD
+
+  runApp(ProviderScope(child: RiderApp(navigatorKey: appNavigatorKey)));
 }
 
 class RiderApp extends StatelessWidget {
-  const RiderApp({super.key});
+  final GlobalKey<NavigatorState> navigatorKey;
+  const RiderApp({super.key, required this.navigatorKey});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      
+      navigatorKey: navigatorKey,
       title: 'CTS Passenger',
       debugShowCheckedModeBanner: false,
       theme: _buildLightTheme(),
@@ -253,33 +264,33 @@ class RiderApp extends StatelessWidget {
   }
 
   Map<String, WidgetBuilder> _buildRoutes() {
-  return {
-    // Auth Flow
-    AppRoutes.splash: (_) => const SplashScreen(),
-    AppRoutes.onboarding: (_) => const OnboardingScreen(),
-    AppRoutes.login: (_) => const LoginScreen(),
-    AppRoutes.signup: (_) => const SignupScreen(),
-    AppRoutes.otpVerification: (_) => const OtpVerificationScreen(),
+    return {
+      // Auth Flow
+      AppRoutes.splash: (_) => const SplashScreen(),
+      AppRoutes.onboarding: (_) => const OnboardingScreen(),
+      AppRoutes.login: (_) => const LoginScreen(),
+      AppRoutes.signup: (_) => const SignupScreen(),
+      AppRoutes.otpVerification: (_) => const OtpVerificationScreen(),
 
-    // Main Shell
-    AppRoutes.shell: (_) => const PassengerRootShell(),
+      // Main Shell
+      AppRoutes.shell: (_) => const PassengerRootShell(),
 
-    // Profile sub-screens
-    AppRoutes.notifications: (_) => const NotificationsScreen(),
-    AppRoutes.editProfile: (_) => const EditProfileScreen(),
-    AppRoutes.savedPlaces: (_) => const SavedPlacesScreen(),
-    AppRoutes.paymentMethods: (_) => const PaymentMethodsScreen(),
-    AppRoutes.promotions: (_) => const PromotionsScreen(),
-    AppRoutes.privacySecurity: (_) => const PrivacySecurityScreen(),
-    AppRoutes.helpSupport: (_) => const HelpSupportScreen(),
-    AppRoutes.about: (_) => const AboutScreen(),
-    
-    // Ride & Delivery Screens - ADD THESE
-    AppRoutes.bookRide: (_) => const BookRideScreen(),
-    AppRoutes.delivery: (_) => const DeliveryScreen(),
-    AppRoutes.gasOrder: (_) => const GasOrderScreen(), // ADD THIS LINE
-  };
-}
+      // Profile sub-screens
+      AppRoutes.notifications: (_) => const NotificationsScreen(),
+      AppRoutes.editProfile: (_) => const EditProfileScreen(),
+      AppRoutes.savedPlaces: (_) => const SavedPlacesScreen(),
+      AppRoutes.paymentMethods: (_) => const PaymentMethodsScreen(),
+      AppRoutes.promotions: (_) => const PromotionsScreen(),
+      AppRoutes.privacySecurity: (_) => const PrivacySecurityScreen(),
+      AppRoutes.helpSupport: (_) => const HelpSupportScreen(),
+      AppRoutes.about: (_) => const AboutScreen(),
+
+      // Ride & Delivery Screens - ADD THESE
+      AppRoutes.bookRide: (_) => const BookRideScreen(),
+      AppRoutes.delivery: (_) => const DeliveryScreen(),
+      AppRoutes.gasOrder: (_) => const GasOrderScreen(), // ADD THIS LINE
+    };
+  }
 
   Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
     debugPrint('🎯 Generating route: ${settings.name}');
@@ -298,24 +309,26 @@ class RiderApp extends StatelessWidget {
         );
 
       case AppRoutes.deliveryVehicle:
-        // ✅ Guard against null args
-        final args = settings.arguments as Map<String, dynamic>? ?? {};
-        return MaterialPageRoute(
-          builder: (context) => DeliveryVehicleScreen(
-            pickup: args['pickup'],
-            dropoff: args['dropoff'], // ✅ was missing
-            weightTier: args['weightTier'],
-            weightRange: args['weightRange'],
-            eligibleVehicles: args['eligibleVehicles'],
-            parcelType: args['parcelType'],
-            isFragile: args['isFragile'] ?? false,
-            requiresHelpers: args['requiresHelpers'] ?? false,
-            hasPhoto: args['hasPhoto'] ?? false,
-            receiverPhone: args['receiverPhone'] ?? '',
-            notes: args['notes'] ?? '',
-          ),
-          settings: settings,
-        );
+  final args = settings.arguments as Map<String, dynamic>? ?? {};
+  return MaterialPageRoute(
+    builder: (context) => DeliveryVehicleScreen(
+      pickup:           args['pickup']           ?? '',
+      pickupGeoPoint:   args['pickupGeoPoint']   ?? const GeoPoint(5.6037, -0.1870),
+      dropoff:          args['dropoff']          ?? '',
+      dropoffGeoPoint:  args['dropoffGeoPoint']  ?? const GeoPoint(5.6037, -0.1870),
+      weightTier:       args['weightTier']       ?? '',
+      weightRange:      args['weightRange']      ?? '',
+      eligibleVehicles: args['eligibleVehicles'] ?? [],
+      parcelType:       args['parcelType']       ?? '',
+      isFragile:        args['isFragile']        ?? false,
+      requiresHelpers:  args['requiresHelpers']  ?? false,
+      hasPhoto:         args['hasPhoto']         ?? false,
+      receiverPhone:    args['receiverPhone']    ?? '',
+      receiverName:     args['receiverName']     ?? '',
+      notes:            args['notes']            ?? '',
+    ),
+    settings: settings,
+  );
 
       case AppRoutes.rideTracking:
         final args = settings.arguments as Map<String, dynamic>?;
@@ -328,15 +341,15 @@ class RiderApp extends StatelessWidget {
         );
 
       case AppRoutes.gasOrder:
-      debugPrint('✅ Creating GasOrderScreen');
-      return MaterialPageRoute(
-        builder: (context) => const GasOrderScreen(),
-        settings: settings,
-      );
+        debugPrint('✅ Creating GasOrderScreen');
+        return MaterialPageRoute(
+          builder: (context) => const GasOrderScreen(),
+          settings: settings,
+        );
 
       default:
-      debugPrint('⚠️ Unknown route in onGenerateRoute: ${settings.name}');
-      return null;
+        debugPrint('⚠️ Unknown route in onGenerateRoute: ${settings.name}');
+        return null;
     }
   }
 

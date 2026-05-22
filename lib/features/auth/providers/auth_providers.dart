@@ -294,25 +294,52 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  Future<void> _createPassengerProfile({
-    required User   user,
-    required String firstName,
-    required String lastName,
-    required String phone,
-    required String email,
-  }) async {
-    await _firestore.collection('users').doc(user.uid).set({
-      'uid':         user.uid,
-      'firstName':   firstName,
-      'lastName':    lastName,
-      'displayName': '$firstName $lastName',
-      'phoneNumber': phone,
-      'email':       email.isNotEmpty ? email : null,
-      'role':        'passenger',
-      'createdAt':   FieldValue.serverTimestamp(),
-      'lastLoginAt': FieldValue.serverTimestamp(),
+ Future<void> _createPassengerProfile({
+  required User user,
+  required String firstName,
+  required String lastName,
+  required String phone,
+  required String email,
+}) async {
+  final userRef    = _firestore.collection('users').doc(user.uid);
+  final walletRef  = _firestore.collection('wallets').doc(user.uid);
+
+  // ── Guard: never overwrite existing user doc ──
+  final existing = await userRef.get();
+  if (existing.exists) {
+    debugPrint('⚠️ User doc already exists — skipping creation');
+    return;
+  }
+
+  final batch = _firestore.batch();
+
+  batch.set(userRef, {
+    'uid':         user.uid,
+    'firstName':   firstName,
+    'lastName':    lastName,
+    'displayName': '$firstName $lastName',
+    'phoneNumber': phone,
+    'email':       email.isNotEmpty ? email : null,
+    'role':        'passenger',
+    'createdAt':   FieldValue.serverTimestamp(),
+    'lastLoginAt': FieldValue.serverTimestamp(),
+  });
+
+  // Only create wallet if it doesn't exist either
+  final existingWallet = await walletRef.get();
+  if (!existingWallet.exists) {
+    batch.set(walletRef, {
+      'userId':    user.uid,
+      'balance':   0.0,
+      'currency':  'GHS',
+      'isActive':  true,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
+
+  await batch.commit();
+}
 
   String _phoneErrorMessage(String code, String? message) {
     return switch (code) {

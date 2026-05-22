@@ -15,9 +15,11 @@ service cloud.firestore {
       );
     }
 
+    // ── Drivers ──────────────────────────────────────────────────────────
     match /drivers/{driverId} {
-      allow read, write: if isOwner(driverId);
-      allow read: if isAuth();
+      allow read:  if isAuth();
+      allow write: if isOwner(driverId);
+
       match /notifications/{notifId} {
         allow read, write: if isOwner(driverId);
       }
@@ -38,6 +40,19 @@ service cloud.firestore {
       }
     }
 
+    // ── Users ─────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /saved_places/{placeId} {
+        allow read, write: if isOwner(userId);
+      }
+      match /momo_methods/{momoId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ── Passengers (legacy) ───────────────────────────────────────────────
     match /passengers/{userId} {
       allow read, write: if isOwner(userId);
       match /savedPlaces/{placeId} {
@@ -45,10 +60,16 @@ service cloud.firestore {
       }
     }
 
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
+    // ── Notifications ─────────────────────────────────────────────────────
+    match /notifications/{userId}/items/{notifId} {
+      allow read, delete: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data)
+           .affectedKeys().hasOnly(['isRead']);
+      allow create: if false; // Cloud Functions only
     }
 
+    // ── Wallets ───────────────────────────────────────────────────────────
     match /wallets/{userId} {
       allow read: if isOwner(userId);
       allow update: if isOwner(userId)
@@ -59,6 +80,7 @@ service cloud.firestore {
       }
     }
 
+    // ── Transactions ──────────────────────────────────────────────────────
     match /transactions/{txId} {
       allow read: if isAuth()
         && resource.data.userId == request.auth.uid;
@@ -75,35 +97,56 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Trips ─────────────────────────────────────────────────────────────
     match /trips/{tripId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
-      allow read, update: if isParty(
-        resource.data.passengerId,
-        resource.data.driverId
-      );
+      allow read: if isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.status   == "searching"
+              && resource.data.driverId == null);
+      allow update: if isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.driverId == null
+              && request.resource.data.driverId == request.auth.uid);
       allow delete: if false;
     }
 
-    match /rideRequests/{requestId} {
-      allow create: if isAuth();
-      allow read: if isAuth();
+    // ── Rides (legacy rideRequests flow) ──────────────────────────────────
+    match /rides/{rideId} {
+      allow create: if isAuth()
+        && request.resource.data.passengerId == request.auth.uid;
+      allow read: if isAuth()
+        && (resource.data.driverId    == null
+            || resource.data.driverId == request.auth.uid
+            || resource.data.passengerId == request.auth.uid);
       allow update: if isAuth()
         && (resource.data.passengerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid
-            || resource.data.driverId == null);
+            || resource.data.driverId  == request.auth.uid
+            || (resource.data.driverId == null
+                && request.resource.data.driverId == request.auth.uid));
       allow delete: if false;
     }
 
-    match /rides/{rideId} {
+    // ── Ride Requests ─────────────────────────────────────────────────────
+    match /rideRequests/{requestId} {
       allow create: if isAuth();
-      allow read, update: if isParty(
-        resource.data.passengerId,
-        resource.data.driverId
-      );
+      allow read:   if isAuth();
+      allow update: if isAuth()
+        && (resource.data.passengerId == request.auth.uid
+            || resource.data.driverId  == request.auth.uid
+            || (resource.data.driverId  == null
+                && request.resource.data.driverId == request.auth.uid));
       allow delete: if false;
     }
 
+    // ── Active Trips ──────────────────────────────────────────────────────
     match /active_trips/{tripId} {
       allow create: if isAuth();
       allow read, update: if isParty(
@@ -114,41 +157,54 @@ service cloud.firestore {
         && resource.data.driverId == request.auth.uid;
     }
 
+    // ── Deliveries ────────────────────────────────────────────────────────
     match /deliveries/{deliveryId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
-      allow read, update: if isParty(
-        resource.data.passengerId,
-        resource.data.driverId
-      );
+      allow read: if isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.status   == "pending"
+              && resource.data.driverId == null);
+      allow update: if isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.driverId == null
+              && request.resource.data.driverId == request.auth.uid);
       allow delete: if false;
     }
 
+    // ── Gas Orders ────────────────────────────────────────────────────────
     match /gas_orders/{orderId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
       allow read: if isParty(
-          resource.data.passengerId,
-          resource.data.driverId
-        )
-        || (isAuth()
-            && resource.data.status == "pendingApproval"
-            && resource.data.driverId == null);
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.status   == "pendingApproval"
+              && resource.data.driverId == null);
       allow update: if isParty(
-          resource.data.passengerId,
-          resource.data.driverId
-        )
-        || (isAuth()
-            && resource.data.driverId == null
-            && request.resource.data.driverId == request.auth.uid);
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          || (isAuth()
+              && resource.data.driverId == null
+              && request.resource.data.driverId == request.auth.uid);
       allow delete: if false;
     }
 
+    // ── Driver Alerts ─────────────────────────────────────────────────────
     match /driver_alerts/{alertId} {
-      allow read, write: if isAuth();
-      allow delete: if false;
+      allow read, write, delete: if isAuth();
     }
 
+    // ── Support Tickets ───────────────────────────────────────────────────
     match /supportTickets/{ticketId} {
       allow create: if isAuth()
         && request.resource.data.userId == request.auth.uid;
@@ -157,9 +213,23 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Profile Photos ────────────────────────────────────────────────────
+    match /profile_photos/{userId} {
+      allow read:  if true;
+      allow write: if isOwner(userId);
+    }
+
+    // ── Promotions ────────────────────────────────────────────────────────
     match /promotions/{promoId} {
-      allow read: if isAuth();
+      allow read:  if isAuth();
       allow write: if false;
+    }
+
+    // ── Data Export Requests ──────────────────────────────────────────────
+    match /data_export_requests/{id} {
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow read, update: if false;
     }
   }
 }

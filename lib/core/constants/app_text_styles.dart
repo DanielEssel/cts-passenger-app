@@ -1,22 +1,29 @@
-// core/constants/app_text_styles.dart
+// lib/core/constants/app_text_styles.dart
 
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+
+// ════════════════════════════════════════════════════════════
+//  CTS TRANSPORT — PREMIUM TYPOGRAPHY
+//
+//  Primary: Inter (clean, modern, trustworthy)
+//  All variable names preserved — zero breakage.
+// ════════════════════════════════════════════════════════════
 
 class AppTextStyles {
   static const String _fontFamily = 'Inter';
 
   // ============================================
-  // HEADING STYLES (32px - 20px)
+  // HEADING STYLES
   // ============================================
 
   static const TextStyle heading1 = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 32,
-    fontWeight: FontWeight.w700,
+    fontSize: 34,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
-    height: 1.2,
-    letterSpacing: -0.5,
+    height: 1.15,
+    letterSpacing: -0.8,
   );
 
   static const TextStyle heading2 = TextStyle(
@@ -24,41 +31,44 @@ class AppTextStyles {
     fontSize: 28,
     fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.3,
-    letterSpacing: -0.3,
+    height: 1.2,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle heading3 = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.4,
+    height: 1.3,
+    letterSpacing: -0.3,
   );
 
   static const TextStyle heading4 = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 20,
-    fontWeight: FontWeight.w600,
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.4,
+    letterSpacing: -0.2,
   );
 
   static const TextStyle headingMedium = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
-    height: 1.4,
-  );
-
-  // Display - Large hero text
-  static const TextStyle display = TextStyle(
-    fontFamily: _fontFamily,
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    letterSpacing: -0.5,
+    height: 1.3,
+    letterSpacing: -0.3,
+  );
+
+  static const TextStyle display = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 32,
+    fontWeight: FontWeight.w800,
+    color: AppColors.textPrimary,
+    letterSpacing: -1.0,
+    height: 1.1,
   );
 
   // ============================================
@@ -68,25 +78,28 @@ class AppTextStyles {
   static const TextStyle bodyLarge = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 16,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w400,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.6,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle bodyMedium = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 14,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w400,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.6,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle bodySmall = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
+    letterSpacing: 0.1,
   );
 
   // ============================================
@@ -97,16 +110,16 @@ class AppTextStyles {
     fontFamily: _fontFamily,
     fontSize: 16,
     fontWeight: FontWeight.w700,
-    color: AppColors.background,
+    color: AppColors.white,
     height: 1.5,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   );
 
   static const TextStyle buttonMedium = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 14,
     fontWeight: FontWeight.w600,
-    color: AppColors.background,
+    color: AppColors.white,
     height: 1.5,
     letterSpacing: 0.2,
   );
@@ -115,15 +128,17 @@ class AppTextStyles {
     fontFamily: _fontFamily,
     fontSize: 12,
     fontWeight: FontWeight.w600,
-    color: AppColors.background,
+    color: AppColors.white,
     height: 1.5,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle button = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 15,
-    fontWeight: FontWeight.w600,
-    color: AppColors.background,
+    fontWeight: FontWeight.w700,
+    color: AppColors.white,
+    letterSpacing: 0.2,
   );
 
   // ============================================
@@ -135,35 +150,39 @@ class AppTextStyles {
     fontSize: 12,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.5,
+    letterSpacing: 0.2,
   );
 
   static const TextStyle captionSmall = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 10,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w500,
     color: AppColors.textTertiary,
-    height: 1.6,
+    height: 1.5,
+    letterSpacing: 0.3,
   );
 
   static const TextStyle captionLarge = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: FontWeight.w500,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.5,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle overline = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
+    fontSize: 11,
+    fontWeight: FontWeight.w700,
+    color: AppColors.textSecondary,
     height: 1.5,
+    letterSpacing: 1.2,
   );
 
   // ============================================
-  // LABEL STYLES (Form Fields)
+  // LABEL STYLES
   // ============================================
 
   static const TextStyle labelLarge = TextStyle(
@@ -172,6 +191,7 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
     height: 1.5,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle labelMedium = TextStyle(
@@ -180,6 +200,7 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
     height: 1.5,
+    letterSpacing: 0.2,
   );
 
   // ============================================
@@ -220,6 +241,7 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.primary,
     decoration: TextDecoration.underline,
+    decorationColor: AppColors.primary,
     height: 1.5,
   );
 
@@ -229,11 +251,12 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.primary,
     decoration: TextDecoration.underline,
+    decorationColor: AppColors.primary,
     height: 1.5,
   );
 
   // ============================================
-  // SUBTITLE & DESCRIPTION TEXT
+  // SUBTITLE & DESCRIPTION
   // ============================================
 
   static const TextStyle subtitle = TextStyle(
@@ -241,7 +264,7 @@ class AppTextStyles {
     fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.5,
+    height: 1.6,
   );
 
   static const TextStyle subtitleSmall = TextStyle(
@@ -257,7 +280,7 @@ class AppTextStyles {
     fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.7,
   );
 
   // ============================================
@@ -266,9 +289,10 @@ class AppTextStyles {
 
   static const TextStyle amount = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 26,
-    fontWeight: FontWeight.w700,
-    color: AppColors.border,
+    fontSize: 28,
+    fontWeight: FontWeight.w800,
+    color: AppColors.textPrimary,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle amountSmall = TextStyle(
@@ -276,42 +300,42 @@ class AppTextStyles {
     fontSize: 18,
     fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
+    letterSpacing: -0.3,
   );
 
   // ============================================
   // SCREEN-SPECIFIC STYLES
   // ============================================
 
-  // Splash Screen
   static const TextStyle splashTitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 32,
-    fontWeight: FontWeight.w700,
-    color: AppColors.background,
-    height: 1.2,
-    letterSpacing: -0.5,
+    fontSize: 34,
+    fontWeight: FontWeight.w800,
+    color: AppColors.white,
+    height: 1.15,
+    letterSpacing: -0.8,
   );
 
   static const TextStyle splashSubtitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: FontWeight.w400,
-    color: AppColors.background,
-    height: 1.5,
+    color: AppColors.white,
+    height: 1.6,
   );
 
-  // Onboarding Screen
   static const TextStyle onboardingTitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
+    fontSize: 26,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
-    height: 1.4,
+    height: 1.25,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle onboardingSubtitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
@@ -325,21 +349,21 @@ class AppTextStyles {
     height: 1.5,
   );
 
-  // Auth Screens (Login, Signup, OTP)
   static const TextStyle authTitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
+    fontSize: 26,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
-    height: 1.4,
+    height: 1.25,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle authSubtitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.5,
+    height: 1.6,
   );
 
   static const TextStyle authHint = TextStyle(
@@ -350,7 +374,6 @@ class AppTextStyles {
     height: 1.5,
   );
 
-  // Form Input Labels
   static const TextStyle inputLabel = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 14,
@@ -367,18 +390,18 @@ class AppTextStyles {
     height: 1.5,
   );
 
-  // OTP Screen
   static const TextStyle otpTitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
+    fontSize: 26,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
-    height: 1.4,
+    height: 1.25,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle otpSubtitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
@@ -386,32 +409,33 @@ class AppTextStyles {
 
   static const TextStyle otpDigitField = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 20,
-    fontWeight: FontWeight.w600,
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
     height: 1.5,
+    letterSpacing: 2.0,
   );
 
   static const TextStyle otpResendText = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
   );
 
-  // Role Selection Screen
   static const TextStyle roleTitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
+    fontSize: 26,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
-    height: 1.4,
+    height: 1.25,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle roleSubtitle = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
@@ -420,34 +444,35 @@ class AppTextStyles {
   static const TextStyle roleCardTitle = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 16,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.4,
   );
 
   static const TextStyle roleCardDescription = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
   );
 
   // ============================================
-  // RIDER HOME SCREEN STYLES
+  // RIDER / DRIVER HOME
   // ============================================
 
   static const TextStyle riderGreeting = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 20,
-    fontWeight: FontWeight.w600,
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.3,
+    letterSpacing: -0.3,
   );
 
   static const TextStyle riderStatus = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
     height: 1.6,
@@ -458,19 +483,17 @@ class AppTextStyles {
     fontSize: 12,
     fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.4,
+    letterSpacing: 0.1,
   );
-
-  // ============================================
-  // DRIVER HOME SCREEN STYLES
-  // ============================================
 
   static const TextStyle driverGreeting = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 20,
-    fontWeight: FontWeight.w600,
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.3,
+    letterSpacing: -0.3,
   );
 
   static const TextStyle driverStats = TextStyle(
@@ -483,10 +506,11 @@ class AppTextStyles {
 
   static const TextStyle driverStatsValue = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 18,
-    fontWeight: FontWeight.w700,
+    fontSize: 20,
+    fontWeight: FontWeight.w800,
     color: AppColors.primary,
-    height: 1.4,
+    height: 1.3,
+    letterSpacing: -0.3,
   );
 
   static const TextStyle requestCard = TextStyle(
@@ -498,7 +522,7 @@ class AppTextStyles {
   );
 
   // ============================================
-  // RIDE/DELIVERY CARDS & LISTS
+  // RIDE / DELIVERY CARDS
   // ============================================
 
   static const TextStyle cardTitle = TextStyle(
@@ -522,33 +546,35 @@ class AppTextStyles {
     fontSize: 16,
     fontWeight: FontWeight.w700,
     color: AppColors.primary,
-    height: 1.5,
+    height: 1.4,
   );
 
   static const TextStyle statusBadge = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 10,
-    fontWeight: FontWeight.w600,
-    color: AppColors.backgroundAlt,
+    fontWeight: FontWeight.w700,
+    color: AppColors.white,
     height: 1.4,
+    letterSpacing: 0.3,
   );
 
   // ============================================
-  // WALLET & TRANSACTION STYLES
+  // WALLET & TRANSACTION
   // ============================================
 
   static const TextStyle walletBalance = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 28,
-    fontWeight: FontWeight.w700,
+    fontSize: 32,
+    fontWeight: FontWeight.w800,
     color: AppColors.textPrimary,
     height: 1.2,
+    letterSpacing: -0.5,
   );
 
   static const TextStyle transactionAmount = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 16,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
     height: 1.5,
   );
@@ -558,7 +584,7 @@ class AppTextStyles {
     fontSize: 12,
     fontWeight: FontWeight.w500,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.5,
   );
 
   static const TextStyle transactionDate = TextStyle(
@@ -566,19 +592,20 @@ class AppTextStyles {
     fontSize: 12,
     fontWeight: FontWeight.w400,
     color: AppColors.textTertiary,
-    height: 1.6,
+    height: 1.5,
   );
 
   // ============================================
-  // MODAL & DIALOG STYLES
+  // MODAL & DIALOG
   // ============================================
 
   static const TextStyle dialogTitle = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 20,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.4,
+    letterSpacing: -0.2,
   );
 
   static const TextStyle dialogContent = TextStyle(
@@ -586,39 +613,40 @@ class AppTextStyles {
     fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.7,
   );
 
   // ============================================
-  // BADGE & CHIP STYLES
+  // BADGE & CHIP
   // ============================================
 
   static const TextStyle badge = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 10,
-    fontWeight: FontWeight.w600,
-    color: AppColors.background,
+    fontWeight: FontWeight.w700,
+    color: AppColors.white,
     height: 1.4,
+    letterSpacing: 0.3,
   );
 
   static const TextStyle chip = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 12,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
     height: 1.5,
   );
 
   // ============================================
-  // EMPTY STATE STYLES
+  // EMPTY STATE
   // ============================================
 
   static const TextStyle emptyStateTitle = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 18,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w700,
     color: AppColors.textPrimary,
-    height: 1.5,
+    height: 1.4,
   );
 
   static const TextStyle emptyStateMessage = TextStyle(
@@ -626,11 +654,11 @@ class AppTextStyles {
     fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
-    height: 1.6,
+    height: 1.7,
   );
 
   // ============================================
-  // TIMESTAMP & METADATA STYLES
+  // TIMESTAMP & METADATA
   // ============================================
 
   static const TextStyle timestamp = TextStyle(
@@ -639,6 +667,7 @@ class AppTextStyles {
     fontWeight: FontWeight.w400,
     color: AppColors.textTertiary,
     height: 1.5,
+    letterSpacing: 0.2,
   );
 
   static const TextStyle metadata = TextStyle(
@@ -650,21 +679,22 @@ class AppTextStyles {
   );
 
   // ============================================
-  // TAB & NAVIGATION STYLES
+  // TAB & NAVIGATION
   // ============================================
 
   static const TextStyle tabActive = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
     color: AppColors.primary,
     height: 1.5,
+    letterSpacing: 0.1,
   );
 
   static const TextStyle tabInactive = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 14,
-    fontWeight: FontWeight.w400,
+    fontSize: 13,
+    fontWeight: FontWeight.w500,
     color: AppColors.textSecondary,
     height: 1.5,
   );
@@ -672,8 +702,9 @@ class AppTextStyles {
   static const TextStyle bottomNavLabel = TextStyle(
     fontFamily: _fontFamily,
     fontSize: 10,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
     height: 1.4,
+    letterSpacing: 0.2,
   );
 }

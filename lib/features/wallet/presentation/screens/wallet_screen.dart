@@ -14,7 +14,7 @@ import '../../domain/entities/transaction.dart';
 import '../../domain/entities/wallet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Derived stats provider — computed from live transaction stream
+// Derived stats provider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final _walletStatsProvider = Provider.autoDispose<_WalletStats>((ref) {
@@ -63,106 +63,123 @@ class WalletScreen extends ConsumerStatefulWidget {
 }
 
 class _WalletScreenState extends ConsumerState<WalletScreen> {
-
   String _activeFilter = 'All';
   bool _balanceVisible = true;
+  bool _isTopUpLoading = false; // ← FIX 1: loading overlay state
 
   static const _filters = [
     'All', 'Rides', 'Deliveries', 'Gas', 'Top-ups', 'Transfers',
   ];
 
-  // ─────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final walletAsync = ref.watch(walletStreamProvider);
-    final txAsync    = ref.watch(recentTransactionsStreamProvider);
-    final stats      = ref.watch(_walletStatsProvider);
+    final txAsync     = ref.watch(recentTransactionsStreamProvider);
+    final stats       = ref.watch(_walletStatsProvider);
 
     ref.listen<AsyncValue<Wallet>>(walletStreamProvider, (_, next) {
       next.whenOrNull(error: (e, _) => _showError('Wallet error: $e'));
     });
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: _refresh,
-        child: CustomScrollView(
-          controller: widget.scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-
-            SliverToBoxAdapter(
-              child: walletAsync.when(
-                data:    (w) => _buildBalanceHeader(w),
-                loading: ()  => _buildBalanceHeader(null),
-                error:   (_, __) => _buildBalanceHeader(null),
-              ),
-            ),
-
-            SliverToBoxAdapter(child: _buildStatsRow(stats)),
-
-            SliverToBoxAdapter(child: _buildSectionHeader()),
-
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                child: _buildFilterChips(),
-              ),
-            ),
-
-            txAsync.when(
-              data: (txList) {
-                final filtered = _filterTransactions(txList);
-                if (filtered.isEmpty) {
-                  return SliverToBoxAdapter(child: _buildEmptyState());
-                }
-                // Pre-build flat item list to avoid O(n²) builder
-                final items = _buildFlatItemList(_groupTransactions(filtered));
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) => items[i],
-                    childCount: items.length,
+    // ── FIX 1: Stack for loading overlay ──
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: AppColors.background,
+          body: RefreshIndicator(
+            color: AppColors.primary,
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              controller: widget.scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: walletAsync.when(
+                    data:    (w) => _buildBalanceHeader(w),
+                    loading: ()  => _buildBalanceHeader(null),
+                    error:   (_, __) => _buildBalanceHeader(null),
                   ),
-                );
-              },
-              loading: () => SliverToBoxAdapter(child: _buildTxSkeleton()),
-              error:   (e, _) => SliverToBoxAdapter(
-                  child: _buildTxError(e.toString())),
+                ),
+                SliverToBoxAdapter(child: _buildStatsRow(stats)),
+                SliverToBoxAdapter(child: _buildSectionHeader()),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    child: _buildFilterChips(),
+                  ),
+                ),
+                txAsync.when(
+                  data: (txList) {
+                    final filtered = _filterTransactions(txList);
+                    if (filtered.isEmpty) {
+                      return SliverToBoxAdapter(child: _buildEmptyState());
+                    }
+                    final items = _buildFlatItemList(_groupTransactions(filtered));
+                    return SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) => items[i],
+                        childCount: items.length,
+                      ),
+                    );
+                  },
+                  loading: () => SliverToBoxAdapter(child: _buildTxSkeleton()),
+                  error:   (e, _) => SliverToBoxAdapter(
+                      child: _buildTxError(e.toString())),
+                ),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                      height: MediaQuery.of(context).padding.bottom + 32),
+                ),
+              ],
             ),
-
-            SliverToBoxAdapter(
-              child: SizedBox(
-                  height: MediaQuery.of(context).padding.bottom + 32),
-            ),
-          ],
+          ),
         ),
-      ),
+
+        // ── FIX 1: Loading overlay while Paystack WebView is open ──
+        if (_isTopUpLoading)
+          Container(
+            color: Colors.black54,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: AppColors.primary),
+                    const SizedBox(height: 16),
+                    Text('Processing payment...', style: AppTextStyles.labelLarge),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Please do not close the app',
+                      style: AppTextStyles.caption
+                          .copyWith(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Balance header
-  // ─────────────────────────────────────────────
-
+  // ── Balance header — unchanged ──
   Widget _buildBalanceHeader(Wallet? wallet) {
     final balance = wallet?.totalBalance ?? 0.0;
 
     return Container(
       color: AppColors.darkNavy,
       padding: EdgeInsets.only(
-        top:    MediaQuery.of(context).padding.top + 16,
-        left:   20,
-        right:  20,
-        bottom: 24,
+        top: MediaQuery.of(context).padding.top + 16,
+        left: 20, right: 20, bottom: 24,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Title + add money ──
           Row(
             children: [
               Text('My Wallet',
@@ -172,16 +189,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               _AddMoneyButton(onTap: _showTopUpSheet),
             ],
           ),
-
           const SizedBox(height: 24),
-
-          // ── Balance label ──
           Text('Available Balance',
               style: AppTextStyles.bodySmall
                   .copyWith(color: AppColors.textOnDarkMuted)),
           const SizedBox(height: 6),
-
-          // ── Balance value + visibility toggle ──
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -231,10 +243,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 24),
-
-          // ── Action buttons ──
           Row(
             children: [
               _ActionBtn(icon: Icons.arrow_upward_rounded,
@@ -252,41 +261,24 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Stats row — all values from live data
-  // ─────────────────────────────────────────────
-
   Widget _buildStatsRow(_WalletStats stats) => ColoredBox(
         color: AppColors.surface,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
             children: [
-              _StatChip(
-                value: '${stats.tripCount}',
-                label: 'Trips',
-                color: AppColors.success,
-              ),
+              _StatChip(value: '${stats.tripCount}',
+                  label: 'Trips', color: AppColors.success),
               _StatsDiv(),
-              _StatChip(
-                value: 'GHS ${stats.totalSpent.toStringAsFixed(0)}',
-                label: 'Total spent',
-                color: AppColors.info,
-              ),
+              _StatChip(value: 'GHS ${stats.totalSpent.toStringAsFixed(0)}',
+                  label: 'Total spent', color: AppColors.info),
               _StatsDiv(),
-              _StatChip(
-                value: 'GHS ${stats.totalSaved.toStringAsFixed(0)}',
-                label: 'Saved',
-                color: AppColors.primary,
-              ),
+              _StatChip(value: 'GHS ${stats.totalSaved.toStringAsFixed(0)}',
+                  label: 'Saved', color: AppColors.primary),
             ],
           ),
         ),
       );
-
-  // ─────────────────────────────────────────────
-  // Section header
-  // ─────────────────────────────────────────────
 
   Widget _buildSectionHeader() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -297,8 +289,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             GestureDetector(
               onTap: _showFilterSheet,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceAlt,
                   borderRadius: BorderRadius.circular(20),
@@ -321,10 +312,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         ),
       );
 
-  // ─────────────────────────────────────────────
-  // Filter chips
-  // ─────────────────────────────────────────────
-
   Widget _buildFilterChips() => SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
@@ -336,26 +323,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 7),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                 decoration: BoxDecoration(
-                  color: isActive
-                      ? AppColors.primary
-                      : AppColors.surface,
+                  color: isActive ? AppColors.primary : AppColors.surface,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                      color: isActive
-                          ? AppColors.primary
-                          : AppColors.border),
+                      color: isActive ? AppColors.primary : AppColors.border),
                 ),
                 child: Text(f,
                     style: AppTextStyles.labelMedium.copyWith(
                       color: isActive
                           ? AppColors.background
                           : AppColors.textSecondary,
-                      fontWeight: isActive
-                          ? FontWeight.w700
-                          : FontWeight.w400,
+                      fontWeight:
+                          isActive ? FontWeight.w700 : FontWeight.w400,
                     )),
               ),
             );
@@ -363,19 +344,12 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         ),
       );
 
-  // ─────────────────────────────────────────────
-  // Transaction filtering & grouping
-  // ─────────────────────────────────────────────
-
   List<Transaction> _filterTransactions(List<Transaction> all) {
     if (_activeFilter == 'All') return all;
-    return all
-        .where((tx) => _categoryLabel(tx) == _activeFilter)
-        .toList();
+    return all.where((tx) => _categoryLabel(tx) == _activeFilter).toList();
   }
 
-  Map<String, List<Transaction>> _groupTransactions(
-      List<Transaction> list) {
+  Map<String, List<Transaction>> _groupTransactions(List<Transaction> list) {
     final map = <String, List<Transaction>>{};
     for (final tx in list) {
       map.putIfAbsent(_dateGroupKey(tx.createdAt), () => []).add(tx);
@@ -383,10 +357,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     return map;
   }
 
-  /// Pre-builds a flat widget list from grouped transactions so the
-  /// SliverChildBuilderDelegate is O(1) per item instead of O(n²).
-  List<Widget> _buildFlatItemList(
-      Map<String, List<Transaction>> grouped) {
+  List<Widget> _buildFlatItemList(Map<String, List<Transaction>> grouped) {
     final widgets = <Widget>[];
     for (final entry in grouped.entries) {
       widgets.add(_groupHeader(entry.key));
@@ -408,7 +379,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     if (cat == 'delivery'   || desc.contains('delivery')) return 'Deliveries';
     if (cat == 'transfer'   || desc.contains('transfer')) return 'Transfers';
     if (cat == 'ride'       || desc.contains('ride') ||
-        desc.contains('taxi') || desc.contains('okada'))  return 'Rides';
+        desc.contains('taxi') || desc.contains('okada')) {
+      return 'Rides';
+    }
     return 'Rides';
   }
 
@@ -419,10 +392,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     if (diff < 7)  return 'This Week';
     return 'Earlier';
   }
-
-  // ─────────────────────────────────────────────
-  // Transaction tile
-  // ─────────────────────────────────────────────
 
   Widget _groupHeader(String label) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -440,25 +409,24 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final meta     = _txMeta(isCredit, category);
 
     final txItem = TxItem(
-      icon:     meta.icon,
-      iconBg:   meta.bg,
+      icon:      meta.icon,
+      iconBg:    meta.bg,
       iconColor: meta.fg,
-      label:    tx.description,
-      sub:      _formatDate(tx.createdAt),
-      amount:   '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
-      isCredit: isCredit,
-      type:     category,
-      ref:      tx.reference,
-      fullDate: _formatFullDate(tx.createdAt),
-      status:   tx.status.toString().split('.').last,
-      note:     tx.metadata?['note'] as String? ?? '',
+      label:     tx.description,
+      sub:       _formatDate(tx.createdAt),
+      amount:    '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
+      isCredit:  isCredit,
+      type:      category,
+      ref:       tx.reference,
+      fullDate:  _formatFullDate(tx.createdAt),
+      status:    tx.status.toString().split('.').last,
+      note:      tx.metadata?['note'] as String? ?? '',
     );
 
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute(
-            builder: (_) => TransactionDetailScreen(tx: txItem)),
+        MaterialPageRoute(builder: (_) => TransactionDetailScreen(tx: txItem)),
       ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -473,8 +441,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                  color: meta.bg,
-                  borderRadius: BorderRadius.circular(12)),
+                  color: meta.bg, borderRadius: BorderRadius.circular(12)),
               child: Icon(meta.icon, color: meta.fg, size: 19),
             ),
             const SizedBox(width: 12),
@@ -487,8 +454,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
-                  Text(_formatDate(tx.createdAt),
-                      style: AppTextStyles.caption),
+                  Text(_formatDate(tx.createdAt), style: AppTextStyles.caption),
                 ],
               ),
             ),
@@ -498,9 +464,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 Text(
                   '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
                   style: AppTextStyles.labelLarge.copyWith(
-                    color: isCredit
-                        ? AppColors.success
-                        : AppColors.error,
+                    color: isCredit ? AppColors.success : AppColors.error,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -517,42 +481,33 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   _TxMeta _txMeta(bool isCredit, String category) {
     if (isCredit) {
       return _TxMeta(
-        icon: Icons.arrow_upward_rounded,
-        bg: AppColors.successLight,
-        fg: AppColors.success,
-      );
+          icon: Icons.arrow_upward_rounded,
+          bg: AppColors.successLight,
+          fg: AppColors.success);
     }
     switch (category) {
       case 'Gas':
         return _TxMeta(
-          icon: Icons.local_fire_department_rounded,
-          bg: const Color(0xFFFEF3C7),
-          fg: const Color(0xFFD97706),
-        );
+            icon: Icons.local_fire_department_rounded,
+            bg: const Color(0xFFFEF3C7),
+            fg: const Color(0xFFD97706));
       case 'Deliveries':
         return _TxMeta(
-          icon: Icons.inventory_2_rounded,
-          bg: AppColors.infoLight,
-          fg: AppColors.info,
-        );
+            icon: Icons.inventory_2_rounded,
+            bg: AppColors.infoLight,
+            fg: AppColors.info);
       case 'Transfers':
         return _TxMeta(
-          icon: Icons.swap_horiz_rounded,
-          bg: const Color(0xFFF3E8FF),
-          fg: const Color(0xFF7C3AED),
-        );
+            icon: Icons.swap_horiz_rounded,
+            bg: const Color(0xFFF3E8FF),
+            fg: const Color(0xFF7C3AED));
       default:
         return _TxMeta(
-          icon: Icons.directions_car_rounded,
-          bg: AppColors.errorLight,
-          fg: AppColors.error,
-        );
+            icon: Icons.directions_car_rounded,
+            bg: AppColors.errorLight,
+            fg: AppColors.error);
     }
   }
-
-  // ─────────────────────────────────────────────
-  // States: empty / skeleton / error
-  // ─────────────────────────────────────────────
 
   Widget _buildEmptyState() => Padding(
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 20),
@@ -602,8 +557,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             const Icon(Icons.cloud_off_rounded,
                 color: AppColors.textTertiary, size: 40),
             const SizedBox(height: 12),
-            Text('Could not load transactions',
-                style: AppTextStyles.heading4),
+            Text('Could not load transactions', style: AppTextStyles.heading4),
             const SizedBox(height: 6),
             Text(message,
                 style: AppTextStyles.caption
@@ -613,8 +567,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             GestureDetector(
               onTap: _refresh,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(20),
@@ -633,14 +586,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   // ─────────────────────────────────────────────
 
   void _showTopUpSheet() {
-    int selectedAmountIndex  = -1;
-    int selectedMethodIndex  = 0;
+    int selectedAmountIndex = -1;
+    int selectedMethodIndex = 0;
     final customCtrl = TextEditingController();
-
-    // Amounts fetched from remote config in a full implementation;
-    // kept here as sensible GHS defaults.
-    final amounts  = [20.0, 50.0, 100.0, 200.0, 500.0];
-    final methods  = _payMethods();
+    final amounts = [20.0, 50.0, 100.0, 200.0, 500.0];
+    final methods = _payMethods();
 
     showModalBottomSheet(
       context: context,
@@ -654,8 +604,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           final resolvedAmount = selectedAmountIndex >= 0
               ? amounts[selectedAmountIndex]
               : double.tryParse(customCtrl.text);
-          final canPay =
-              resolvedAmount != null && resolvedAmount > 0;
+          final canPay = resolvedAmount != null && resolvedAmount > 0;
 
           return SingleChildScrollView(
             padding: EdgeInsets.only(
@@ -673,8 +622,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     style: AppTextStyles.caption
                         .copyWith(color: AppColors.textSecondary)),
                 const SizedBox(height: 20),
-
-                // Amount presets
                 Text('Select amount', style: AppTextStyles.labelLarge),
                 const SizedBox(height: 10),
                 SizedBox(
@@ -721,12 +668,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-
-                // Custom amount
                 TextField(
                   controller: customCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   onChanged: (_) =>
                       setLocal(() => selectedAmountIndex = -1),
                   style: AppTextStyles.bodyMedium,
@@ -754,16 +699,13 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Payment methods
                 Text('Pay with', style: AppTextStyles.labelLarge),
                 const SizedBox(height: 10),
                 ...methods.asMap().entries.map((e) {
                   final isSel = selectedMethodIndex == e.key;
                   final m     = e.value;
                   return GestureDetector(
-                    onTap: () =>
-                        setLocal(() => selectedMethodIndex = e.key),
+                    onTap: () => setLocal(() => selectedMethodIndex = e.key),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       margin: const EdgeInsets.only(bottom: 8),
@@ -771,14 +713,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                           horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
                         color: isSel
-                            ? AppColors.primary
-                                .withValues(alpha: 0.06)
+                            ? AppColors.primary.withValues(alpha: 0.06)
                             : AppColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isSel
-                              ? AppColors.primary
-                              : AppColors.border,
+                          color: isSel ? AppColors.primary : AppColors.border,
                           width: isSel ? 1.5 : 0.8,
                         ),
                       ),
@@ -789,18 +728,15 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                             color: m.color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child:
-                              Icon(m.icon, color: m.color, size: 18),
+                          child: Icon(m.icon, color: m.color, size: 18),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(m.label,
-                                  style: AppTextStyles.labelLarge),
-                              Text(m.sub,
-                                  style: AppTextStyles.caption),
+                              Text(m.label, style: AppTextStyles.labelLarge),
+                              Text(m.sub,   style: AppTextStyles.caption),
                             ],
                           ),
                         ),
@@ -817,15 +753,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     ),
                   );
                 }),
-
                 const SizedBox(height: 16),
-
-                // Security badge
                 _SecurityBadge(),
-
                 const SizedBox(height: 16),
-
-                // CTA
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -834,7 +764,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                         : () async {
                             Navigator.pop(ctx);
                             await _processTopUp(
-                              resolvedAmount!,
+                              resolvedAmount,
                               methods[selectedMethodIndex].value,
                             );
                           },
@@ -849,7 +779,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     ),
                     child: Text(
                       canPay
-                          ? 'Pay GHS ${resolvedAmount!.toStringAsFixed(2)} via Paystack'
+                          ? 'Pay GHS ${resolvedAmount.toStringAsFixed(2)} via Paystack'
                           : 'Select an amount',
                       style: const TextStyle(
                         fontFamily: 'Inter',
@@ -867,33 +797,38 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Process top-up
-  // WalletController handles email resolution for phone-auth users.
-  // ─────────────────────────────────────────────
-
+  // ── FIX 1 + 2: loading state + correct channel mapping ──
   Future<void> _processTopUp(double amount, String method) async {
+    setState(() => _isTopUpLoading = true);
     try {
       final success = await ref.read(walletControllerProvider).topUp(
         amount: amount,
-        paymentMethod: method,
+        paymentMethod: _toPaystackChannel(method), // ← FIX 2
       );
       if (success && mounted) {
         await _refresh();
-        _showSuccess(
-            'GHS ${amount.toStringAsFixed(2)} added to your wallet');
+        _showSuccess('GHS ${amount.toStringAsFixed(2)} added to your wallet');
       }
     } catch (e) {
+      if (!mounted) return;
       final msg = e.toString().replaceFirst('Exception: ', '');
-      msg.contains('cancelled')
+      msg.toLowerCase().contains('cancel')
           ? _showError('Payment cancelled')
           : _showError('Top-up failed: $msg');
+    } finally {
+      if (mounted) setState(() => _isTopUpLoading = false);
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Withdraw sheet
-  // ─────────────────────────────────────────────
+  // ── FIX 2: map UI value → Paystack channel ──
+  String _toPaystackChannel(String method) {
+    switch (method) {
+      case 'momo':     return 'mobile_money';
+      case 'vodafone': return 'mobile_money';
+      case 'card':     return 'card';
+      default:         return 'card';
+    }
+  }
 
   void _showWithdrawSheet() => showModalBottomSheet(
         context: context,
@@ -916,17 +851,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   style: AppTextStyles.bodySmall
                       .copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: 20),
-              PrimaryButton(
-                  label: 'Close',
-                  onTap: () => Navigator.pop(context)),
+              PrimaryButton(label: 'Close', onTap: () => Navigator.pop(context)),
             ],
           ),
         ),
       );
-
-  // ─────────────────────────────────────────────
-  // Transfer sheet
-  // ─────────────────────────────────────────────
 
   void _showTransferSheet() => showModalBottomSheet(
         context: context,
@@ -950,16 +879,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       .copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: 20),
               PrimaryButton(
-                  label: 'Coming Soon',
-                  onTap: () => Navigator.pop(context)),
+                  label: 'Coming Soon', onTap: () => Navigator.pop(context)),
             ],
           ),
         ),
       );
-
-  // ─────────────────────────────────────────────
-  // Filter sheet
-  // ─────────────────────────────────────────────
 
   void _showFilterSheet() {
     String tempFilter = _activeFilter;
@@ -991,9 +915,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
-                        color: isSel
-                            ? AppColors.primary
-                            : AppColors.surfaceAlt,
+                        color: isSel ? AppColors.primary : AppColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                             color: isSel
@@ -1037,14 +959,12 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────
-
+  // ── FIX 3: correct refresh for StreamProviders ──
   Future<void> _refresh() async {
     await ref.read(walletProvider.notifier).refresh();
-    ref.invalidate(transactionHistoryProvider);
-    ref.invalidate(recentTransactionsStreamProvider);
+    ref.invalidate(walletStreamProvider);             // ← re-subscribes stream
+    ref.invalidate(recentTransactionsStreamProvider); // ← re-subscribes stream
+    ref.invalidate(transactionHistoryProvider);       // ← busts future cache
   }
 
   void _showError(String msg) {
@@ -1059,8 +979,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const Icon(Icons.check_circle_rounded,
-            color: Colors.white, size: 18),
+        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
         const SizedBox(width: 8),
         Expanded(child: Text(msg)),
       ]),
@@ -1068,20 +987,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     ));
   }
 
+  // ── FIX 2: UI labels unchanged, values mapped in _toPaystackChannel ──
   List<_PayMethod> _payMethods() => [
         _PayMethod(
           label: 'MTN MoMo',
           sub: 'Mobile Money',
           icon: Icons.phone_android_rounded,
           color: const Color(0xFFFFCC00),
-          value: 'momo',
+          value: 'momo', // mapped → 'mobile_money' before sending to function
         ),
         _PayMethod(
           label: 'Vodafone Cash',
           sub: 'Mobile Money',
           icon: Icons.phone_android_rounded,
           color: const Color(0xFFE60000),
-          value: 'vodafone',
+          value: 'vodafone', // mapped → 'mobile_money'
         ),
         _PayMethod(
           label: 'Debit / Credit Card',
@@ -1116,7 +1036,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MODELS
+// MODELS — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class TxItem {
@@ -1172,7 +1092,7 @@ class _PayMethod {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRIVATE WIDGETS
+// PRIVATE WIDGETS — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AddMoneyButton extends StatelessWidget {
@@ -1183,8 +1103,7 @@ class _AddMoneyButton extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           decoration: BoxDecoration(
             color: AppColors.primary,
             borderRadius: BorderRadius.circular(20),
@@ -1192,8 +1111,7 @@ class _AddMoneyButton extends StatelessWidget {
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.add_rounded,
-                  color: AppColors.background, size: 15),
+              Icon(Icons.add_rounded, color: AppColors.background, size: 15),
               SizedBox(width: 5),
               Text('Add Money',
                   style: TextStyle(
@@ -1213,8 +1131,7 @@ class _BalanceSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 38,
-        width: 180,
+        height: 38, width: 180,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
@@ -1223,11 +1140,8 @@ class _BalanceSkeleton extends StatelessWidget {
 }
 
 class _ActionBtn extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final VoidCallback onTap;
-  const _ActionBtn(
-      {required this.icon, required this.label, required this.onTap});
+  final IconData icon; final String label; final VoidCallback onTap;
+  const _ActionBtn({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -1252,20 +1166,15 @@ class _ActionBtn extends StatelessWidget {
 }
 
 class _StatChip extends StatelessWidget {
-  final String value, label;
-  final Color  color;
-  const _StatChip(
-      {required this.value, required this.label, required this.color});
+  final String value, label; final Color color;
+  const _StatChip({required this.value, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) => Expanded(
         child: Column(children: [
-          Text(value,
-              style: AppTextStyles.heading4.copyWith(color: color)),
+          Text(value, style: AppTextStyles.heading4.copyWith(color: color)),
           const SizedBox(height: 2),
-          Text(label,
-              style: AppTextStyles.caption,
-              textAlign: TextAlign.center),
+          Text(label, style: AppTextStyles.caption, textAlign: TextAlign.center),
         ]),
       );
 }
@@ -1273,9 +1182,7 @@ class _StatChip extends StatelessWidget {
 class _StatsDiv extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-      width: 0.5,
-      height: 36,
-      color: AppColors.border,
+      width: 0.5, height: 36, color: AppColors.border,
       margin: const EdgeInsets.symmetric(horizontal: 12));
 }
 
@@ -1285,29 +1192,28 @@ class _StatusBadge extends StatelessWidget {
 
   Color get _color {
     final s = status.toLowerCase();
-    if (s.contains('complete') || s.contains('success')) {
-      return AppColors.success;
-    }
-    if (s.contains('fail') || s.contains('cancel')) return AppColors.error;
+    if (s.contains('complete') || s.contains('success')) return AppColors.success;
+    if (s.contains('fail')     || s.contains('cancel'))  return AppColors.error;
+    if (s.contains('pending'))                            return AppColors.warning;
     return AppColors.warning;
+  }
+
+  String get _label {
+    final s = status.split('.').last;
+    return s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
   }
 
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: _color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
         ),
-        child: Text(
-          status.split('.').last,
-          style: AppTextStyles.caption.copyWith(
-            color: _color,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        child: Text(_label,
+            style: AppTextStyles.caption.copyWith(
+              color: _color, fontSize: 9, fontWeight: FontWeight.w700,
+            )),
       );
 }
 
@@ -1317,8 +1223,7 @@ class _SheetHandle extends StatelessWidget {
         child: Container(
           width: 40, height: 4,
           decoration: BoxDecoration(
-            color: AppColors.border,
-            borderRadius: BorderRadius.circular(2),
+            color: AppColors.border, borderRadius: BorderRadius.circular(2),
           ),
         ),
       );
@@ -1327,8 +1232,7 @@ class _SheetHandle extends StatelessWidget {
 class _SecurityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: AppColors.successLight,
           borderRadius: BorderRadius.circular(10),
@@ -1336,16 +1240,12 @@ class _SecurityBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_rounded,
-                color: AppColors.success, size: 14),
+            const Icon(Icons.lock_rounded, color: AppColors.success, size: 14),
             const SizedBox(width: 6),
-            Text(
-              'Secured by Paystack · 256-bit encryption',
-              style: AppTextStyles.caption.copyWith(
-                color: AppColors.success,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Text('Secured by Paystack · 256-bit encryption',
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.success, fontWeight: FontWeight.w600,
+                )),
           ],
         ),
       );

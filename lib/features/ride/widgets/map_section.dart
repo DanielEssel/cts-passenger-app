@@ -1,9 +1,3 @@
-// features/ride/widgets/map_section.dart
-//
-// ✅ _DriversNearbyChip reads live count from driversNearbyProvider
-// ✅ No hardcoded '3 drivers nearby'
-// ✅ Shows loading state while stream initialises
-// ✅ Hides chip entirely on error; shows 'No drivers nearby' when empty
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

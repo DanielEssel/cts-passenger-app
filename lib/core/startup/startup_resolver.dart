@@ -29,10 +29,17 @@ class StartupResolver {
     }
 
     // ── 2. Not authenticated — go to login ──────────────────────────
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return const RouteDestination(AppRoutes.login);
-    }
+    // Wait for Firebase Auth to restore persisted session
+final user = await FirebaseAuth.instance
+    .authStateChanges()
+    .first
+    .timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => null,
+    );
+if (user == null) {
+  return const RouteDestination(AppRoutes.login);
+}
 
     // ── 3. Authenticated — delegate to passenger flow resolver ───────
     // PassengerFlowResolver checks Firestore for profile completion,

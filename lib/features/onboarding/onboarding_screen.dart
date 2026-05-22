@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/routes/app_routes.dart';
 import 'onboarding_model.dart';
+import '../../core/services/local/onboarding_local_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -42,6 +43,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         curve: Curves.easeOutCubic,
       );
     } else {
+      OnboardingLocalService.markCompleted();
       Navigator.of(context).pushReplacementNamed(AppRoutes.login);
     }
   }
@@ -111,7 +113,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   child: TextButton(
                     onPressed: isLastPage 
                         ? null 
-                        : () => Navigator.of(context).pushReplacementNamed(AppRoutes.login),
+                        : () async {
+                          await OnboardingLocalService.markCompleted();
+                          if (context.mounted) Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+                        },
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white.withValues(alpha: 0.9),
                       backgroundColor: Colors.white.withValues(alpha: 0.1),

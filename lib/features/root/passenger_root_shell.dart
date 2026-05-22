@@ -9,11 +9,14 @@ import 'package:cts_transport_app/features/history/presentation/history_screen.d
 import '../../../features/wallet/presentation/screens/wallet_screen.dart';
 import 'package:cts_transport_app/features/profile/presentation/profile_screen.dart';
 
+import 'package:cts_transport_app/features/delivery/presentation/delivery_matching_screen.dart';
+import 'package:cts_transport_app/features/delivery/presentation/delivery_tracking_screen.dart';
 // Screens for navigation
 import 'package:cts_transport_app/features/ride/presentation/book_ride_screen.dart';
 import 'package:cts_transport_app/features/delivery/presentation/delivery_screen.dart';
 import 'package:cts_transport_app/features/notification/presentation/notifications_screen.dart';
 import 'package:cts_transport_app/features/ride_tracking/ride_tracking_screen.dart';
+import 'package:cts_transport_app/features/notification/providers/notification_providers.dart';
 
 // Import profile-related screens
 import 'package:cts_transport_app/features/profile/presentation/edit_profile_screen.dart';
@@ -24,26 +27,17 @@ import 'package:cts_transport_app/features/profile/presentation/privacy_security
 import 'package:cts_transport_app/features/profile/presentation/help_support_screen.dart';
 import 'package:cts_transport_app/features/profile/presentation/about_screen.dart';
 import '../ride/presentation/destination_search_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// PassengerRootShell is the single widget that owns the bottom navigation bar.
-/// It uses an IndexedStack so each tab keeps its scroll position and state
-/// when you switch away and come back.
-///
-/// How to reach it:
-///   Navigator.pushNamedAndRemoveUntil(
-///     context, AppRoutes.shell, (route) => false,
-///   );
-///
-/// Use pushNamedAndRemoveUntil (not just pushNamed) so the auth screens
-/// are fully removed from the back-stack when the user lands on the shell.
-class PassengerRootShell extends StatefulWidget {
+/// PassengerRootShell
+class PassengerRootShell extends ConsumerStatefulWidget {
   const PassengerRootShell({super.key});
 
   @override
-  State<PassengerRootShell> createState() => _PassengerRootShellState();
+  ConsumerState<PassengerRootShell> createState() => _PassengerRootShellState();
 }
 
-class _PassengerRootShellState extends State<PassengerRootShell> {
+class _PassengerRootShellState extends ConsumerState<PassengerRootShell> {
   int _currentIndex = 0;
 
   // One Navigator key per tab — lets each tab have its own navigation stack.
@@ -110,9 +104,9 @@ class _PassengerRootShellState extends State<PassengerRootShell> {
         ),
         bottomNavigationBar: _BottomNavBar(
           currentIndex: _currentIndex,
+          unreadCount: ref.watch(unreadNotifCountProvider).value ?? 0,
           onTap: (index) {
             if (index == _currentIndex) {
-              // Tapping the already-active tab scrolls it back to the top
               _navKeys[index].currentState?.popUntil((route) => route.isFirst);
             } else {
               setState(() => _currentIndex = index);
@@ -132,6 +126,13 @@ class _PassengerRootShellState extends State<PassengerRootShell> {
           builder: (_) => _tabRoots[tabIndex],
           settings: settings,
         );
+      case AppRoutes.profile:
+        return MaterialPageRoute(
+          builder: (_) => ProfileScreen(
+            scrollController: ScrollController(),
+          ),
+          settings: settings,
+        );
 
       // Existing routes
       case AppRoutes.bookRide:
@@ -145,6 +146,27 @@ class _PassengerRootShellState extends State<PassengerRootShell> {
           builder: (context) => const DeliveryScreen(),
           settings: settings,
         );
+
+      case AppRoutes.deliveryMatching:
+  final args = settings.arguments as Map<String, dynamic>?;
+  return MaterialPageRoute(
+    builder: (_) => DeliveryMatchingScreen(
+      deliveryId:  args?['deliveryId']  ?? '',
+      vehicleName: args?['vehicleName'] ?? '',
+      dropoff:     args?['dropoff']     ?? '',
+      fare:        args?['fare']        ?? '',
+    ),
+    settings: settings,
+  );
+
+case AppRoutes.deliveryTracking:
+  final args = settings.arguments as Map<String, dynamic>?;
+  return MaterialPageRoute(
+    builder: (_) => DeliveryTrackingScreen(
+      deliveryId: args?['deliveryId'] ?? '',
+    ),
+    settings: settings,
+  );
 
       // ADD THIS GAS ORDER ROUTE
       case AppRoutes.gasOrder:
@@ -232,10 +254,12 @@ class _PassengerRootShellState extends State<PassengerRootShell> {
 class _BottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final int unreadCount; // ← ADD
 
   const _BottomNavBar({
     required this.currentIndex,
     required this.onTap,
+    required this.unreadCount, // ← ADD
   });
 
   static const _items = [
@@ -249,9 +273,9 @@ class _BottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: AppColors.background,
+        color: AppColors.surface,
         border: Border(
-          top: BorderSide(color: AppColors.borderColor, width: 0.5),
+          top: BorderSide(color: AppColors.border, width: 0.5),
         ),
       ),
       child: SafeArea(
@@ -264,6 +288,8 @@ class _BottomNavBar extends StatelessWidget {
               (i) => _NavTile(
                 item: _items[i],
                 isActive: currentIndex == i,
+                showBadge: i == 0 && unreadCount > 0, // ← badge on Home
+                badgeCount: unreadCount,
                 onTap: () => onTap(i),
               ),
             ),
@@ -277,12 +303,16 @@ class _BottomNavBar extends StatelessWidget {
 class _NavTile extends StatelessWidget {
   final _NavItem item;
   final bool isActive;
+  final bool showBadge; // ← ADD
+  final int badgeCount; // ← ADD
   final VoidCallback onTap;
 
   const _NavTile({
     required this.item,
     required this.isActive,
     required this.onTap,
+    this.showBadge = false, // ← ADD
+    this.badgeCount = 0, // ← ADD
   });
 
   @override
@@ -294,12 +324,44 @@ class _NavTile extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              item.icon,
-              size: 22,
-              color: isActive
-                  ? AppColors.primaryColor
-                  : AppColors.textSecondaryColor,
+            // ── Icon with optional badge ──
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  item.icon,
+                  size: 22,
+                  color: isActive ? AppColors.primary : AppColors.textSecondary,
+                ),
+                if (showBadge)
+                  Positioned(
+                    top: -4,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppColors.error,
+                        borderRadius: BorderRadius.circular(10),
+                        border:
+                            Border.all(color: AppColors.surface, width: 1.5),
+                      ),
+                      constraints:
+                          const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        badgeCount > 99 ? '99+' : '$badgeCount',
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 3),
             Text(
@@ -308,9 +370,7 @@ class _NavTile extends StatelessWidget {
                 fontFamily: 'Inter',
                 fontSize: 11,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                color: isActive
-                    ? AppColors.primaryColor
-                    : AppColors.textSecondaryColor,
+                color: isActive ? AppColors.primary : AppColors.textSecondary,
               ),
             ),
             const SizedBox(height: 3),
@@ -319,7 +379,7 @@ class _NavTile extends StatelessWidget {
               width: isActive ? 4 : 0,
               height: isActive ? 4 : 0,
               decoration: BoxDecoration(
-                color: AppColors.primaryColor,
+                color: AppColors.primary,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),

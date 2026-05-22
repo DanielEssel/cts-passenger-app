@@ -42,16 +42,28 @@ class WalletRemoteDataSource {
   // Wallet reads
   // ─────────────────────────────────────────────
 
-  /// One-time fetch via Cloud Function.
-  Future<WalletModel> getWallet() async {
-    try {
-      final result =
-          await _functions.httpsCallable('getWalletBalance').call();
-      return WalletModel.fromJson(result.data as Map<String, dynamic>);
-    } catch (e) {
-      throw _handleException(e);
+  
+  /// One-time fetch — reads directly from Firestore.
+Future<WalletModel> getWallet() async {
+  try {
+    final uid = _requireUid;
+    final doc = await _firestore.collection('wallets').doc(uid).get();
+    if (!doc.exists || doc.data() == null) {
+      // Auto-create wallet if missing
+      return WalletModel.fromJson({
+        'balance':   0.0,
+        'currency':  'GHS',
+        'userId':    uid,
+        'status':    'active',
+        'createdAt': DateTime.now().toIso8601String(),
+        'lastUpdated': DateTime.now().toIso8601String(),
+      });
     }
+    return WalletModel.fromFirestore(doc);
+  } catch (e) {
+    throw _handleException(e);
   }
+}
 
   /// One-time direct Firestore read by user ID.
   Future<WalletModel?> getWalletByUserId(String userId) async {
@@ -59,7 +71,7 @@ class WalletRemoteDataSource {
       final doc =
           await _firestore.collection('wallets').doc(userId).get();
       if (!doc.exists || doc.data() == null) return null;
-      return WalletModel.fromJson(doc.data()!);
+      return WalletModel.fromFirestore(doc);
     } catch (e) {
       throw _handleException(e);
     }
@@ -83,7 +95,7 @@ class WalletRemoteDataSource {
               'userId': uid,
             });
           }
-          return WalletModel.fromJson(doc.data()!);
+          return WalletModel.fromFirestore(doc);
         });
   }
 
@@ -224,7 +236,7 @@ class WalletRemoteDataSource {
           .limit(1)
           .get();
       if (snap.docs.isEmpty) return null;
-      return Transaction.fromMap(snap.docs.first.data());
+      return TransactionModel.fromFirestore(snap.docs.first).toEntity();
     } catch (e) {
       throw _handleException(e);
     }

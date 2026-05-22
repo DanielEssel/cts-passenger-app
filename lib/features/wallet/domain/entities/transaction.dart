@@ -68,9 +68,13 @@ class Transaction extends Equatable {
                        orElse: () => PaymentMethod.cash,
                      ),
       reference:     map['reference'] as String? ?? '',
-      createdAt:     map['createdAt'] != null
-                       ? (map['createdAt'] as Timestamp).toDate()
-                       : DateTime.now(),
+      createdAt: map['createdAt'] != null
+    ? (map['createdAt'] is Timestamp)
+        ? (map['createdAt'] as Timestamp).toDate()
+        : map['createdAt'] is String
+            ? DateTime.parse(map['createdAt'] as String)
+            : DateTime.now()
+    : DateTime.now(),
       metadata:      map['metadata'] != null
                        ? Map<String, dynamic>.from(map['metadata'] as Map)
                        : null,

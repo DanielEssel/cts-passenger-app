@@ -55,44 +55,59 @@ class WalletController {
     _ref.invalidate(recentTransactionsStreamProvider);
   }
 
+
+// In WalletController — add this helper
+Future<void> _refreshAuthToken() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) throw Exception('Please log in to continue');
+  // Force token refresh — fixes expired token issues
+  await user.getIdToken(true);
+}
   // ─────────────────────────────────────────────
   // Top up via Paystack
   // ─────────────────────────────────────────────
 
   Future<bool> topUp({
-    required double amount,
-    required String paymentMethod,
-  }) async {
-    final user = _requireUser;
-    final email = _resolveEmail(user);
+  required double amount,
+  required String paymentMethod,
+}) async {
+  await _refreshAuthToken();
+  final user = _requireUser;
+  final email = _resolveEmail(user);
 
-    try {
-      final remote = _ref.read(walletRemoteDataSourceProvider);
+  try {
+    final remote = _ref.read(walletRemoteDataSourceProvider);
 
-      final result = await remote.initializePaystackPayment(
-        amount: amount,
-        paymentMethod: paymentMethod,
-        email: email,
-      );
-
-      final url = result['authorization_url'] as String?;
-      final reference = result['reference'] as String?;
-
-      if (url == null || url.isEmpty) {
-        throw Exception('Invalid payment URL from Paystack');
-      }
-
-      await _openPaystackCheckout(url, reference ?? '');
-      await _refreshWallet();
-      return true;
-    } on FirebaseFunctionsException catch (e) {
-      debugPrint('Paystack init error [${e.code}]: ${e.message}');
-      throw Exception(e.message ?? 'Payment initialisation failed');
-    } catch (e) {
-      debugPrint('Top up error: $e');
-      rethrow;
+    // Ensure wallet exists
+    final existing = await remote.getWalletByUserId(user.uid);
+    if (existing == null) {
+      await remote.createWallet(user.uid, email);
     }
+
+    final result = await remote.initializePaystackPayment(
+      amount: amount,
+      paymentMethod: paymentMethod,
+      email: email,
+    );
+
+    final url = result['authorization_url'] as String?;
+    final reference = result['reference'] as String?;
+
+    if (url == null || url.isEmpty) {
+      throw Exception('Invalid payment URL');
+    }
+
+    // Opens WebView → verifies → completes or throws
+    await _openPaystackCheckout(url, reference ?? '');
+    await _refreshWallet();
+    return true;
+
+  } on FirebaseFunctionsException catch (e) {
+    throw Exception(e.message ?? 'Payment initialisation failed');
+  } catch (e) {
+    rethrow;
   }
+}
 
   // ─────────────────────────────────────────────
   // Deduct wallet for a service order
@@ -103,6 +118,7 @@ class WalletController {
     required double amount,
     required String description,
   }) async {
+    await _refreshAuthToken();
     _requireUser; // throws if not authenticated
 
     try {
@@ -196,47 +212,75 @@ class WalletController {
   // ─────────────────────────────────────────────
 
   Future<void> _openPaystackCheckout(String url, String reference) async {
-    final completer = Completer<void>();
+  final completer = Completer<void>();
+  bool paymentHandled = false;
 
-    final webController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (currentUrl) {
-          if (currentUrl.contains('success') ||
-              currentUrl.contains('callback')) {
-            if (!completer.isCompleted) completer.complete();
-          } else if (currentUrl.contains('cancel') ||
-              currentUrl.contains('close')) {
-            if (!completer.isCompleted) {
-              completer.completeError(Exception('Payment cancelled'));
+  final webController = WebViewController()
+    ..setJavaScriptMode(JavaScriptMode.unrestricted)
+    ..setNavigationDelegate(NavigationDelegate(
+      onPageFinished: (currentUrl) async {
+        if (paymentHandled) return;
+
+        // Paystack redirects here after payment
+        final uri = Uri.tryParse(currentUrl);
+        final isCallback = currentUrl.contains('ctstransportapp.web.app/payment/callback') ||
+            currentUrl.contains('success') ||
+            uri?.queryParameters['trxref'] != null;
+
+        final isCancelled = currentUrl.contains('cancel') ||
+            currentUrl.contains('close');
+
+        if (isCallback && !paymentHandled) {
+          paymentHandled = true;
+          try {
+            final remote = _ref.read(walletRemoteDataSourceProvider);
+            final verified = await remote.verifyPayment(reference);
+            // ── Always pop WebView first ──
+            final nav = _ref.read(navigatorKeyProvider);
+            if (nav.currentContext != null) {
+              Navigator.pop(nav.currentContext!);
             }
+            if (verified) {
+              if (!completer.isCompleted) completer.complete();
+            } else {
+              if (!completer.isCompleted) {
+                completer.completeError(
+                    Exception('Payment could not be verified'));
+              }
+            }
+          } catch (e) {
+            final nav = _ref.read(navigatorKeyProvider);
+            if (nav.currentContext != null) {
+              Navigator.pop(nav.currentContext!);
+            }
+            if (!completer.isCompleted) completer.completeError(e);
           }
+        }
+      },
+    ))
+    ..loadRequest(Uri.parse(url));
+
+  final navigatorKey = _ref.read(navigatorKeyProvider);
+  final context = navigatorKey.currentContext;
+  if (context == null) throw Exception('No navigation context');
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => _PaystackWebView(
+        webController: webController,
+        onClose: () {
+          if (!completer.isCompleted) {
+            completer.completeError(Exception('Payment cancelled'));
+          }
+          Navigator.pop(context);
         },
-      ))
-      ..loadRequest(Uri.parse(url));
-
-    final navigatorKey = _ref.read(navigatorKeyProvider);
-    final context = navigatorKey.currentContext;
-    if (context == null) throw Exception('No navigation context available');
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _PaystackWebView(
-          webController: webController,
-          onClose: () {
-            if (!completer.isCompleted) {
-              completer.completeError(Exception('Payment cancelled'));
-            }
-            Navigator.pop(context);
-          },
-        ),
       ),
-    );
+    ),
+  );
 
-    // Await the result — throws if cancelled
-    await completer.future;
-  }
+  await completer.future; // throws if cancelled/failed
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
@@ -88,6 +89,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
     // ✅ E.164 number with country code from PhoneInputField
     final phone = _phoneKey.currentState?.fullNumber
         ?? _phoneController.text.trim();
+
+        // ── Check if phone number already registered ──
+  try {
+    final existing = await FirebaseFirestore.instance
+        .collection('users')
+        .where('phoneNumber', isEqualTo: phone)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isNotEmpty) {
+      _showError(
+          'This number is already registered. Please sign in instead.');
+      return;
+    }
+  } catch (e) {
+    // Non-fatal — let the flow continue if check fails
+    debugPrint('Phone existence check failed: $e');
+  }
 
     await ref.read(authProvider.notifier).signUp(
       firstName: firstName,

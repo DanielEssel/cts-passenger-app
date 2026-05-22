@@ -431,11 +431,20 @@ class PhoneInputField extends StatefulWidget {
 class PhoneInputFieldState extends State<PhoneInputField> {
   late Country _selected;
 
+//for international code detector
+  // @override
+  // void initState() {
+  //   super.initState();
+  //   _selected = detectCountryFromLocale();
+  // }
+
+//for africa and ghana hardcoded//
   @override
-  void initState() {
-    super.initState();
-    _selected = detectCountryFromLocale();
-  }
+void initState() {
+  super.initState();
+  // Always default to Ghana — override locale detection
+  _selected = kAfricaCountries.first;
+}
 
   Country get selectedCountry => _selected;
 

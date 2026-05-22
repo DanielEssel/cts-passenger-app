@@ -5,10 +5,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cts_transport_app/core/constants/app_colors.dart'; // ← ADD
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:cts_transport_app/features/notification/providers/notification_providers.dart';
+
 
 import '../../../core/routes/app_routes.dart';
 import '../../../features/auth/providers/auth_providers.dart';
@@ -20,7 +23,7 @@ import '../../home/theme/home_theme.dart';
 import '../../ride/models/service_type.dart';
 
 // ─────────────────────────────────────────────────
-// PROVIDERS (unchanged)
+// PROVIDERS
 // ─────────────────────────────────────────────────
 
 final locationService = LocationService.instance;
@@ -73,30 +76,25 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  // ── Map ────────────────────────────────────────
+
   GoogleMapController? _mapController;
-  LatLng? _userLocation;
-  final Set<Marker> _markers = {};
-  bool _isMapReady = false;
-  Timer? _debounceTimer;
+  LatLng?              _userLocation;
+  final Set<Marker>    _markers = {};
+  bool                 _isMapReady = false;
+  Timer?               _debounceTimer;
   StreamSubscription<Position>? _locationSub;
 
-  // ── State ──────────────────────────────────────
   ServiceType _selectedService = ServiceType.taxi;
-  bool _isLocating = true;
-  String _locationLabel = 'Locating...';
+  bool        _isLocating      = true;
+  String      _locationLabel   = 'Locating...';
 
-  // ── Sheet ──────────────────────────────────────
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
 
-  // ── Animation ─────────────────────────────────
   late AnimationController _chipAnimController;
-  late AnimationController _sheetAnimController;
 
   static const LatLng _accra = LatLng(5.6037, -0.1870);
 
-  // ── Greeting ───────────────────────────────────
   String get _greeting {
     final h = DateTime.now().hour;
     if (h < 12) return 'Good morning';
@@ -112,10 +110,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 350),
     )..forward();
-    _sheetAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
     _initLocation();
   }
 
@@ -135,8 +129,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return p == LocationPermission.always || p == LocationPermission.whileInUse;
   }
 
-  // ── Location ───────────────────────────────────
-
   Future<void> _initLocation() async {
     setState(() => _isLocating = true);
     try {
@@ -145,11 +137,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final ll = LatLng(pos.latitude, pos.longitude);
       setState(() {
         _userLocation = ll;
-        _isLocating = false;
+        _isLocating   = false;
       });
       if (_isMapReady) {
         _mapController?.animateCamera(
-          CameraUpdate.newCameraPosition(CameraPosition(target: ll, zoom: 15)),
+          CameraUpdate.newCameraPosition(
+              CameraPosition(target: ll, zoom: 15)),
         );
       }
       _updateUserMarker(ll);
@@ -158,7 +151,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {
       if (mounted) {
         setState(() {
-          _isLocating = false;
+          _isLocating    = false;
           _locationLabel = 'Location unavailable';
         });
         _showLocationErrorDialog();
@@ -193,8 +186,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ..add(Marker(
           markerId: const MarkerId('user'),
           position: pos,
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueGreen),
           infoWindow: const InfoWindow(title: 'You'),
         ));
     });
@@ -223,14 +216,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ── Service selection ──────────────────────────
-
   Future<void> _selectService(ServiceType service) async {
     HapticFeedback.selectionClick();
     setState(() => _selectedService = service);
-    _chipAnimController
-      ..reset()
-      ..forward();
+    _chipAnimController..reset()..forward();
     await _goToSearch();
   }
 
@@ -256,7 +245,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void dispose() {
     _debounceTimer?.cancel();
     _chipAnimController.dispose();
-    _sheetAnimController.dispose();
     _sheetController.dispose();
     _mapController?.dispose();
     _locationSub?.cancel();
@@ -278,15 +266,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         backgroundColor: HomeTheme.background,
         body: Stack(
           children: [
-            // 1 ── Full-screen map
+            // 1 ── Full-screen map (60% of screen)
             _buildMap(),
 
-            // 2 ── Top fade gradient
+            // 2 ── Top fade gradient over map
             _buildTopFade(),
 
-            // 3 ── Top bar
+            // 3 ── Top bar overlaid on map
             Positioned(
-              top: topPad + 8,
+              top: topPad + 10,
               left: 16,
               right: 16,
               child: _buildTopBar(),
@@ -295,11 +283,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             // 4 ── Recenter FAB
             Positioned(
               right: 16,
-              bottom: _sheetMinHeight(context) + 16,
+              bottom: MediaQuery.of(context).size.height * 0.44 + 16,
               child: _buildRecenterFab(),
             ),
 
-            // 5 ── Bottom sheet (the star)
+            // 5 ── Bottom sheet — the main content
             _buildBottomSheet(),
           ],
         ),
@@ -307,26 +295,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  double _sheetMinHeight(BuildContext context) =>
-      MediaQuery.of(context).size.height * 0.42;
-
   // ─────────────────────────────────────────────
-  // MAP
+  // MAP — stays dark for marker readability
   // ─────────────────────────────────────────────
 
+  // Premium light map style — keeps roads readable but lighter
   static const String _mapStyle = '''
 [
-  {"elementType":"geometry","stylers":[{"color":"#16213e"}]},
-  {"elementType":"labels.text.fill","stylers":[{"color":"#8ec3b9"}]},
-  {"elementType":"labels.text.stroke","stylers":[{"color":"#1a3646"}]},
-  {"featureType":"administrative.country","elementType":"geometry.stroke","stylers":[{"color":"#4b6878"}]},
-  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#304a7d"}]},
-  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2c6675"}]},
-  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#98a5be"}]},
-  {"featureType":"transit","elementType":"geometry","stylers":[{"color":"#1a3a4a"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0d1b2a"}]},
-  {"featureType":"poi","elementType":"labels","stylers":[{"visibility":"off"}]},
-  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#1a2e1a"}]}
+  {"elementType":"geometry","stylers":[{"color":"#f5f5f5"}]},
+  {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#f5f5f5"}]},
+  {"featureType":"administrative.land_parcel","elementType":"labels.text.fill","stylers":[{"color":"#bdbdbd"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#eeeeee"}]},
+  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d8f0e4"}]},
+  {"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
+  {"featureType":"road.arterial","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#e8f5e9"}]},
+  {"featureType":"road.highway","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},
+  {"featureType":"road.local","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},
+  {"featureType":"transit.line","elementType":"geometry","stylers":[{"color":"#e5e5e5"}]},
+  {"featureType":"transit.station","elementType":"geometry","stylers":[{"color":"#eeeeee"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#b3d9f2"}]},
+  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]}
 ]
 ''';
 
@@ -334,7 +327,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final target = _userLocation ?? _accra;
     return GoogleMap(
       style: _mapStyle,
-      initialCameraPosition: CameraPosition(target: target, zoom: 14.5),
+      initialCameraPosition:
+          CameraPosition(target: target, zoom: 14.5),
       onMapCreated: (c) async {
         _mapController = c;
         setState(() => _isMapReady = true);
@@ -344,33 +338,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ));
         }
       },
-      markers: _markers,
-      myLocationEnabled: true,
+      markers:               _markers,
+      myLocationEnabled:     true,
       myLocationButtonEnabled: false,
-      zoomControlsEnabled: false,
-      mapToolbarEnabled: false,
-      compassEnabled: false,
-      buildingsEnabled: true,
-      onCameraMove: (_) {},
+      zoomControlsEnabled:   false,
+      mapToolbarEnabled:     false,
+      compassEnabled:        false,
+      buildingsEnabled:      true,
     );
   }
 
   // ─────────────────────────────────────────────
-  // TOP FADE & TOP BAR
+  // TOP FADE — subtle gradient so top bar is readable
   // ─────────────────────────────────────────────
 
   Widget _buildTopFade() => Positioned(
-        top: 0,
-        left: 0,
-        right: 0,
+        top: 0, left: 0, right: 0,
         child: Container(
-          height: 160,
+          height: 180,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withValues(alpha: 0.72),
+                Colors.black.withValues(alpha: 0.55),
                 Colors.transparent,
               ],
             ),
@@ -378,10 +369,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
+  // ─────────────────────────────────────────────
+  // TOP BAR
+  // ─────────────────────────────────────────────
+
   Widget _buildTopBar() {
-    final user = ref.watch(currentUserProvider).value;
+    final user      = ref.watch(currentUserProvider).value;
     final firstName = user?.displayName?.split(' ').first ?? 'there';
-    final photoUrl = user?.photoURL;
+    final photoUrl  = user?.photoURL;
 
     return Row(
       children: [
@@ -390,16 +385,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: GestureDetector(
             onTap: _recenterMap,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 11),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
+                color: Colors.white.withValues(alpha: 0.92),
                 borderRadius: BorderRadius.circular(50),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4))
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  )
                 ],
               ),
               child: Row(
@@ -410,7 +406,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     child: Text(
                       _isLocating ? 'Locating...' : _locationLabel,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF0D1F14),
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.1,
@@ -419,8 +415,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const Icon(Icons.expand_more_rounded,
-                      color: Colors.white60, size: 18),
+                  Icon(Icons.expand_more_rounded,
+                      color: HomeTheme.textSecondary, size: 18),
                 ],
               ),
             ),
@@ -429,11 +425,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         const SizedBox(width: 10),
 
         // ── Notifications ──
-        _TopIconButton(
-          icon: Icons.notifications_outlined,
-          badge: true,
-          onTap: () => Navigator.pushNamed(context, AppRoutes.notifications),
-        ),
+        Consumer(
+  builder: (_, ref, __) {
+    final count = ref.watch(unreadNotifCountProvider).value ?? 0;
+    return _TopIconButton(
+      icon:       Icons.notifications_outlined,
+      badge:      count > 0,
+      badgeCount: count,
+      onTap: () =>
+          Navigator.pushNamed(context, AppRoutes.notifications),
+    );
+  },
+),
         const SizedBox(width: 10),
 
         // ── Avatar ──
@@ -444,12 +447,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             height: 42,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: HomeTheme.primary, width: 2),
+              border: Border.all(color: Colors.white, width: 2.5),
               boxShadow: [
                 BoxShadow(
-                    color: HomeTheme.primary.withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    spreadRadius: 1)
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 12,
+                )
               ],
             ),
             child: ClipOval(
@@ -458,8 +461,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       imageUrl: photoUrl,
                       fit: BoxFit.cover,
                       placeholder: (_, __) =>
-                          Container(color: HomeTheme.surfaceAlt),
-                      errorWidget: (_, __, ___) => _avatarFallback(firstName),
+                          Container(color: Colors.grey[200]),
+                      errorWidget: (_, __, ___) =>
+                          _avatarFallback(firstName),
                     )
                   : _avatarFallback(firstName),
             ),
@@ -470,14 +474,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _avatarFallback(String name) => Container(
-        color: HomeTheme.surface,
+        color: HomeTheme.primaryGradient.colors.first
+            .withValues(alpha: 0.15),
         alignment: Alignment.center,
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : 'U',
-          style: const TextStyle(
-              color: HomeTheme.primary,
-              fontWeight: FontWeight.bold,
-              fontSize: 17),
+          style: TextStyle(
+            color: HomeTheme.primary,
+            fontWeight: FontWeight.w800,
+            fontSize: 17,
+          ),
         ),
       );
 
@@ -493,48 +499,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           decoration: BoxDecoration(
             color: HomeTheme.surface,
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6))
-            ],
+            boxShadow: HomeTheme.cardShadow,
           ),
-          child: const Icon(Icons.my_location_rounded,
+          child: Icon(Icons.my_location_rounded,
               color: HomeTheme.primary, size: 22),
         ),
       );
 
   // ─────────────────────────────────────────────
-  // BOTTOM SHEET
+  // BOTTOM SHEET — main content on white card
   // ─────────────────────────────────────────────
 
   Widget _buildBottomSheet() {
-    final user = ref.watch(currentUserProvider).value;
+    final user      = ref.watch(currentUserProvider).value;
     final firstName = user?.displayName?.split(' ').first ?? 'there';
 
     return DraggableScrollableSheet(
-      controller: _sheetController,
+      controller:      _sheetController,
       initialChildSize: 0.44,
-      minChildSize: 0.16,
-      maxChildSize: 0.92,
-      snap: true,
-      snapSizes: const [0.16, 0.44, 0.92],
+      minChildSize:     0.16,
+      maxChildSize:     0.92,
+      snap:             true,
+      snapSizes:        const [0.16, 0.44, 0.92],
       builder: (ctx, sc) => Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: HomeTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: HomeTheme.sheetShadow,
         ),
         child: RefreshIndicator(
           onRefresh: _refreshData,
           color: HomeTheme.primary,
+          backgroundColor: HomeTheme.surface,
           child: CustomScrollView(
             controller: sc,
             physics: const AlwaysScrollableScrollPhysics(
                 parent: ClampingScrollPhysics()),
             slivers: [
               SliverToBoxAdapter(child: _buildDragHandle()),
-              SliverToBoxAdapter(child: _buildSheetHeader(firstName)),
+              SliverToBoxAdapter(
+                  child: _buildSheetHeader(firstName)),
               SliverToBoxAdapter(child: _buildServiceGrid()),
               SliverToBoxAdapter(child: _buildSearchBar()),
               SliverToBoxAdapter(child: _buildNearbyBadge()),
@@ -543,7 +548,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               SliverToBoxAdapter(child: _buildPromoBanner()),
               SliverToBoxAdapter(
                 child: SizedBox(
-                    height: MediaQuery.of(context).padding.bottom + 24),
+                    height:
+                        MediaQuery.of(context).padding.bottom + 32),
               ),
             ],
           ),
@@ -556,11 +562,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildDragHandle() => Center(
         child: Container(
-          width: 38,
+          width: 36,
           height: 4,
-          margin: const EdgeInsets.only(top: 12, bottom: 6),
+          margin: const EdgeInsets.only(top: 14, bottom: 6),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
+            color: HomeTheme.border,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -579,8 +585,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Text(
                   _greeting,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
-                    fontSize: 12,
+                    color: HomeTheme.textSecondary,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -588,40 +594,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Text(
                   firstName,
                   style: const TextStyle(
+                    fontFamily: 'Inter',
                     color: HomeTheme.textPrimary,
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
+                    letterSpacing: -0.5,
                   ),
                 ),
               ],
             ),
-            // Wallet / balance chip
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: HomeTheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(
-                    color: HomeTheme.primary.withValues(alpha: 0.25), width: 1),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.account_balance_wallet_rounded,
-                      color: HomeTheme.primary, size: 16),
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: widget.onWalletTap,
-                    child: const Text(
+
+            // ── Wallet chip ──
+            GestureDetector(
+              onTap: widget.onWalletTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: HomeTheme.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(
+                    color: HomeTheme.primary.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet_rounded,
+                        color: HomeTheme.primary, size: 16),
+                    const SizedBox(width: 7),
+                    Text(
                       'Wallet',
                       style: TextStyle(
+                        fontFamily: 'Inter',
                         color: HomeTheme.primary,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -630,177 +641,169 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   // ── Service grid ───────────────────────────────
 
-  Widget _buildServiceGrid() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-      child: Row(
-        children: ServiceType.values.map((svc) {
-          final selected = svc == _selectedService;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => _selectService(svc),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeOutCubic,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? HomeTheme.primary.withValues(alpha: 0.15)
-                      : HomeTheme.surfaceAlt,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
+  Widget _buildServiceGrid() => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: Row(
+          children: ServiceType.values.map((svc) {
+            final selected = svc == _selectedService;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => _selectService(svc),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
                     color: selected
-                        ? HomeTheme.primary.withValues(alpha: 0.6)
-                        : Colors.white.withValues(alpha: 0.06),
-                    width: selected ? 1.5 : 1,
+                        ? HomeTheme.primary.withValues(alpha: 0.08)
+                        : HomeTheme.surfaceAlt,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: selected
+                          ? HomeTheme.primary.withValues(alpha: 0.5)
+                          : HomeTheme.border,
+                      width: selected ? 1.5 : 1,
+                    ),
+                    boxShadow: selected ? HomeTheme.primaryGlow : null,
                   ),
-                  boxShadow: selected
-                      ? [
-                          BoxShadow(
-                            color: HomeTheme.primary.withValues(alpha: 0.25),
-                            blurRadius: 14,
-                            offset: const Offset(0, 4),
-                          )
-                        ]
-                      : null,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 280),
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        gradient: selected ? HomeTheme.primaryGradient : null,
-                        color: selected ? null : HomeTheme.background,
-                        shape: BoxShape.circle,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: selected
+                              ? HomeTheme.primaryGradient
+                              : null,
+                          color: selected
+                              ? null
+                              : HomeTheme.border
+                                  .withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          svc.icon,
+                          color: selected
+                              ? Colors.white
+                              : HomeTheme.textSecondary,
+                          size: 20,
+                        ),
                       ),
-                      child: Icon(
-                        svc.icon,
-                        color: selected
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.6),
-                        size: 20,
+                      const SizedBox(height: 8),
+                      Text(
+                        svc.displayName,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: selected
+                              ? HomeTheme.primary
+                              : HomeTheme.textSecondary,
+                          fontSize: 11,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      svc.displayName,
-                      style: TextStyle(
-                        color: selected
-                            ? HomeTheme.primary
-                            : Colors.white.withValues(alpha: 0.55),
-                        fontSize: 11,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
+            );
+          }).toList(),
+        ),
+      );
 
   // ── Search bar ─────────────────────────────────
 
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: GestureDetector(
-        onTap: _goToSearch,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          decoration: BoxDecoration(
-            color: HomeTheme.background,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: HomeTheme.primary.withValues(alpha: 0.25),
-              width: 1.5,
+  Widget _buildSearchBar() => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: GestureDetector(
+          onTap: _goToSearch,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: HomeTheme.surfaceAlt,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: HomeTheme.border),
+              boxShadow: HomeTheme.cardShadow,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: HomeTheme.primary.withValues(alpha: 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: HomeTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    gradient: HomeTheme.primaryGradient,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(Icons.search_rounded,
+                      color: Colors.white, size: 22),
                 ),
-                child: const Icon(Icons.search_rounded,
-                    color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _selectedService.searchHint,
-                      style: const TextStyle(
-                        color: HomeTheme.textPrimary,
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedService.searchHint,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          color: HomeTheme.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Enter your destination',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.35),
-                        fontSize: 11.5,
+                      const SizedBox(height: 2),
+                      Text(
+                        'Tap to enter destination',
+                        style: TextStyle(
+                          color: HomeTheme.textTertiary,
+                          fontSize: 11.5,
+                        ),
                       ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: HomeTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color:
+                          HomeTheme.primary.withValues(alpha: 0.2),
                     ),
-                  ],
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: HomeTheme.surfaceAlt,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(_selectedService.icon,
-                        color: HomeTheme.primary, size: 14),
-                    const SizedBox(width: 4),
-                    Text(
-                      _selectedService.displayName,
-                      style: const TextStyle(
-                        color: HomeTheme.primary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_selectedService.icon,
+                          color: HomeTheme.primary, size: 13),
+                      const SizedBox(width: 4),
+                      Text(
+                        _selectedService.displayName,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          color: HomeTheme.primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
-  }
+      );
 
-  // ── Nearby drivers badge ───────────────────────
+  // ── Nearby badge ───────────────────────────────
 
   Widget _buildNearbyBadge() {
     final async = ref.watch(nearbyDriversProvider(_selectedService));
@@ -816,21 +819,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Text(
                 '$n ${_selectedService.displayName}${n == 1 ? '' : 's'} available near you',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.55),
+                  color: HomeTheme.textSecondary,
                   fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(width: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.15),
+                  color: HomeTheme.success.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color:
+                        HomeTheme.success.withValues(alpha: 0.25),
+                  ),
                 ),
                 child: Text(
                   'LIVE',
                   style: TextStyle(
-                    color: Colors.green[400],
+                    color: HomeTheme.success,
                     fontSize: 9,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
@@ -842,7 +851,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         );
       },
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error:   (_, __) => const SizedBox.shrink(),
     );
   }
 
@@ -850,7 +859,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildSavedPlaces() {
     final placesAsync = ref.watch(savedPlacesProvider);
-    final defaults = [
+    final defaults    = [
       _SavedPlace(
           id: 'home',
           label: 'Home',
@@ -867,20 +876,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Quick destinations',
+              Text('Quick destinations',
                   style: TextStyle(
+                    fontFamily: 'Inter',
                     color: HomeTheme.textPrimary,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     letterSpacing: -0.2,
                   )),
               GestureDetector(
-                onTap: () =>
-                    Navigator.pushNamed(context, AppRoutes.savedPlaces),
+                onTap: () => Navigator.pushNamed(
+                    context, AppRoutes.savedPlaces),
                 child: Text('Edit',
                     style: TextStyle(
                       color: HomeTheme.primary,
@@ -896,7 +906,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: placesAsync.when(
             data: (places) {
               final all = [
-                ...defaults.where((d) => !places.any((p) => p.id == d.id)),
+                ...defaults.where(
+                    (d) => !places.any((p) => p.id == d.id)),
                 ...places,
                 _SavedPlace(
                     id: 'add',
@@ -907,14 +918,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               return _placesList(all);
             },
             loading: () => _placesList(defaults),
-            error: (_, __) => const SizedBox.shrink(),
+            error:   (_, __) => const SizedBox.shrink(),
           ),
         ),
       ],
     );
   }
 
-  Widget _placesList(List<_SavedPlace> places) => ListView.separated(
+  Widget _placesList(List<_SavedPlace> places) =>
+      ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: places.length,
@@ -931,8 +943,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     Navigator.pushNamed(context, _selectedService.route, arguments: {
-      'service': _selectedService,
-      'destinationLabel': place.label,
+      'service':            _selectedService,
+      'destinationLabel':   place.label,
       'destinationAddress': place.address,
     });
   }
@@ -960,20 +972,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+              padding:
+                  const EdgeInsets.fromLTRB(20, 24, 20, 12),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment:
+                    MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Recent trips',
+                  Text('Recent trips',
                       style: TextStyle(
+                        fontFamily: 'Inter',
                         color: HomeTheme.textPrimary,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.2,
                       )),
                   GestureDetector(
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.tripHistory),
+                    onTap: () => Navigator.pushNamed(
+                        context, AppRoutes.tripHistory),
                     child: Text('See all',
                         style: TextStyle(
                           color: HomeTheme.primary,
@@ -985,20 +1000,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             ...docs.map((doc) {
-              final d = doc.data() as Map<String, dynamic>;
+              final d  = doc.data() as Map<String, dynamic>;
               final ts = d['createdAt'] as Timestamp?;
-              final date =
-                  ts != null ? DateFormat('MMM d').format(ts.toDate()) : '';
+              final date = ts != null
+                  ? DateFormat('MMM d').format(ts.toDate())
+                  : '';
               return _RecentTripTile(
-                from: d['pickupAddress'] as String? ?? '—',
-                to: d['dropoffAddress'] as String? ?? '—',
+                from: d['pickupAddress']  as String? ?? '—',
+                to:   d['dropoffAddress'] as String? ?? '—',
                 fare: (d['actualFare'] as num?)?.toDouble() ?? 0,
                 date: date,
                 onRebook: () => Navigator.pushNamed(
                   context,
                   _selectedService.route,
                   arguments: {
-                    'pickupAddress': d['pickupAddress'],
+                    'pickupAddress':  d['pickupAddress'],
                     'dropoffAddress': d['dropoffAddress'],
                   },
                 ),
@@ -1013,11 +1029,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _buildEmptyState() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
         child: Container(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: HomeTheme.surfaceAlt,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+            border: Border.all(color: HomeTheme.border),
           ),
           child: Row(
             children: [
@@ -1025,11 +1041,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: HomeTheme.background,
+                  color: HomeTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(Icons.route_rounded,
-                    color: Colors.white.withValues(alpha: 0.3), size: 24),
+                    color: HomeTheme.primary.withValues(alpha: 0.5),
+                    size: 24),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -1038,16 +1055,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Text('No trips yet',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
+                          fontFamily: 'Inter',
+                          color: HomeTheme.textPrimary,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         )),
                     const SizedBox(height: 3),
-                    Text('Your completed trips will appear here',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 12,
-                        )),
+                    Text(
+                      'Your completed trips will appear here',
+                      style: TextStyle(
+                        color: HomeTheme.textTertiary,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1061,20 +1081,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _buildPromoBanner() {
     final promoAsync = ref.watch(promoBannerProvider);
     return promoAsync.when(
-      data: (promo) =>
-          promo == null ? _buildDefaultPromo() : _PromoCard(promo: promo),
+      data:    (p) => p == null
+          ? _buildDefaultPromo()
+          : _PromoCard(promo: p),
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => _buildDefaultPromo(),
+      error:   (_, __) => _buildDefaultPromo(),
     );
   }
 
   Widget _buildDefaultPromo() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         child: Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
             gradient: HomeTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(24),
             boxShadow: HomeTheme.primaryGlow,
           ),
           child: Row(
@@ -1087,43 +1108,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: Colors.white.withValues(alpha: 0.25),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text('FIRST RIDE',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.5,
-                          )),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('50% off\nyour first ride',
+                      child: const Text(
+                        'FIRST RIDE',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 9,
                           fontWeight: FontWeight.w800,
-                          height: 1.15,
-                          letterSpacing: -0.4,
-                        )),
-                    const SizedBox(height: 12),
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      '50% off\nyour first ride',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     GestureDetector(
-                      onTap: () =>
-                          Navigator.pushNamed(context, AppRoutes.promotions),
+                      onTap: () => Navigator.pushNamed(
+                          context, AppRoutes.promotions),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
+                            horizontal: 16, vertical: 9),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text('Use code CTS50',
-                            style: TextStyle(
-                              color: HomeTheme.primary,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                            )),
+                        child: Text(
+                          'Use code CTS50',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            color: HomeTheme.primary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -1131,7 +1160,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               const SizedBox(width: 8),
               Icon(Icons.local_offer_rounded,
-                  color: Colors.white.withValues(alpha: 0.2), size: 80),
+                  color: Colors.white.withValues(alpha: 0.15),
+                  size: 90),
             ],
           ),
         ),
@@ -1142,9 +1172,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // SUPPORTING WIDGETS
 // ═══════════════════════════════════════════════
 
-/// Pulsing green dot (used for location + live badge).
 class _PulsingDot extends StatefulWidget {
-  final Color color;
+  final Color  color;
   final double size;
   const _PulsingDot({required this.color, this.size = 8});
 
@@ -1154,71 +1183,93 @@ class _PulsingDot extends StatefulWidget {
 
 class _PulsingDotState extends State<_PulsingDot>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(seconds: 1))
-        ..repeat(reverse: true);
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 1),
+  )..repeat(reverse: true);
+
   late final Animation<double> _a =
       Tween<double>(begin: 0.4, end: 1.0).animate(_c);
 
   @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
+  void dispose() { _c.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => FadeTransition(
         opacity: _a,
         child: Container(
-          width: widget.size,
+          width:  widget.size,
           height: widget.size,
           decoration: BoxDecoration(
             color: widget.color,
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                  color: widget.color.withValues(alpha: 0.6), blurRadius: 6)
+                color: widget.color.withValues(alpha: 0.5),
+                blurRadius: 6,
+              )
             ],
           ),
         ),
       );
 }
 
-/// Icon button used in the top bar.
 class _TopIconButton extends StatelessWidget {
-  final IconData icon;
-  final bool badge;
+  final IconData     icon;
+  final bool         badge;
+  final int          badgeCount; // ← ADD
   final VoidCallback onTap;
 
-  const _TopIconButton(
-      {required this.icon, this.badge = false, required this.onTap});
+  const _TopIconButton({
+    required this.icon,
+    this.badge      = false,
+    this.badgeCount = 0,     // ← ADD
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 42,
-          height: 42,
+          width: 42, height: 42,
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.55),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            color:  Colors.white.withValues(alpha: 0.92),
+            shape:  BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color:  Colors.black.withValues(alpha: 0.12),
+                blurRadius: 12,
+                offset: const Offset(0, 3),
+              )
+            ],
           ),
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Icon(icon, color: Colors.white, size: 22),
+              Icon(icon, color: const Color(0xFF0D1F14), size: 22),
               if (badge)
                 Positioned(
-                  right: 9,
-                  top: 9,
+                  right: 8, top: 8,
                   child: Container(
-                    width: 8,
-                    height: 8,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 3, vertical: 1),
                     decoration: BoxDecoration(
-                      color: HomeTheme.danger,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black, width: 1.5),
+                      color:        AppColors.error,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: Colors.white, width: 1.5),
+                    ),
+                    constraints: const BoxConstraints(
+                        minWidth: 14, minHeight: 14),
+                    child: Text(
+                      badgeCount > 9 ? '9+' : '$badgeCount',
+                      style: const TextStyle(
+                        color:      Colors.white,
+                        fontSize:   8,
+                        fontWeight: FontWeight.w700,
+                        height:     1,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),
@@ -1228,9 +1279,8 @@ class _TopIconButton extends StatelessWidget {
       );
 }
 
-/// Quick destination chip.
 class _PlaceChip extends StatelessWidget {
-  final _SavedPlace place;
+  final _SavedPlace  place;
   final VoidCallback onTap;
   const _PlaceChip({required this.place, required this.onTap});
 
@@ -1239,29 +1289,32 @@ class _PlaceChip extends StatelessWidget {
         onTap: onTap,
         child: Container(
           width: 100,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: HomeTheme.surfaceAlt,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+            border: Border.all(color: HomeTheme.border),
+            boxShadow: HomeTheme.cardShadow,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 30,
-                height: 30,
+                width: 30, height: 30,
                 decoration: BoxDecoration(
-                  color: HomeTheme.background,
+                  color: HomeTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(place.icon, color: HomeTheme.primary, size: 16),
+                child: Icon(place.icon,
+                    color: HomeTheme.primary, size: 16),
               ),
               const SizedBox(height: 7),
               Text(
                 place.label,
                 style: const TextStyle(
+                  fontFamily: 'Inter',
                   color: HomeTheme.textPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -1275,12 +1328,9 @@ class _PlaceChip extends StatelessWidget {
       );
 }
 
-/// Recent trip list tile.
 class _RecentTripTile extends StatelessWidget {
-  final String from;
-  final String to;
-  final double fare;
-  final String date;
+  final String       from, to, date;
+  final double       fare;
   final VoidCallback onRebook;
 
   const _RecentTripTile({
@@ -1296,28 +1346,30 @@ class _RecentTripTile extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: HomeTheme.surfaceAlt,
+          color: HomeTheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          border: Border.all(color: HomeTheme.border),
+          boxShadow: HomeTheme.cardShadow,
         ),
         child: Row(
           children: [
-            // Route dots
             Column(
               children: [
                 Container(
-                  width: 9,
-                  height: 9,
+                  width: 9, height: 9,
                   decoration: BoxDecoration(
-                    border: Border.all(color: HomeTheme.primary, width: 2),
+                    border: Border.all(
+                        color: HomeTheme.primary, width: 2),
                     shape: BoxShape.circle,
                   ),
                 ),
-                Container(width: 1.5, height: 22, color: HomeTheme.border),
                 Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
+                    width: 1.5,
+                    height: 22,
+                    color: HomeTheme.border),
+                Container(
+                  width: 9, height: 9,
+                  decoration: BoxDecoration(
                     color: HomeTheme.primary,
                     shape: BoxShape.circle,
                   ),
@@ -1325,13 +1377,13 @@ class _RecentTripTile extends StatelessWidget {
               ],
             ),
             const SizedBox(width: 12),
-            // Addresses
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(from,
                       style: const TextStyle(
+                        fontFamily: 'Inter',
                         color: HomeTheme.textPrimary,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -1344,33 +1396,31 @@ class _RecentTripTile extends StatelessWidget {
                       Expanded(
                         child: Text(to,
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.45),
+                              color: HomeTheme.textTertiary,
                               fontSize: 12,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        date,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          fontSize: 11,
-                        ),
-                      ),
+                      Text(date,
+                          style: TextStyle(
+                            color: HomeTheme.textTertiary,
+                            fontSize: 11,
+                          )),
                     ],
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 10),
-            // Fare + rebook
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
                   fare > 0 ? '₵${fare.toStringAsFixed(2)}' : '',
                   style: const TextStyle(
+                    fontFamily: 'Inter',
                     color: HomeTheme.textPrimary,
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -1380,17 +1430,21 @@ class _RecentTripTile extends StatelessWidget {
                 GestureDetector(
                   onTap: onRebook,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: HomeTheme.primary.withValues(alpha: 0.15),
+                      color: HomeTheme.primary
+                          .withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                          color: HomeTheme.primary.withValues(alpha: 0.3)),
+                        color: HomeTheme.primary
+                            .withValues(alpha: 0.2),
+                      ),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Rebook',
                       style: TextStyle(
+                        fontFamily: 'Inter',
                         color: HomeTheme.primary,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1405,7 +1459,6 @@ class _RecentTripTile extends StatelessWidget {
       );
 }
 
-/// Dynamic promo card from Firestore.
 class _PromoCard extends StatelessWidget {
   final _PromoBanner promo;
   const _PromoCard({required this.promo});
@@ -1414,17 +1467,19 @@ class _PromoCard extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         child: Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Color(int.parse(promo.colorStart.replaceFirst('#', '0xFF'))),
-                Color(int.parse(promo.colorEnd.replaceFirst('#', '0xFF'))),
+                Color(int.parse(
+                    promo.colorStart.replaceFirst('#', '0xFF'))),
+                Color(int.parse(
+                    promo.colorEnd.replaceFirst('#', '0xFF'))),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(24),
           ),
           child: Row(
             children: [
@@ -1442,35 +1497,40 @@ class _PromoCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(promo.title,
                         style: const TextStyle(
+                          fontFamily: 'Inter',
                           color: Colors.white,
-                          fontSize: 19,
+                          fontSize: 20,
                           fontWeight: FontWeight.w800,
                           height: 1.2,
-                          letterSpacing: -0.3,
+                          letterSpacing: -0.4,
                         )),
                     if (promo.code != null) ...[
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
+                            horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text('Code: ${promo.code}',
-                            style: TextStyle(
-                              color: Color(int.parse(
-                                  promo.colorStart.replaceFirst('#', '0xFF'))),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            )),
+                        child: Text(
+                          'Code: ${promo.code}',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            color: Color(int.parse(promo.colorStart
+                                .replaceFirst('#', '0xFF'))),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ],
                   ],
                 ),
               ),
               Icon(Icons.local_offer_rounded,
-                  color: Colors.white.withValues(alpha: 0.2), size: 72),
+                  color: Colors.white.withValues(alpha: 0.15),
+                  size: 80),
             ],
           ),
         ),
@@ -1478,13 +1538,13 @@ class _PromoCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────
-// DATA MODELS (private, same file)
+// DATA MODELS
 // ─────────────────────────────────────────────────
 
 class _SavedPlace {
-  final String id;
-  final String label;
-  final String address;
+  final String   id;
+  final String   label;
+  final String   address;
   final IconData icon;
 
   const _SavedPlace({
@@ -1497,19 +1557,19 @@ class _SavedPlace {
   factory _SavedPlace.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return _SavedPlace(
-      id: doc.id,
-      label: d['label'] as String? ?? 'Place',
+      id:      doc.id,
+      label:   d['label']   as String? ?? 'Place',
       address: d['address'] as String? ?? '',
     );
   }
 }
 
 class _PromoBanner {
-  final String title;
-  final String tag;
+  final String  title;
+  final String  tag;
   final String? code;
-  final String colorStart;
-  final String colorEnd;
+  final String  colorStart;
+  final String  colorEnd;
 
   const _PromoBanner({
     required this.title,
@@ -1522,11 +1582,11 @@ class _PromoBanner {
   factory _PromoBanner.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return _PromoBanner(
-      title: d['title'] as String? ?? '',
-      tag: d['tag'] as String? ?? 'OFFER',
-      code: d['code'] as String?,
-      colorStart: d['colorStart'] as String? ?? '#00C566',
-      colorEnd: d['colorEnd'] as String? ?? '#00A855',
+      title:      d['title']      as String? ?? '',
+      tag:        d['tag']        as String? ?? 'OFFER',
+      code:       d['code']       as String?,
+      colorStart: d['colorStart'] as String? ?? '#00A86B',
+      colorEnd:   d['colorEnd']   as String? ?? '#00C97E',
     );
   }
 }
