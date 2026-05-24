@@ -144,13 +144,14 @@ class TripRequestManager extends _$TripRequestManager {
     ServiceType serviceType,
   ) async {
     await _db.collection(_Col.driverAlerts).doc(tripId).set({
-      'tripId':         tripId,
-      'pickupLocation': pickup,
-      'serviceType':    serviceType.name,
-      'timestamp':      FieldValue.serverTimestamp(),
-      'expiresAt':      Timestamp.fromDate(
-                          DateTime.now().add(const Duration(seconds: 45))),
-      'status':         'broadcasting',
+      'tripId':      tripId,
+      'pickupLat':   pickup.latitude,
+      'pickupLng':   pickup.longitude,
+      'serviceType': serviceType.name,
+      'timestamp':   FieldValue.serverTimestamp(),
+      'expiresAt':   Timestamp.fromDate(
+                       DateTime.now().add(const Duration(seconds: 120))),
+      'status':      'broadcasting',
     });
   }
 

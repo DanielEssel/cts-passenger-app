@@ -17,6 +17,7 @@ import '../widgets/ride_options_list.dart';
 import '../widgets/confirm_ride_bar.dart';
 import '../widgets/empty_destination_state.dart';
 import 'driver_matching_screen.dart';
+import 'destination_search_screen.dart';
 import '../widgets/payment_method_sheet.dart';
 
 class BookRideScreen extends ConsumerStatefulWidget {
@@ -187,8 +188,16 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   // ---------------------------------------------------------------------------
 
   Future<void> _openDestinationSearch() async {
-    final result =
-        await Navigator.pushNamed(context, AppRoutes.destinationSearch);
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute<Map<String, dynamic>>(
+        builder: (_) => DestinationSearchScreen(
+          origin: ref.read(rideRequestProvider).origin ?? 'Current Location',
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+    debugPrint('🎯 Destination result: $result');
     if (!mounted || result is! Map<String, dynamic>) return;
 
     ref.read(rideRequestProvider.notifier).setDestination(
@@ -205,13 +214,21 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
       return;
     }
 
+    if (state.selectedRide == null) {
+      _showErrorSnack('Please select a ride option');
+      return;
+    }
+
     HapticFeedback.heavyImpact();
+
     ref.read(rideRequestProvider.notifier).setLoading(true);
 
     try {
+      final selectedRide = state.selectedRide!;
+
       final tripId =
           await ref.read(tripRequestCreatorProvider.notifier).createTripRequest(
-                serviceType: state.selectedRide!.serviceType,
+                serviceType: selectedRide.serviceType,
                 pickupAddress: state.origin ?? RideConstants.defaultOrigin,
                 dropoffAddress: state.destination!,
                 pickupLocation: state.pickupLocation!,
@@ -230,19 +247,26 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
         context,
         MaterialPageRoute(
           builder: (_) => DriverMatchingScreen(
-            rideType: state.selectedRide!.serviceType.displayName,
+            rideType: selectedRide.serviceType.displayName,
             destination: state.destination!,
             fare: 'GHS ${state.calculatedFare.toStringAsFixed(0)}',
             tripId: tripId,
           ),
         ),
       );
+    } catch (e, stack) {
+      debugPrint('Trip creation failed: $e');
+      debugPrint(stack.toString());
 
-      ref.read(rideRequestProvider.notifier).reset();
-    } catch (e) {
-      if (mounted) _showErrorSnack(RideConstants.errorCreateTrip);
+      if (mounted) {
+        _showErrorSnack(
+          RideConstants.errorCreateTrip,
+        );
+      }
     } finally {
-      if (mounted) ref.read(rideRequestProvider.notifier).setLoading(false);
+      if (mounted) {
+        ref.read(rideRequestProvider.notifier).setLoading(false);
+      }
     }
   }
 

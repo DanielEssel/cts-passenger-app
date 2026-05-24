@@ -341,3 +341,156 @@ exports.requestWithdrawal = onCall(async (request) => {
 
   return { success: true, message: "Withdrawal request submitted" };
 });
+
+// ── approveDriver ─────────────────────────────────────────────────────────────
+exports.approveDriver = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Login required');
+  }
+
+  // Check admin collection — no hardcoded UIDs
+  const adminDoc = await admin.firestore()
+    .collection('admins')
+    .doc(request.auth.uid)
+    .get();
+
+  if (!adminDoc.exists) {
+    throw new HttpsError('permission-denied', 'Admin access required');
+  }
+
+  const { driverUid, action, rejectionReasons } = request.data;
+  // action: 'approve' | 'reject'
+
+  if (!driverUid || !action) {
+    throw new HttpsError('invalid-argument', 'driverUid and action required');
+  }
+
+  const driverRef = admin.firestore().collection('drivers').doc(driverUid);
+  const driverDoc = await driverRef.get();
+
+  if (!driverDoc.exists) {
+    throw new HttpsError('not-found', 'Driver not found');
+  }
+
+  if (action === 'approve') {
+    await driverRef.update({
+      isApproved:        true,
+      isRejected:        false,
+      documentsRejected: false,
+      approvedAt:        admin.firestore.FieldValue.serverTimestamp(),
+      approvedBy:        request.auth.uid,
+      signupStep:        'approved',
+    });
+
+    // Notify driver
+    const fcmToken = driverDoc.data()?.fcmToken;
+    if (fcmToken) {
+      await admin.messaging().send({
+        token: fcmToken,
+        notification: {
+          title: '🎉 Account Approved!',
+          body:  'Your CTS Transport driver account is verified. Start driving now!',
+        },
+        data: {
+          type:  'account_approved',
+          route: '/driver-shell',
+        },
+      });
+    }
+
+    // Write notification to Firestore
+    await admin.firestore()
+      .collection('drivers')
+      .doc(driverUid)
+      .collection('notifications')
+      .add({
+        type:      'account_approved',
+        title:     'Account Approved! 🎉',
+        body:      'Your account has been verified. You can now start accepting rides.',
+        isRead:    false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+  } else if (action === 'reject') {
+    // rejectionReasons: { drivers_license: 'Expired', insurance: 'Unclear photo' }
+    const documents = driverDoc.data()?.documents ?? {};
+
+    // Mark each rejected doc
+    const updates = {};
+    if (rejectionReasons) {
+      for (const [docKey, reason] of Object.entries(rejectionReasons)) {
+        updates[`documents.${docKey}.status`]          = 'rejected';
+        updates[`documents.${docKey}.rejectionReason`] = reason;
+      }
+    }
+
+    await driverRef.update({
+      ...updates,
+      isApproved:        false,
+      documentsRejected: true,
+      rejectedAt:        admin.firestore.FieldValue.serverTimestamp(),
+      rejectedBy:        request.auth.uid,
+    });
+
+    // Notify driver
+    const fcmToken = driverDoc.data()?.fcmToken;
+    if (fcmToken) {
+      await admin.messaging().send({
+        token: fcmToken,
+        notification: {
+          title: 'Documents Need Attention',
+          body:  'Some of your documents were rejected. Please re-upload and resubmit.',
+        },
+        data: {
+          type:  'documents_rejected',
+          route: '/driver/documents',
+        },
+      });
+    }
+
+    await admin.firestore()
+      .collection('drivers')
+      .doc(driverUid)
+      .collection('notifications')
+      .add({
+        type:      'documents_rejected',
+        title:     'Documents Rejected',
+        body:      'Some documents need to be re-uploaded. Tap to view details.',
+        isRead:    false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+  }
+
+  return { success: true, action };
+});
+
+// ── rejectDriver (convenience wrapper) ───────────────────────────────────────
+exports.getPendingDrivers = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Login required');
+  }
+
+  const adminDoc = await admin.firestore()
+    .collection('admins')
+    .doc(request.auth.uid)
+    .get();
+
+  if (!adminDoc.exists) {
+    throw new HttpsError('permission-denied', 'Admin access required');
+  }
+
+  const snap = await admin.firestore()
+    .collection('drivers')
+    .where('documentsUploaded', '==', true)
+    .where('isApproved',        '==', false)
+    .where('documentsRejected', '==', false)
+    .orderBy('submittedForReviewAt', 'desc')
+    .get();
+
+  return {
+    drivers: snap.docs.map(doc => ({
+      uid:  doc.id,
+      ...doc.data(),
+    })),
+  };
+});

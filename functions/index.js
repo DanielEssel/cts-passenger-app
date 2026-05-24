@@ -1,78 +1,229 @@
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const admin = require("firebase-admin");
+const { onSchedule }        = require("firebase-functions/v2/scheduler");
+const admin                 = require("firebase-admin");
 
 admin.initializeApp();
 
+// ── onDriverAlertCreated ──────────────────────────────────────────────────────
+
 exports.onDriverAlertCreated = onDocumentCreated(
+  { region: "europe-west2" },
   "driver_alerts/{tripId}",
   async (event) => {
+    // v2 Firestore trigger: event.data is the DocumentSnapshot
     const snap = event.data;
     if (!snap) return;
 
     const alert = snap.data();
-    const { tripId, pickupLocation, serviceType } = alert;
+    if (!alert) return;
 
-    const db = admin.firestore();
+    const tripId     = event.params.tripId;
+    const serviceType = alert.serviceType;
+    const db          = admin.firestore();
 
-    // Query available drivers
+    // Use plain numbers — avoids GeoPoint protobuf deserialization bug
+    const pickupLocation = {
+      latitude:  alert.pickupLat ?? 0,
+      longitude: alert.pickupLng ?? 0,
+    };
+
+    // ── 1. Verify trip still exists and is searching ──────────────────────
+    const tripRef  = db.collection("trips").doc(tripId);
+    const tripSnap = await tripRef.get();
+
+    if (!tripSnap.exists || tripSnap.data().status !== "searching") {
+      console.log(`Trip ${tripId} no longer searching — aborting`);
+      return;
+    }
+
+    // ── 2. Query available drivers by serviceType (string field) ──────────
+    //    FIX: was "serviceTypes" (array) — driver doc has "serviceType" string
     const driversSnap = await db
       .collection("drivers")
       .where("isAvailable", "==", true)
-      .where("isOnline", "==", true)
-      .where("serviceTypes", "array-contains", serviceType)
+      .where("isOnline",    "==", true)
+      .where("isApproved",  "==", true)
+      .where("serviceType", "==", serviceType) // ← FIXED: string not array
       .get();
 
     if (driversSnap.empty) {
-      await db.collection("trips").doc(tripId).update({
-        status: "noDriversAvailable",
-      });
+      await tripRef.update({ status: "noDriversAvailable" });
+      await snap.ref.update({ status: "noDriversFound" });
       return;
     }
 
-    // Filter by distance (5km)
+    // ── 3. Filter by 5km radius ───────────────────────────────────────────
     const nearby = driversSnap.docs.filter((doc) => {
-      const driverLoc = doc.data().location;
-      const dist = haversineKm(
-        pickupLocation.latitude,
-        pickupLocation.longitude,
-        driverLoc.latitude,
-        driverLoc.longitude
-      );
-      return dist <= 5.0;
+      const loc = doc.data().location;
+      if (!loc) return false;
+      return haversineKm(
+        pickupLocation.latitude,  pickupLocation.longitude,
+        loc.latitude,             loc.longitude
+      ) <= 5.0;
     });
 
     if (nearby.length === 0) {
-      await db.collection("trips").doc(tripId).update({
-        status: "noDriversAvailable",
-      });
+      await tripRef.update({ status: "noDriversAvailable" });
+      await snap.ref.update({ status: "noDriversFound" });
       return;
     }
 
-    // Send FCM
+    // ── 4. Send FCM to all nearby drivers ─────────────────────────────────
     const tokens = nearby.map((d) => d.data().fcmToken).filter(Boolean);
 
-    await admin.messaging().sendEachForMulticast({
-      tokens,
-      data: { tripId, type: "NEW_TRIP_REQUEST" },
-      notification: {
-        title: "New ride request",
-        body: `Pickup: ${alert.pickupAddress ?? "Nearby location"}`,
-      },
-    });
+    if (tokens.length > 0) {
+      await admin.messaging().sendEachForMulticast({
+        tokens,
+        data: {
+          tripId,
+          type:           "NEW_TRIP_REQUEST",
+          serviceType,
+          pickupLat:      String(pickupLocation.latitude),
+          pickupLng:      String(pickupLocation.longitude),
+          pickupAddress:  alert.pickupAddress ?? "",
+        },
+        notification: {
+          title: "🚗 New ride request",
+          body:  `Pickup: ${alert.pickupAddress ?? "Nearby location"}`,
+        },
+        android: { priority: "high" },
+      });
+    }
 
     await snap.ref.update({
-      status: "sent",
+      status:      "sent",
       driverCount: nearby.length,
+      sentAt:      admin.firestore.FieldValue.serverTimestamp(),
     });
   }
 );
 
-// Haversine distance
+// ── acceptTrip — transaction-safe driver acceptance ───────────────────────────
+
+exports.acceptTrip = require("firebase-functions/v2/https").onCall(
+  { region: "europe-west2" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new Error("Unauthenticated");
+
+    const { tripId } = request.data;
+    if (!tripId) throw new Error("tripId required");
+
+    const db      = admin.firestore();
+    const tripRef = db.collection("trips").doc(tripId);
+
+    // ── Transaction: only first driver wins ──────────────────────────────
+    const result = await db.runTransaction(async (txn) => {
+      const tripSnap = await txn.get(tripRef);
+
+      if (!tripSnap.exists) {
+        return { success: false, reason: "trip_not_found" };
+      }
+
+      const data   = tripSnap.data();
+      const status = data.status;
+
+      // Reject if already accepted or not searching
+      if (status !== "searching") {
+        return { success: false, reason: "already_accepted" };
+      }
+
+      // Check expiry
+      const expiresAt = data.expiresAt?.toDate();
+      if (expiresAt && new Date() > expiresAt) {
+        txn.update(tripRef, { status: "expired" });
+        return { success: false, reason: "expired" };
+      }
+
+      // Get driver info
+      const driverSnap = await txn.get(db.collection("drivers").doc(uid));
+      if (!driverSnap.exists) {
+        return { success: false, reason: "driver_not_found" };
+      }
+
+      const driver = driverSnap.data();
+
+      // Accept — write atomically
+      txn.update(tripRef, {
+        status:        "tripAccepted",  // ← matches driver app status
+        driverId:      uid,
+        driverName:    driver.displayName ?? driver.name ?? "Driver",
+        driverPhone:   driver.phoneNumber ?? "",
+        driverRating:  driver.rating      ?? 5.0,
+        driverPlate:   driver.vehiclePlate ?? "",
+        driverPhoto:   driver.photoUrl    ?? "",
+        vehicleModel:  driver.vehicleModel ?? "",
+        acceptedAt:    admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Mark driver as busy
+      txn.update(db.collection("drivers").doc(uid), {
+        isAvailable:    false,
+        currentTripId:  tripId,
+      });
+
+      return { success: true };
+    });
+
+    if (result.success) {
+      // Notify passenger via FCM
+      const tripSnap    = await tripRef.get();
+      const passengerId = tripSnap.data()?.passengerId;
+      if (passengerId) {
+        const passengerSnap = await db.collection("users").doc(passengerId).get();
+        const fcmToken      = passengerSnap.data()?.fcmToken;
+        if (fcmToken) {
+          await admin.messaging().send({
+            token:        fcmToken,
+            notification: {
+              title: "Driver found! 🎉",
+              body:  "Your driver is on the way",
+            },
+            data: { type: "DRIVER_ASSIGNED", tripId },
+          });
+        }
+      }
+    }
+
+    return result;
+  }
+);
+
+// ── expireStaleTrips — runs every 2 minutes ───────────────────────────────────
+
+exports.expireStaleTrips = onSchedule(
+  { schedule: "every 2 minutes", timeZone: "Africa/Accra" },
+  async () => {
+    const db  = admin.firestore();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 2 * 60 * 1000); // 2 min ago
+
+    const staleSnap = await db
+      .collection("trips")
+      .where("status",    "==", "searching")
+      .where("createdAt", "<=", admin.firestore.Timestamp.fromDate(cutoff))
+      .get();
+
+    const batch = db.batch();
+    staleSnap.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        status:    "noDriversAvailable",
+        expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+    console.log(`Expired ${staleSnap.docs.length} stale trips`);
+  }
+);
+
+// ── Haversine ────────────────────────────────────────────────────────────────
+
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
+  const R    = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
+  const a    =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1 * Math.PI / 180) *
       Math.cos(lat2 * Math.PI / 180) *
@@ -80,20 +231,26 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── New: wallet functions ──
-const wallet = require("./wallet");
-exports.createWallet               = wallet.createWallet;
-exports.getWalletBalance           = wallet.getWalletBalance;
-exports.initializePaystackPayment  = wallet.initializePaystackPayment;
-exports.verifyPaystackPayment      = wallet.verifyPaystackPayment;
-exports.deductWalletBalance        = wallet.deductWalletBalance;
-exports.getTransactionHistory      = wallet.getTransactionHistory;
+// ── Wallet functions ──────────────────────────────────────────────────────────
 
+const wallet = require("./wallet");
+exports.createWallet              = wallet.createWallet;
+exports.getWalletBalance          = wallet.getWalletBalance;
+exports.initializePaystackPayment = wallet.initializePaystackPayment;
+exports.verifyPaystackPayment     = wallet.verifyPaystackPayment;
+exports.deductWalletBalance       = wallet.deductWalletBalance;
+exports.getTransactionHistory     = wallet.getTransactionHistory;
+exports.requestWithdrawal         = wallet.requestWithdrawal;
+exports.approveDriver             = wallet.approveDriver;
+exports.getPendingDrivers         = wallet.getPendingDrivers;
+
+// ── Notification functions ────────────────────────────────────────────────────
 
 const notifications = require("./notifications");
-exports.onTripStatusChanged       = notifications.onTripStatusChanged;
-exports.onGasOrderStatusChanged   = notifications.onGasOrderStatusChanged;
-exports.onGasOrderCreated         = notifications.onGasOrderCreated;
-exports.onDeliveryStatusChanged   = notifications.onDeliveryStatusChanged;
-exports.onWalletChanged           = notifications.onWalletChanged;
-exports.onDeliveryCompleted = notifications.onDeliveryCompleted;exports.requestWithdrawal = require('./wallet').requestWithdrawal;
+exports.onTripStatusChanged     = notifications.onTripStatusChanged;
+exports.onGasOrderStatusChanged = notifications.onGasOrderStatusChanged;
+exports.onGasOrderCreated       = notifications.onGasOrderCreated;
+exports.onDeliveryStatusChanged = notifications.onDeliveryStatusChanged;
+exports.onWalletChanged         = notifications.onWalletChanged;
+exports.onDeliveryCompleted     = notifications.onDeliveryCompleted;
+exports.checkDocumentExpiry     = notifications.checkDocumentExpiry;

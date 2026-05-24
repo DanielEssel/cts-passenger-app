@@ -225,7 +225,7 @@ case AppRoutes.deliveryTracking:
       case AppRoutes.destinationSearch:
         final args = settings.arguments as Map<String, dynamic>?;
         final originAddress = args?['origin'] as String? ?? "Current Location";
-        return MaterialPageRoute(
+        return MaterialPageRoute<Map<String, dynamic>>(
           builder: (_) => DestinationSearchScreen(origin: originAddress),
           settings: settings,
         );

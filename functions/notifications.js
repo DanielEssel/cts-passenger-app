@@ -1,5 +1,6 @@
 // functions/notifications.js
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 
 const db  = admin.firestore();
@@ -383,3 +384,178 @@ exports.onDeliveryCompleted = onDocumentUpdated(
     }
   }
 );
+// ── Document expiry check — runs daily at 8am Ghana time ─────────────────────
+exports.checkDocumentExpiry = onSchedule(
+  { schedule: '0 8 * * *', timeZone: 'Africa/Accra' },
+  async () => {
+    const db      = admin.firestore();
+    const now     = new Date();
+    const in30    = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const in7     = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000);
+
+    const drivers = await db.collection('drivers')
+      .where('isApproved', '==', true)
+      .get();
+
+    for (const driverDoc of drivers.docs) {
+      const data      = driverDoc.data();
+      const documents = data.documents ?? {};
+      const fcmToken  = data.fcmToken;
+      const uid       = driverDoc.id;
+
+      for (const [key, value] of Object.entries(documents)) {
+        if (!value?.expiryDate) continue;
+
+        const expiry      = value.expiryDate.toDate();
+        const daysLeft    = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+        const docLabel    = _docLabel(key);
+
+        if (daysLeft <= 0) {
+          // Already expired
+          await _sendDriverNotif(db, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `⚠️ ${docLabel} Expired`,
+            body:  `Your ${docLabel} has expired. Please upload a new one to continue driving.`,
+            route: '/driver/documents',
+          });
+        } else if (daysLeft <= 7) {
+          // Expiring in 7 days
+          await _sendDriverNotif(db, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `⏰ ${docLabel} Expiring Soon`,
+            body:  `Your ${docLabel} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Update it now.`,
+            route: '/driver/documents',
+          });
+        } else if (daysLeft <= 30) {
+          // Expiring in 30 days — notify once
+          await _sendDriverNotif(db, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `📅 ${docLabel} Expiring in ${daysLeft} Days`,
+            body:  `Your ${docLabel} expires on ${expiry.toDateString()}. Plan to renew it soon.`,
+            route: '/driver/documents',
+          });
+        }
+      }
+    }
+  }
+);
+
+async function _sendDriverNotif(db, uid, fcmToken, payload) {
+  // Write to Firestore
+  await db.collection('drivers').doc(uid)
+    .collection('notifications').add({
+      ...payload,
+      isRead:    false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  // FCM push
+  if (fcmToken) {
+    try {
+      await admin.messaging().send({
+        token:        fcmToken,
+        notification: { title: payload.title, body: payload.body },
+        data:         { type: payload.type, route: payload.route ?? '' },
+      });
+    } catch (e) {
+      console.error('FCM error for', uid, e.message);
+    }
+  }
+}
+
+function _docLabel(key) {
+  const labels = {
+    profile_photo:          'Profile Photo',
+    national_id:            'National ID',
+    drivers_license:        "Driver's License",
+    vehicle_registration:   'Vehicle Registration',
+    roadworthy_certificate: 'Roadworthy Certificate',
+    insurance:              'Vehicle Insurance',
+    police_clearance:       'Police Clearance',
+  };
+  return labels[key] ?? key;
+}
+
+// ── Document expiry check — runs daily at 8am Ghana time ─────────────────────
+exports.checkDocumentExpiry = onSchedule(
+  { schedule: '0 8 * * *', timeZone: 'Africa/Accra' },
+  async () => {
+    const now  = new Date();
+    const db2  = admin.firestore();
+
+    const drivers = await db2.collection('drivers')
+      .where('isApproved', '==', true)
+      .get();
+
+    for (const driverDoc of drivers.docs) {
+      const data      = driverDoc.data();
+      const documents = data.documents ?? {};
+      const fcmToken  = data.fcmToken;
+      const uid       = driverDoc.id;
+
+      for (const [key, value] of Object.entries(documents)) {
+        if (!value?.expiryDate) continue;
+
+        const expiry   = value.expiryDate.toDate();
+        const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+        const label    = _docLabel(key);
+
+        if (daysLeft <= 0) {
+          await _sendDriverNotif(db2, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `⚠️ ${label} Expired`,
+            body:  `Your ${label} has expired. Upload a new one to continue driving.`,
+            route: '/driver/documents',
+          });
+        } else if (daysLeft <= 7) {
+          await _sendDriverNotif(db2, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `⏰ ${label} Expiring Soon`,
+            body:  `Your ${label} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Update it now.`,
+            route: '/driver/documents',
+          });
+        } else if (daysLeft <= 30) {
+          await _sendDriverNotif(db2, uid, fcmToken, {
+            type:  'documentExpiry',
+            title: `📅 ${label} Expiring in ${daysLeft} Days`,
+            body:  `Your ${label} expires on ${expiry.toDateString()}. Plan to renew it soon.`,
+            route: '/driver/documents',
+          });
+        }
+      }
+    }
+  }
+);
+
+async function _sendDriverNotif(db2, uid, fcmToken, payload) {
+  await db2.collection('drivers').doc(uid)
+    .collection('notifications').add({
+      ...payload,
+      isRead:    false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  if (fcmToken) {
+    try {
+      await admin.messaging().send({
+        token:        fcmToken,
+        notification: { title: payload.title, body: payload.body },
+        data:         { type: payload.type, route: payload.route ?? '' },
+      });
+    } catch (e) {
+      console.error('FCM error for', uid, e.message);
+    }
+  }
+}
+
+function _docLabel(key) {
+  const labels = {
+    national_id:            'National ID',
+    drivers_license:        "Driver's License",
+    vehicle_registration:   'Vehicle Registration',
+    roadworthy_certificate: 'Roadworthy Certificate',
+    insurance:              'Vehicle Insurance',
+    police_clearance:       'Police Clearance',
+  };
+  return labels[key] ?? key;
+}

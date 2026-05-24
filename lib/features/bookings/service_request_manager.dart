@@ -73,6 +73,9 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
     'pending',
     'driverArrived',
     'inProgress',
+    'tripAccepted',
+    'driverArrived',
+    'tripStarted',
   ];
 
   static const _activeDeliveryStatuses = [
@@ -205,13 +208,14 @@ class TripRequestCreator extends Notifier<void> {
         .collection('driver_alerts')
         .doc(tripId)
         .set({
-      'tripId':        tripId,
-      'pickupLocation': pickup,
-      'serviceType':   serviceType.name,  // ✅ .name matches Firestore strings
-      'timestamp':     FieldValue.serverTimestamp(),
-      'expiresAt':     Timestamp.fromDate(
-                         DateTime.now().add(const Duration(seconds: 45))),
-      'status':        'broadcasting',
+      'tripId':      tripId,
+      'pickupLat':   pickup.latitude,   // ← plain numbers avoid GeoPoint bug
+      'pickupLng':   pickup.longitude,
+      'serviceType': serviceType.name,
+      'timestamp':   FieldValue.serverTimestamp(),
+      'expiresAt':   Timestamp.fromDate(
+                       DateTime.now().add(const Duration(seconds: 120))),
+      'status':      'broadcasting',
     });
   }
 }

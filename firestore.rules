@@ -101,13 +101,7 @@ service cloud.firestore {
     match /trips/{tripId} {
       allow create: if isAuth()
         && request.resource.data.passengerId == request.auth.uid;
-      allow read: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.status   == "searching"
-              && resource.data.driverId == null);
+      allow read: if isAuth();
       allow update: if isParty(
             resource.data.passengerId,
             resource.data.driverId
@@ -116,6 +110,13 @@ service cloud.firestore {
               && resource.data.driverId == null
               && request.resource.data.driverId == request.auth.uid);
       allow delete: if false;
+
+      // ── Driver location updates ──────────────────────────────────────
+      match /locations/{locationId} {
+        allow read:   if isAuth();
+        allow create, update: if isAuth()
+          && resource == null || get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == request.auth.uid;
+      }
     }
 
     // ── Rides (legacy rideRequests flow) ──────────────────────────────────

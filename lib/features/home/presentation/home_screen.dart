@@ -5,28 +5,24 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cts_transport_app/core/constants/app_colors.dart'; // ← ADD
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
-import 'package:cts_transport_app/features/notification/providers/notification_providers.dart';
 
-
+import '../../../core/constants/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../features/auth/providers/auth_providers.dart';
-import '../../home/services/location_services.dart';
-import '../services/driver_availability_service.dart';
-import '../widgets/location_permission_dialog.dart';
+import '../../../features/notification/providers/notification_providers.dart';
 import '../../home/extensions/service_type_extensions.dart';
+import '../../home/services/location_services.dart';
 import '../../home/theme/home_theme.dart';
 import '../../ride/models/service_type.dart';
+import '../services/driver_availability_service.dart';
 
 // ─────────────────────────────────────────────────
 // PROVIDERS
 // ─────────────────────────────────────────────────
-
-final locationService = LocationService.instance;
 
 final driverAvailabilityServiceProvider =
     Provider((ref) => DriverAvailabilityService());
@@ -41,10 +37,11 @@ final savedPlacesProvider =
     StreamProvider.autoDispose<List<_SavedPlace>>((ref) {
   final uid = ref.watch(userIdProvider);
   if (uid == null) return const Stream.empty();
+  // ✅ Use 'users' collection not 'passengers'
   return FirebaseFirestore.instance
-      .collection('passengers')
+      .collection('users')
       .doc(uid)
-      .collection('savedPlaces')
+      .collection('saved_places')
       .orderBy('order')
       .snapshots()
       .map((s) => s.docs.map(_SavedPlace.fromFirestore).toList());
@@ -77,12 +74,13 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
 
-  GoogleMapController? _mapController;
-  LatLng?              _userLocation;
-  final Set<Marker>    _markers = {};
-  bool                 _isMapReady = false;
-  Timer?               _debounceTimer;
+  GoogleMapController?          _mapController;
+  LatLng?                       _userLocation;
+  final Set<Marker>             _markers = {};
+  bool                          _isMapReady    = false;
+  Timer?                        _debounceTimer;
   StreamSubscription<Position>? _locationSub;
+  bool                          _locationInitialized = false; // ✅ prevent duplicate init
 
   ServiceType _selectedService = ServiceType.taxi;
   bool        _isLocating      = true;
@@ -90,7 +88,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
-
   late AnimationController _chipAnimController;
 
   static const LatLng _accra = LatLng(5.6037, -0.1870);
@@ -107,7 +104,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _chipAnimController = AnimationController(
-      vsync: this,
+      vsync:    this,
       duration: const Duration(milliseconds: 350),
     )..forward();
     _initLocation();
@@ -115,30 +112,73 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _checkLocationOnResume();
+    // ✅ Only re-check on resume, don't restart full init
+    if (state == AppLifecycleState.resumed) {
+      _checkLocationOnResume();
+    }
   }
 
   Future<void> _checkLocationOnResume() async {
-    final ok = await _checkLocationPermission();
-    if (ok && _userLocation == null) _initLocation();
-  }
-
-  Future<bool> _checkLocationPermission() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return false;
-    final p = await Geolocator.checkPermission();
-    return p == LocationPermission.always || p == LocationPermission.whileInUse;
+    if (_userLocation != null) return; // ✅ Already has location
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse) {
+      _initLocation();
+    }
   }
 
   Future<void> _initLocation() async {
+    if (_locationInitialized && _userLocation != null) return; // ✅ Guard
     setState(() => _isLocating = true);
+
     try {
-      final pos = await LocationService.instance.getCurrentLocation();
+      // ✅ Check permission first without showing dialog for every error
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() {
+            _isLocating    = false;
+            _locationLabel = 'Location services off';
+          });
+          _showLocationErrorDialog('Please enable location services.');
+        }
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() {
+            _isLocating    = false;
+            _locationLabel = 'Location access denied';
+          });
+          // ✅ Only show dialog for actual permission denial
+          if (permission == LocationPermission.deniedForever) {
+            _showLocationErrorDialog(
+                'Location permission is permanently denied. Please enable it in Settings.');
+          }
+        }
+        return;
+      }
+
+      final pos = await LocationService.instance
+          .getCurrentLocation()
+          .timeout(const Duration(seconds: 10));
+
       if (!mounted) return;
+
       final ll = LatLng(pos.latitude, pos.longitude);
       setState(() {
-        _userLocation = ll;
-        _isLocating   = false;
+        _userLocation        = ll;
+        _isLocating          = false;
+        _locationInitialized = true;
       });
+
       if (_isMapReady) {
         _mapController?.animateCamera(
           CameraUpdate.newCameraPosition(
@@ -146,47 +186,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         );
       }
       _updateUserMarker(ll);
-      await _startLocationUpdates();
-      await _updateLocationLabel(ll);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _isLocating    = false;
-          _locationLabel = 'Location unavailable';
-        });
-        _showLocationErrorDialog();
-      }
+      _startLocationUpdates(); // ✅ No await — runs in background
+      _updateLocationLabel(ll);
+    } catch (e) {
+      if (!mounted) return;
+      // ✅ Don't show dialog for timeouts/network errors
+      setState(() {
+        _isLocating    = false;
+        _locationLabel = 'Location unavailable';
+        _userLocation  = _accra; // ✅ Fall back to Accra
+      });
+      debugPrint('Location error: $e');
     }
   }
 
-  Future<void> _startLocationUpdates() async {
-    await LocationService.instance.startListening(
+  void _startLocationUpdates() {
+    // ✅ Cancel existing subscription before creating new one
+    _locationSub?.cancel();
+    _locationSub = null;
+
+    LocationService.instance.startListening(
       onSignificantMove: (d) {
         if (mounted && d > 50) _recenterMap();
       },
-    );
-    _locationSub?.cancel();
-    _locationSub = LocationService.instance.positionStream.listen((pos) {
-      if (!mounted) return;
-      final ll = LatLng(pos.latitude, pos.longitude);
-      setState(() => _userLocation = ll);
-      _updateUserMarker(ll);
+    ).then((_) {
+      _locationSub = LocationService.instance.positionStream.listen((pos) {
+        if (!mounted) return;
+        final ll = LatLng(pos.latitude, pos.longitude);
+        setState(() => _userLocation = ll);
+        _updateUserMarker(ll);
+      });
     });
   }
 
   Future<void> _updateLocationLabel(LatLng ll) async {
-    final label = await LocationService.instance.reverseGeocode(ll);
-    if (mounted) setState(() => _locationLabel = label);
+    try {
+      final label = await LocationService.instance.reverseGeocode(ll);
+      if (mounted) setState(() => _locationLabel = label);
+    } catch (_) {
+      // Silently fail — label stays as fallback
+    }
   }
 
   void _updateUserMarker(LatLng pos) {
+    if (!mounted) return;
     setState(() {
       _markers
         ..removeWhere((m) => m.markerId.value == 'user')
         ..add(Marker(
-          markerId: const MarkerId('user'),
-          position: pos,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
+          markerId:  const MarkerId('user'),
+          position:  pos,
+          icon:      BitmapDescriptor.defaultMarkerWithHue(
               BitmapDescriptor.hueGreen),
           infoWindow: const InfoWindow(title: 'You'),
         ));
@@ -205,13 +255,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
-  void _showLocationErrorDialog() {
+  void _showLocationErrorDialog(String message) {
+    if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => LocationPermissionDialog(
-        message: 'Location access is required to find nearby drivers.',
-        onRetry: _initLocation,
+      barrierDismissible: true, // ✅ Allow dismissal
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.location_off_rounded, color: AppColors.warning),
+            SizedBox(width: 8),
+            Text('Location Required'),
+          ],
+        ),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Dismiss'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Geolocator.openLocationSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
       ),
     );
   }
@@ -266,28 +338,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         backgroundColor: HomeTheme.background,
         body: Stack(
           children: [
-            // 1 ── Full-screen map (60% of screen)
             _buildMap(),
-
-            // 2 ── Top fade gradient over map
             _buildTopFade(),
-
-            // 3 ── Top bar overlaid on map
             Positioned(
-              top: topPad + 10,
-              left: 16,
+              top:   topPad + 10,
+              left:  16,
               right: 16,
               child: _buildTopBar(),
             ),
-
-            // 4 ── Recenter FAB
             Positioned(
-              right: 16,
+              right:  16,
               bottom: MediaQuery.of(context).size.height * 0.44 + 16,
-              child: _buildRecenterFab(),
+              child:  _buildRecenterFab(),
             ),
-
-            // 5 ── Bottom sheet — the main content
             _buildBottomSheet(),
           ],
         ),
@@ -296,39 +359,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   // ─────────────────────────────────────────────
-  // MAP — stays dark for marker readability
+  // MAP
   // ─────────────────────────────────────────────
 
-  // Premium light map style — keeps roads readable but lighter
   static const String _mapStyle = '''
 [
   {"elementType":"geometry","stylers":[{"color":"#f5f5f5"}]},
   {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
   {"elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},
   {"elementType":"labels.text.stroke","stylers":[{"color":"#f5f5f5"}]},
-  {"featureType":"administrative.land_parcel","elementType":"labels.text.fill","stylers":[{"color":"#bdbdbd"}]},
   {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#eeeeee"}]},
-  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},
   {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d8f0e4"}]},
-  {"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},
   {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
-  {"featureType":"road.arterial","elementType":"labels.text.fill","stylers":[{"color":"#757575"}]},
   {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#e8f5e9"}]},
-  {"featureType":"road.highway","elementType":"labels.text.fill","stylers":[{"color":"#616161"}]},
-  {"featureType":"road.local","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]},
-  {"featureType":"transit.line","elementType":"geometry","stylers":[{"color":"#e5e5e5"}]},
-  {"featureType":"transit.station","elementType":"geometry","stylers":[{"color":"#eeeeee"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#b3d9f2"}]},
-  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#9e9e9e"}]}
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#b3d9f2"}]}
 ]
 ''';
 
   Widget _buildMap() {
     final target = _userLocation ?? _accra;
     return GoogleMap(
-      style: _mapStyle,
-      initialCameraPosition:
-          CameraPosition(target: target, zoom: 14.5),
+      style:                  _mapStyle,
+      initialCameraPosition:  CameraPosition(target: target, zoom: 14.5),
       onMapCreated: (c) async {
         _mapController = c;
         setState(() => _isMapReady = true);
@@ -338,32 +390,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ));
         }
       },
-      markers:               _markers,
-      myLocationEnabled:     true,
+      markers:                _markers,
+      myLocationEnabled:      true,
       myLocationButtonEnabled: false,
-      zoomControlsEnabled:   false,
-      mapToolbarEnabled:     false,
-      compassEnabled:        false,
-      buildingsEnabled:      true,
+      zoomControlsEnabled:    false,
+      mapToolbarEnabled:      false,
+      compassEnabled:         false,
+      buildingsEnabled:       true,
     );
   }
 
-  // ─────────────────────────────────────────────
-  // TOP FADE — subtle gradient so top bar is readable
-  // ─────────────────────────────────────────────
-
   Widget _buildTopFade() => Positioned(
         top: 0, left: 0, right: 0,
-        child: Container(
-          height: 180,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.55),
-                Colors.transparent,
-              ],
+        child: IgnorePointer(
+          child: Container(
+            height: 180,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end:   Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.55),
+                  Colors.transparent,
+                ],
+              ),
             ),
           ),
         ),
@@ -380,7 +430,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Row(
       children: [
-        // ── Location pill ──
         Expanded(
           child: GestureDetector(
             onTap: _recenterMap,
@@ -388,14 +437,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 11),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.92),
+                color:        Colors.white.withValues(alpha: 0.92),
                 borderRadius: BorderRadius.circular(50),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
+                    color:      Colors.black.withValues(alpha: 0.12),
                     blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  )
+                    offset:     const Offset(0, 4),
+                  ),
                 ],
               ),
               child: Row(
@@ -404,11 +453,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const SizedBox(width: 9),
                   Expanded(
                     child: Text(
-                      _isLocating ? 'Locating...' : _locationLabel,
+                      _locationLabel,
                       style: const TextStyle(
-                        color: Color(0xFF0D1F14),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+                        color:       Color(0xFF0D1F14),
+                        fontSize:    12.5,
+                        fontWeight:  FontWeight.w600,
                         letterSpacing: 0.1,
                       ),
                       maxLines: 1,
@@ -424,45 +473,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
         const SizedBox(width: 10),
 
-        // ── Notifications ──
+        // Notifications
         Consumer(
-  builder: (_, ref, __) {
-    final count = ref.watch(unreadNotifCountProvider).value ?? 0;
-    return _TopIconButton(
-      icon:       Icons.notifications_outlined,
-      badge:      count > 0,
-      badgeCount: count,
-      onTap: () =>
-          Navigator.pushNamed(context, AppRoutes.notifications),
-    );
-  },
-),
+          builder: (_, ref, __) {
+            final count = ref.watch(unreadNotifCountProvider).value ?? 0;
+            return _TopIconButton(
+              icon:       Icons.notifications_outlined,
+              badge:      count > 0,
+              badgeCount: count,
+              onTap: () =>
+                  Navigator.pushNamed(context, AppRoutes.notifications),
+            );
+          },
+        ),
         const SizedBox(width: 10),
 
-        // ── Avatar ──
+        // Avatar
         GestureDetector(
           onTap: () => Navigator.pushNamed(context, AppRoutes.profile),
           child: Container(
-            width: 42,
+            width:  42,
             height: 42,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
+              shape:  BoxShape.circle,
               border: Border.all(color: Colors.white, width: 2.5),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
+                  color:      Colors.black.withValues(alpha: 0.2),
                   blurRadius: 12,
-                )
+                ),
               ],
             ),
             child: ClipOval(
-              child: photoUrl != null
+              child: photoUrl != null && photoUrl.isNotEmpty
                   ? CachedNetworkImage(
-                      imageUrl: photoUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) =>
+                      imageUrl:     photoUrl,
+                      fit:          BoxFit.cover,
+                      placeholder:  (_, __) =>
                           Container(color: Colors.grey[200]),
-                      errorWidget: (_, __, ___) =>
+                      errorWidget:  (_, __, ___) =>
                           _avatarFallback(firstName),
                     )
                   : _avatarFallback(firstName),
@@ -474,31 +523,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _avatarFallback(String name) => Container(
-        color: HomeTheme.primaryGradient.colors.first
-            .withValues(alpha: 0.15),
+        color: HomeTheme.primary.withValues(alpha: 0.15),
         alignment: Alignment.center,
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : 'U',
           style: TextStyle(
-            color: HomeTheme.primary,
+            color:      HomeTheme.primary,
             fontWeight: FontWeight.w800,
-            fontSize: 17,
+            fontSize:   17,
           ),
         ),
       );
 
-  // ─────────────────────────────────────────────
-  // RECENTER FAB
-  // ─────────────────────────────────────────────
-
   Widget _buildRecenterFab() => GestureDetector(
         onTap: _recenterMap,
         child: Container(
-          width: 46,
+          width:  46,
           height: 46,
           decoration: BoxDecoration(
-            color: HomeTheme.surface,
-            shape: BoxShape.circle,
+            color:     HomeTheme.surface,
+            shape:     BoxShape.circle,
             boxShadow: HomeTheme.cardShadow,
           ),
           child: Icon(Icons.my_location_rounded,
@@ -507,7 +551,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
 
   // ─────────────────────────────────────────────
-  // BOTTOM SHEET — main content on white card
+  // BOTTOM SHEET
   // ─────────────────────────────────────────────
 
   Widget _buildBottomSheet() {
@@ -515,7 +559,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final firstName = user?.displayName?.split(' ').first ?? 'there';
 
     return DraggableScrollableSheet(
-      controller:      _sheetController,
+      controller:       _sheetController,
       initialChildSize: 0.44,
       minChildSize:     0.16,
       maxChildSize:     0.92,
@@ -523,18 +567,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       snapSizes:        const [0.16, 0.44, 0.92],
       builder: (ctx, sc) => Container(
         decoration: BoxDecoration(
-          color: HomeTheme.surface,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(28)),
+          color:        HomeTheme.surface,
+          borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(28)),
           boxShadow: HomeTheme.sheetShadow,
         ),
         child: RefreshIndicator(
-          onRefresh: _refreshData,
-          color: HomeTheme.primary,
+          onRefresh:       _refreshData,
+          color:           HomeTheme.primary,
           backgroundColor: HomeTheme.surface,
           child: CustomScrollView(
             controller: sc,
-            physics: const AlwaysScrollableScrollPhysics(
+            physics:    const AlwaysScrollableScrollPhysics(
                 parent: ClampingScrollPhysics()),
             slivers: [
               SliverToBoxAdapter(child: _buildDragHandle()),
@@ -548,8 +592,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               SliverToBoxAdapter(child: _buildPromoBanner()),
               SliverToBoxAdapter(
                 child: SizedBox(
-                    height:
-                        MediaQuery.of(context).padding.bottom + 32),
+                  height: MediaQuery.of(context).padding.bottom + 32,
+                ),
               ),
             ],
           ),
@@ -558,21 +602,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ── Drag handle ────────────────────────────────
-
   Widget _buildDragHandle() => Center(
         child: Container(
-          width: 36,
+          width:  36,
           height: 4,
           margin: const EdgeInsets.only(top: 14, bottom: 6),
           decoration: BoxDecoration(
-            color: HomeTheme.border,
+            color:        HomeTheme.border,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
       );
-
-  // ── Sheet header ───────────────────────────────
 
   Widget _buildSheetHeader(String firstName) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -582,38 +622,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _greeting,
-                  style: TextStyle(
-                    color: HomeTheme.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(_greeting,
+                    style: TextStyle(
+                      color:      HomeTheme.textSecondary,
+                      fontSize:   13,
+                      fontWeight: FontWeight.w500,
+                    )),
                 const SizedBox(height: 2),
-                Text(
-                  firstName,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    color: HomeTheme.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                  ),
-                ),
+                Text(firstName,
+                    style: const TextStyle(
+                      fontFamily:    'Inter',
+                      color:         HomeTheme.textPrimary,
+                      fontSize:      24,
+                      fontWeight:    FontWeight.w800,
+                      letterSpacing: -0.5,
+                    )),
               ],
             ),
-
-            // ── Wallet chip ──
             GestureDetector(
               onTap: widget.onWalletTap,
               child: Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: HomeTheme.primary.withValues(alpha: 0.08),
+                  color:        HomeTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(30),
-                  border: Border.all(
+                  border:       Border.all(
                     color: HomeTheme.primary.withValues(alpha: 0.2),
                   ),
                 ),
@@ -622,15 +656,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     Icon(Icons.account_balance_wallet_rounded,
                         color: HomeTheme.primary, size: 16),
                     const SizedBox(width: 7),
-                    Text(
-                      'Wallet',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.primary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    Text('Wallet',
+                        style: TextStyle(
+                          fontFamily:  'Inter',
+                          color:       HomeTheme.primary,
+                          fontSize:    13,
+                          fontWeight:  FontWeight.w700,
+                        )),
                   ],
                 ),
               ),
@@ -638,8 +670,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ],
         ),
       );
-
-  // ── Service grid ───────────────────────────────
 
   Widget _buildServiceGrid() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -651,10 +681,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 onTap: () => _selectService(svc),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOutCubic,
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 4),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  curve:    Curves.easeOutCubic,
+                  margin:   const EdgeInsets.symmetric(horizontal: 4),
+                  padding:  const EdgeInsets.symmetric(vertical: 14),
                   decoration: BoxDecoration(
                     color: selected
                         ? HomeTheme.primary.withValues(alpha: 0.08)
@@ -673,7 +702,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     children: [
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 250),
-                        width: 44,
+                        width:  44,
                         height: 44,
                         decoration: BoxDecoration(
                           gradient: selected
@@ -681,8 +710,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               : null,
                           color: selected
                               ? null
-                              : HomeTheme.border
-                                  .withValues(alpha: 0.5),
+                              : HomeTheme.border.withValues(alpha: 0.5),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -697,12 +725,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       Text(
                         svc.displayName,
                         style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: selected
+                          fontFamily:  'Inter',
+                          color:       selected
                               ? HomeTheme.primary
                               : HomeTheme.textSecondary,
-                          fontSize: 11,
-                          fontWeight: selected
+                          fontSize:    11,
+                          fontWeight:  selected
                               ? FontWeight.w700
                               : FontWeight.w500,
                         ),
@@ -716,8 +744,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
-  // ── Search bar ─────────────────────────────────
-
   Widget _buildSearchBar() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
         child: GestureDetector(
@@ -725,18 +751,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: HomeTheme.surfaceAlt,
+              color:        HomeTheme.surfaceAlt,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: HomeTheme.border),
-              boxShadow: HomeTheme.cardShadow,
+              border:       Border.all(color: HomeTheme.border),
+              boxShadow:    HomeTheme.cardShadow,
             ),
             child: Row(
               children: [
                 Container(
-                  width: 42,
+                  width:  42,
                   height: 42,
                   decoration: BoxDecoration(
-                    gradient: HomeTheme.primaryGradient,
+                    gradient:     HomeTheme.primaryGradient,
                     borderRadius: BorderRadius.circular(13),
                   ),
                   child: const Icon(Icons.search_rounded,
@@ -747,24 +773,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _selectedService.searchHint,
-                        style: const TextStyle(
-                          fontFamily: 'Inter',
-                          color: HomeTheme.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
+                      Text(_selectedService.searchHint,
+                          style: const TextStyle(
+                            fontFamily:    'Inter',
+                            color:         HomeTheme.textPrimary,
+                            fontSize:      15,
+                            fontWeight:    FontWeight.w700,
+                            letterSpacing: -0.2,
+                          )),
                       const SizedBox(height: 2),
-                      Text(
-                        'Tap to enter destination',
-                        style: TextStyle(
-                          color: HomeTheme.textTertiary,
-                          fontSize: 11.5,
-                        ),
-                      ),
+                      Text('Tap to enter destination',
+                          style: TextStyle(
+                            color:   HomeTheme.textTertiary,
+                            fontSize: 11.5,
+                          )),
                     ],
                   ),
                 ),
@@ -772,11 +794,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: HomeTheme.primary.withValues(alpha: 0.1),
+                    color:        HomeTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color:
-                          HomeTheme.primary.withValues(alpha: 0.2),
+                    border:       Border.all(
+                      color: HomeTheme.primary.withValues(alpha: 0.2),
                     ),
                   ),
                   child: Row(
@@ -785,15 +806,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       Icon(_selectedService.icon,
                           color: HomeTheme.primary, size: 13),
                       const SizedBox(width: 4),
-                      Text(
-                        _selectedService.displayName,
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: HomeTheme.primary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Text(_selectedService.displayName,
+                          style: TextStyle(
+                            fontFamily:  'Inter',
+                            color:       HomeTheme.primary,
+                            fontSize:    11,
+                            fontWeight:  FontWeight.w700,
+                          )),
                     ],
                   ),
                 ),
@@ -802,8 +821,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         ),
       );
-
-  // ── Nearby badge ───────────────────────────────
 
   Widget _buildNearbyBadge() {
     final async = ref.watch(nearbyDriversProvider(_selectedService));
@@ -819,8 +836,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Text(
                 '$n ${_selectedService.displayName}${n == 1 ? '' : 's'} available near you',
                 style: TextStyle(
-                  color: HomeTheme.textSecondary,
-                  fontSize: 12.5,
+                  color:      HomeTheme.textSecondary,
+                  fontSize:   12.5,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -829,22 +846,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: HomeTheme.success.withValues(alpha: 0.1),
+                  color:        HomeTheme.success.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color:
-                        HomeTheme.success.withValues(alpha: 0.25),
+                  border:       Border.all(
+                    color: HomeTheme.success.withValues(alpha: 0.25),
                   ),
                 ),
-                child: Text(
-                  'LIVE',
-                  style: TextStyle(
-                    color: HomeTheme.success,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
+                child: Text('LIVE',
+                    style: TextStyle(
+                      color:         HomeTheme.success,
+                      fontSize:      9,
+                      fontWeight:    FontWeight.w800,
+                      letterSpacing: 0.8,
+                    )),
               ),
             ],
           ),
@@ -855,21 +869,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ── Saved places ───────────────────────────────
-
   Widget _buildSavedPlaces() {
     final placesAsync = ref.watch(savedPlacesProvider);
     final defaults    = [
       _SavedPlace(
-          id: 'home',
-          label: 'Home',
+          id:      'home',
+          label:   'Home',
           address: 'Set home address',
-          icon: Icons.home_rounded),
+          icon:    Icons.home_rounded),
       _SavedPlace(
-          id: 'work',
-          label: 'Work',
+          id:      'work',
+          label:   'Work',
           address: 'Set work address',
-          icon: Icons.work_rounded),
+          icon:    Icons.work_rounded),
     ];
 
     return Column(
@@ -882,10 +894,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             children: [
               Text('Quick destinations',
                   style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: HomeTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                    fontFamily:    'Inter',
+                    color:         HomeTheme.textPrimary,
+                    fontSize:      15,
+                    fontWeight:    FontWeight.w700,
                     letterSpacing: -0.2,
                   )),
               GestureDetector(
@@ -893,8 +905,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     context, AppRoutes.savedPlaces),
                 child: Text('Edit',
                     style: TextStyle(
-                      color: HomeTheme.primary,
-                      fontSize: 13,
+                      color:      HomeTheme.primary,
+                      fontSize:   13,
                       fontWeight: FontWeight.w600,
                     )),
               ),
@@ -910,26 +922,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     (d) => !places.any((p) => p.id == d.id)),
                 ...places,
                 _SavedPlace(
-                    id: 'add',
-                    label: 'Add',
+                    id:      'add',
+                    label:   'Add',
                     address: '',
-                    icon: Icons.add_rounded),
+                    icon:    Icons.add_rounded),
               ];
               return _placesList(all);
             },
             loading: () => _placesList(defaults),
-            error:   (_, __) => const SizedBox.shrink(),
+            error:   (_, __) => _placesList(defaults),
           ),
         ),
       ],
     );
   }
 
-  Widget _placesList(List<_SavedPlace> places) =>
-      ListView.separated(
+  Widget _placesList(List<_SavedPlace> places) => ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: places.length,
+        padding:         const EdgeInsets.symmetric(horizontal: 20),
+        itemCount:       places.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (_, i) => _PlaceChip(
           place: places[i],
@@ -949,8 +960,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
-  // ── Recent trips ───────────────────────────────
-
   Widget _buildRecentTrips() {
     final uid = ref.watch(userIdProvider);
     if (uid == null) return const SizedBox.shrink();
@@ -959,12 +968,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       stream: FirebaseFirestore.instance
           .collection('trips')
           .where('passengerId', isEqualTo: uid)
-          .where('status', isEqualTo: 'completed')
+          .where('status',      isEqualTo: 'completed')
           .orderBy('createdAt', descending: true)
           .limit(3)
           .snapshots(),
       builder: (ctx, snap) {
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
+        if (!snap.hasData || (snap.data?.docs.isEmpty ?? true)) {
           return _buildEmptyState();
         }
         final docs = snap.data!.docs;
@@ -972,18 +981,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(20, 24, 20, 12),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
               child: Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Recent trips',
                       style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.textPrimary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
+                        fontFamily:    'Inter',
+                        color:         HomeTheme.textPrimary,
+                        fontSize:      15,
+                        fontWeight:    FontWeight.w700,
                         letterSpacing: -0.2,
                       )),
                   GestureDetector(
@@ -991,8 +998,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         context, AppRoutes.tripHistory),
                     child: Text('See all',
                         style: TextStyle(
-                          color: HomeTheme.primary,
-                          fontSize: 13,
+                          color:      HomeTheme.primary,
+                          fontSize:   13,
                           fontWeight: FontWeight.w600,
                         )),
                   ),
@@ -1000,15 +1007,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
             ...docs.map((doc) {
-              final d  = doc.data() as Map<String, dynamic>;
-              final ts = d['createdAt'] as Timestamp?;
+              final d    = doc.data() as Map<String, dynamic>;
+              final ts   = d['createdAt'] as Timestamp?;
               final date = ts != null
                   ? DateFormat('MMM d').format(ts.toDate())
                   : '';
               return _RecentTripTile(
                 from: d['pickupAddress']  as String? ?? '—',
                 to:   d['dropoffAddress'] as String? ?? '—',
-                fare: (d['actualFare'] as num?)?.toDouble() ?? 0,
+                fare: (d['actualFare']    as num?)?.toDouble() ?? 0,
                 date: date,
                 onRebook: () => Navigator.pushNamed(
                   context,
@@ -1031,22 +1038,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: HomeTheme.surfaceAlt,
+            color:        HomeTheme.surfaceAlt,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HomeTheme.border),
+            border:       Border.all(color: HomeTheme.border),
           ),
           child: Row(
             children: [
               Container(
-                width: 48,
+                width:  48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: HomeTheme.primary.withValues(alpha: 0.08),
+                  color:        HomeTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(Icons.route_rounded,
                     color: HomeTheme.primary.withValues(alpha: 0.5),
-                    size: 24),
+                    size:  24),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -1055,19 +1062,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Text('No trips yet',
                         style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: HomeTheme.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                          fontFamily:  'Inter',
+                          color:       HomeTheme.textPrimary,
+                          fontSize:    14,
+                          fontWeight:  FontWeight.w600,
                         )),
                     const SizedBox(height: 3),
-                    Text(
-                      'Your completed trips will appear here',
-                      style: TextStyle(
-                        color: HomeTheme.textTertiary,
-                        fontSize: 12,
-                      ),
-                    ),
+                    Text('Your completed trips will appear here',
+                        style: TextStyle(
+                          color:   HomeTheme.textTertiary,
+                          fontSize: 12,
+                        )),
                   ],
                 ),
               ),
@@ -1076,14 +1081,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
-  // ── Promo banner ───────────────────────────────
-
   Widget _buildPromoBanner() {
     final promoAsync = ref.watch(promoBannerProvider);
     return promoAsync.when(
-      data:    (p) => p == null
-          ? _buildDefaultPromo()
-          : _PromoCard(promo: p),
+      data:    (p) => p == null ? _buildDefaultPromo() : _PromoCard(promo: p),
       loading: () => const SizedBox.shrink(),
       error:   (_, __) => _buildDefaultPromo(),
     );
@@ -1094,9 +1095,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         child: Container(
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            gradient: HomeTheme.primaryGradient,
+            gradient:     HomeTheme.primaryGradient,
             borderRadius: BorderRadius.circular(24),
-            boxShadow: HomeTheme.primaryGlow,
+            boxShadow:    HomeTheme.primaryGlow,
           ),
           child: Row(
             children: [
@@ -1108,31 +1109,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.25),
+                        color:        Colors.white.withValues(alpha: 0.25),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        'FIRST RIDE',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
+                      child: const Text('FIRST RIDE',
+                          style: TextStyle(
+                            color:         Colors.white,
+                            fontSize:      9,
+                            fontWeight:    FontWeight.w800,
+                            letterSpacing: 1.5,
+                          )),
                     ),
                     const SizedBox(height: 10),
-                    const Text(
-                      '50% off\nyour first ride',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        height: 1.15,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
+                    const Text('50% off\nyour first ride',
+                        style: TextStyle(
+                          fontFamily:    'Inter',
+                          color:         Colors.white,
+                          fontSize:      22,
+                          fontWeight:    FontWeight.w800,
+                          height:        1.15,
+                          letterSpacing: -0.5,
+                        )),
                     const SizedBox(height: 14),
                     GestureDetector(
                       onTap: () => Navigator.pushNamed(
@@ -1141,18 +1138,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 9),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color:        Colors.white,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text(
-                          'Use code CTS50',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            color: HomeTheme.primary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        child: Text('Use code CTS50',
+                            style: TextStyle(
+                              fontFamily:  'Inter',
+                              color:       HomeTheme.primary,
+                              fontSize:    13,
+                              fontWeight:  FontWeight.w800,
+                            )),
                       ),
                     ),
                   ],
@@ -1161,7 +1156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               const SizedBox(width: 8),
               Icon(Icons.local_offer_rounded,
                   color: Colors.white.withValues(alpha: 0.15),
-                  size: 90),
+                  size:  90),
             ],
           ),
         ),
@@ -1169,7 +1164,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 }
 
 // ═══════════════════════════════════════════════
-// SUPPORTING WIDGETS
+// SHARED WIDGETS
 // ═══════════════════════════════════════════════
 
 class _PulsingDot extends StatefulWidget {
@@ -1184,7 +1179,7 @@ class _PulsingDot extends StatefulWidget {
 class _PulsingDotState extends State<_PulsingDot>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
-    vsync: this,
+    vsync:    this,
     duration: const Duration(seconds: 1),
   )..repeat(reverse: true);
 
@@ -1201,13 +1196,13 @@ class _PulsingDotState extends State<_PulsingDot>
           width:  widget.size,
           height: widget.size,
           decoration: BoxDecoration(
-            color: widget.color,
-            shape: BoxShape.circle,
+            color:  widget.color,
+            shape:  BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: widget.color.withValues(alpha: 0.5),
+                color:      widget.color.withValues(alpha: 0.5),
                 blurRadius: 6,
-              )
+              ),
             ],
           ),
         ),
@@ -1217,13 +1212,13 @@ class _PulsingDotState extends State<_PulsingDot>
 class _TopIconButton extends StatelessWidget {
   final IconData     icon;
   final bool         badge;
-  final int          badgeCount; // ← ADD
+  final int          badgeCount;
   final VoidCallback onTap;
 
   const _TopIconButton({
     required this.icon,
     this.badge      = false,
-    this.badgeCount = 0,     // ← ADD
+    this.badgeCount = 0,
     required this.onTap,
   });
 
@@ -1231,16 +1226,17 @@ class _TopIconButton extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 42, height: 42,
+          width:  42,
+          height: 42,
           decoration: BoxDecoration(
             color:  Colors.white.withValues(alpha: 0.92),
             shape:  BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color:  Colors.black.withValues(alpha: 0.12),
+                color:      Colors.black.withValues(alpha: 0.12),
                 blurRadius: 12,
-                offset: const Offset(0, 3),
-              )
+                offset:     const Offset(0, 3),
+              ),
             ],
           ),
           child: Stack(
@@ -1256,7 +1252,7 @@ class _TopIconButton extends StatelessWidget {
                     decoration: BoxDecoration(
                       color:        AppColors.error,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
+                      border:       Border.all(
                           color: Colors.white, width: 1.5),
                     ),
                     constraints: const BoxConstraints(
@@ -1288,40 +1284,38 @@ class _PlaceChip extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 100,
-          padding: const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 10),
+          width:   100,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: HomeTheme.surfaceAlt,
+            color:        HomeTheme.surfaceAlt,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: HomeTheme.border),
-            boxShadow: HomeTheme.cardShadow,
+            border:       Border.all(color: HomeTheme.border),
+            boxShadow:    HomeTheme.cardShadow,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment:  MainAxisAlignment.center,
             children: [
               Container(
-                width: 30, height: 30,
+                width:  30,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: HomeTheme.primary.withValues(alpha: 0.1),
+                  color:        HomeTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: Icon(place.icon,
                     color: HomeTheme.primary, size: 16),
               ),
               const SizedBox(height: 7),
-              Text(
-                place.label,
-                style: const TextStyle(
-                  fontFamily: 'Inter',
-                  color: HomeTheme.textPrimary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              Text(place.label,
+                  style: const TextStyle(
+                    fontFamily:  'Inter',
+                    color:       HomeTheme.textPrimary,
+                    fontSize:    12,
+                    fontWeight:  FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ],
           ),
         ),
@@ -1343,20 +1337,21 @@ class _RecentTripTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+        margin:  const EdgeInsets.fromLTRB(20, 0, 20, 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: HomeTheme.surface,
+          color:        HomeTheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: HomeTheme.border),
-          boxShadow: HomeTheme.cardShadow,
+          border:       Border.all(color: HomeTheme.border),
+          boxShadow:    HomeTheme.cardShadow,
         ),
         child: Row(
           children: [
             Column(
               children: [
                 Container(
-                  width: 9, height: 9,
+                  width:  9,
+                  height: 9,
                   decoration: BoxDecoration(
                     border: Border.all(
                         color: HomeTheme.primary, width: 2),
@@ -1364,11 +1359,11 @@ class _RecentTripTile extends StatelessWidget {
                   ),
                 ),
                 Container(
-                    width: 1.5,
-                    height: 22,
+                    width: 1.5, height: 22,
                     color: HomeTheme.border),
                 Container(
-                  width: 9, height: 9,
+                  width:  9,
+                  height: 9,
                   decoration: BoxDecoration(
                     color: HomeTheme.primary,
                     shape: BoxShape.circle,
@@ -1383,10 +1378,10 @@ class _RecentTripTile extends StatelessWidget {
                 children: [
                   Text(from,
                       style: const TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                        fontFamily:  'Inter',
+                        color:       HomeTheme.textPrimary,
+                        fontSize:    13,
+                        fontWeight:  FontWeight.w500,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
@@ -1396,7 +1391,7 @@ class _RecentTripTile extends StatelessWidget {
                       Expanded(
                         child: Text(to,
                             style: TextStyle(
-                              color: HomeTheme.textTertiary,
+                              color:   HomeTheme.textTertiary,
                               fontSize: 12,
                             ),
                             maxLines: 1,
@@ -1405,7 +1400,7 @@ class _RecentTripTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(date,
                           style: TextStyle(
-                            color: HomeTheme.textTertiary,
+                            color:   HomeTheme.textTertiary,
                             fontSize: 11,
                           )),
                     ],
@@ -1417,15 +1412,14 @@ class _RecentTripTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  fare > 0 ? '₵${fare.toStringAsFixed(2)}' : '',
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    color: HomeTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                if (fare > 0)
+                  Text('₵${fare.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontFamily:  'Inter',
+                        color:       HomeTheme.textPrimary,
+                        fontSize:    13,
+                        fontWeight:  FontWeight.w700,
+                      )),
                 const SizedBox(height: 6),
                 GestureDetector(
                   onTap: onRebook,
@@ -1433,7 +1427,7 @@ class _RecentTripTile extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: HomeTheme.primary
+                      color:        HomeTheme.primary
                           .withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
@@ -1441,15 +1435,13 @@ class _RecentTripTile extends StatelessWidget {
                             .withValues(alpha: 0.2),
                       ),
                     ),
-                    child: Text(
-                      'Rebook',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.primary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    child: Text('Rebook',
+                        style: TextStyle(
+                          fontFamily:  'Inter',
+                          color:       HomeTheme.primary,
+                          fontSize:    11,
+                          fontWeight:  FontWeight.w700,
+                        )),
                   ),
                 ),
               ],
@@ -1477,7 +1469,7 @@ class _PromoCard extends StatelessWidget {
                     promo.colorEnd.replaceFirst('#', '0xFF'))),
               ],
               begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+              end:   Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(24),
           ),
@@ -1489,19 +1481,19 @@ class _PromoCard extends StatelessWidget {
                   children: [
                     Text(promo.tag,
                         style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 9,
+                          color:         Colors.white70,
+                          fontSize:      9,
                           letterSpacing: 1.5,
-                          fontWeight: FontWeight.w700,
+                          fontWeight:    FontWeight.w700,
                         )),
                     const SizedBox(height: 6),
                     Text(promo.title,
                         style: const TextStyle(
-                          fontFamily: 'Inter',
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          height: 1.2,
+                          fontFamily:    'Inter',
+                          color:         Colors.white,
+                          fontSize:      20,
+                          fontWeight:    FontWeight.w800,
+                          height:        1.2,
                           letterSpacing: -0.4,
                         )),
                     if (promo.code != null) ...[
@@ -1510,19 +1502,18 @@ class _PromoCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color:        Colors.white,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text(
-                          'Code: ${promo.code}',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            color: Color(int.parse(promo.colorStart
-                                .replaceFirst('#', '0xFF'))),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        child: Text('Code: ${promo.code}',
+                            style: TextStyle(
+                              fontFamily:  'Inter',
+                              color:       Color(int.parse(
+                                  promo.colorStart
+                                      .replaceFirst('#', '0xFF'))),
+                              fontSize:    12,
+                              fontWeight:  FontWeight.w800,
+                            )),
                       ),
                     ],
                   ],
@@ -1530,7 +1521,7 @@ class _PromoCard extends StatelessWidget {
               ),
               Icon(Icons.local_offer_rounded,
                   color: Colors.white.withValues(alpha: 0.15),
-                  size: 80),
+                  size:  80),
             ],
           ),
         ),
@@ -1585,8 +1576,8 @@ class _PromoBanner {
       title:      d['title']      as String? ?? '',
       tag:        d['tag']        as String? ?? 'OFFER',
       code:       d['code']       as String?,
-      colorStart: d['colorStart'] as String? ?? '#00A86B',
-      colorEnd:   d['colorEnd']   as String? ?? '#00C97E',
+      colorStart: d['colorStart'] as String? ?? '#16A34A',
+      colorEnd:   d['colorEnd']   as String? ?? '#15803D',
     );
   }
 }

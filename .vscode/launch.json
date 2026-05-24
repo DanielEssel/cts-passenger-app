@@ -4,8 +4,10 @@
       "name": "Flutter",
       "type": "dart",
       "request": "launch",
-      "args": ["--dart-define=PLACES_API_KEY=YOUR_KEY_HERE",
-               "--dart-define=MAPS_API_KEY=YOUR_KEY_HERE"]
+      "args": [
+        "--dart-define=PLACES_API_KEY=AIzaSyAXlNfiCFOgNy9gwjj7_vrvU5Hzs4j9wUI",
+        "--dart-define=MAPS_API_KEY=AIzaSyAFqi7QoQAL5oOPlV6P4ZTNQT4IeRKCbeU"
+      ]
     }
   ]
 }
