@@ -1,5 +1,6 @@
 // lib/features/gas/models/gas_order.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/utils/otp_utils.dart';
 import 'package:equatable/equatable.dart';
 
 enum GasOrderType {
@@ -202,7 +203,8 @@ class GasOrder extends Equatable {
           scheduledFor != null ? Timestamp.fromDate(scheduledFor!) : null,
       'completedAt':
           completedAt != null ? Timestamp.fromDate(completedAt!) : null,
-      'metadata': metadata,
+      'metadata':    metadata,
+      'deliveryOtp':  OtpUtils.generate(),
     };
   }
 

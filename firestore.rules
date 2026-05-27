@@ -1,7 +1,8 @@
-rules_version = "2";
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Helper functions ──────────────────────────────────────────────────
     function isAuth() {
       return request.auth != null;
     }
@@ -14,190 +15,243 @@ service cloud.firestore {
         request.auth.uid == driverId
       );
     }
+    function isAdmin() {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
 
-    // ── Drivers ──────────────────────────────────────────────────────────
+    // ── Admins ────────────────────────────────────────────────────────────
+    match /admins/{uid} {
+      allow read:  if isAuth() && request.auth.uid == uid;
+      allow write: if isAdmin();
+    }
+
+    // ── Drivers ───────────────────────────────────────────────────────────
     match /drivers/{driverId} {
       allow read:  if isAuth();
-      allow write: if isOwner(driverId);
+      allow write: if isOwner(driverId) || isAdmin();
 
       match /notifications/{notifId} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
       match /earnings/{document=**} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
       match /stats/{document=**} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
       match /settings/{document=**} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
       match /withdrawals/{document=**} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
       match /dismissed_requests/{document=**} {
-        allow read, write: if isOwner(driverId);
+        allow read, write: if isOwner(driverId) || isAdmin();
       }
     }
 
-    // ── Users ─────────────────────────────────────────────────────────────
+    // ── Users (passengers) ────────────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isOwner(userId) || isAdmin();
 
       match /saved_places/{placeId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
       match /momo_methods/{momoId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
     }
 
     // ── Passengers (legacy) ───────────────────────────────────────────────
     match /passengers/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isOwner(userId) || isAdmin();
       match /savedPlaces/{placeId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
     }
 
     // ── Notifications ─────────────────────────────────────────────────────
     match /notifications/{userId}/items/{notifId} {
-      allow read, delete: if isOwner(userId);
-      allow update: if isOwner(userId)
-        && request.resource.data.diff(resource.data)
-           .affectedKeys().hasOnly(['isRead']);
-      allow create: if false; // Cloud Functions only
+      allow read, delete: if isOwner(userId) || isAdmin();
+      allow update: if (isOwner(userId)
+          && request.resource.data.diff(resource.data)
+             .affectedKeys().hasOnly(['isRead']))
+        || isAdmin();
+      allow create: if isAdmin(); // Cloud Functions + admin panel
     }
 
     // ── Wallets ───────────────────────────────────────────────────────────
     match /wallets/{userId} {
-      allow read: if isOwner(userId);
-      allow update: if isOwner(userId)
-        && request.resource.data.balance <= resource.data.balance;
+      allow read: if isOwner(userId) || isAdmin();
+      allow update: if (isOwner(userId)
+          && request.resource.data.balance <= resource.data.balance)
+        || isAdmin();
       match /transactions/{txId} {
-        allow read, create: if isOwner(userId);
-        allow update, delete: if false;
+        allow read, create: if isOwner(userId) || isAdmin();
+        allow update, delete: if isAdmin();
       }
     }
 
     // ── Transactions ──────────────────────────────────────────────────────
     match /transactions/{txId} {
-      allow read: if isAuth()
-        && resource.data.userId == request.auth.uid;
-      allow create: if isAuth()
-        && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow create: if (isAuth()
+          && request.resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     match /tip_transactions/{txId} {
-      allow read: if isAuth()
-        && resource.data.userId == request.auth.uid;
-      allow create: if isAuth()
-        && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow create: if (isAuth()
+          && request.resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // ── Trips ─────────────────────────────────────────────────────────────
     match /trips/{tripId} {
-      allow create: if isAuth()
-        && request.resource.data.passengerId == request.auth.uid;
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid)
+        || isAdmin();
       allow read: if isAuth();
       allow update: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.driverId == null
-              && request.resource.data.driverId == request.auth.uid);
-      allow delete: if false;
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (isAuth()
+                && resource.data.driverId == null
+                && request.resource.data.driverId == request.auth.uid)
+            || isAdmin();
+      allow delete: if isAdmin();
 
-      // ── Driver location updates ──────────────────────────────────────
       match /locations/{locationId} {
-        allow read:   if isAuth();
+        allow read: if isAuth();
         allow create, update: if isAuth()
-          && resource == null || get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == request.auth.uid;
+          && (resource == null
+              || get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == request.auth.uid);
       }
     }
 
-    // ── Rides (legacy rideRequests flow) ──────────────────────────────────
+    // ── Rides (legacy) ────────────────────────────────────────────────────
     match /rides/{rideId} {
-      allow create: if isAuth()
-        && request.resource.data.passengerId == request.auth.uid;
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid)
+        || isAdmin();
       allow read: if isAuth()
-        && (resource.data.driverId    == null
-            || resource.data.driverId == request.auth.uid
-            || resource.data.passengerId == request.auth.uid);
-      allow update: if isAuth()
-        && (resource.data.passengerId == request.auth.uid
-            || resource.data.driverId  == request.auth.uid
-            || (resource.data.driverId == null
-                && request.resource.data.driverId == request.auth.uid));
-      allow delete: if false;
+          && (resource.data.driverId    == null
+              || resource.data.driverId == request.auth.uid
+              || resource.data.passengerId == request.auth.uid)
+        || isAdmin();
+      allow update: if (isAuth()
+          && (resource.data.passengerId == request.auth.uid
+              || resource.data.driverId  == request.auth.uid
+              || (resource.data.driverId == null
+                  && request.resource.data.driverId == request.auth.uid)))
+        || isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── Ride Requests ─────────────────────────────────────────────────────
     match /rideRequests/{requestId} {
       allow create: if isAuth();
       allow read:   if isAuth();
-      allow update: if isAuth()
-        && (resource.data.passengerId == request.auth.uid
-            || resource.data.driverId  == request.auth.uid
-            || (resource.data.driverId  == null
-                && request.resource.data.driverId == request.auth.uid));
-      allow delete: if false;
+      allow update: if (isAuth()
+          && (resource.data.passengerId == request.auth.uid
+              || resource.data.driverId  == request.auth.uid
+              || (resource.data.driverId  == null
+                  && request.resource.data.driverId == request.auth.uid)))
+        || isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── Active Trips ──────────────────────────────────────────────────────
     match /active_trips/{tripId} {
       allow create: if isAuth();
       allow read, update: if isParty(
-        resource.data.passengerId,
-        resource.data.driverId
-      );
-      allow delete: if isAuth()
-        && resource.data.driverId == request.auth.uid;
+          resource.data.passengerId,
+          resource.data.driverId
+        ) || isAdmin();
+      allow delete: if (isAuth()
+          && resource.data.driverId == request.auth.uid)
+        || isAdmin();
     }
 
     // ── Deliveries ────────────────────────────────────────────────────────
     match /deliveries/{deliveryId} {
-      allow create: if isAuth()
-        && request.resource.data.passengerId == request.auth.uid;
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid)
+        || isAdmin();
       allow read: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.status   == "pending"
-              && resource.data.driverId == null);
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (isAuth()
+                && resource.data.status   == "pending"
+                && resource.data.driverId == null)
+            || isAdmin();
       allow update: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.driverId == null
-              && request.resource.data.driverId == request.auth.uid);
-      allow delete: if false;
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (isAuth()
+                && resource.data.driverId == null
+                && request.resource.data.driverId == request.auth.uid)
+            || isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── Gas Orders ────────────────────────────────────────────────────────
     match /gas_orders/{orderId} {
-      allow create: if isAuth()
-        && request.resource.data.passengerId == request.auth.uid;
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid)
+        || isAdmin();
       allow read: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.status   == "pendingApproval"
-              && resource.data.driverId == null);
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (isAuth()
+                && resource.data.status   == "pendingApproval"
+                && resource.data.driverId == null)
+            || isAdmin();
       allow update: if isParty(
-            resource.data.passengerId,
-            resource.data.driverId
-          )
-          || (isAuth()
-              && resource.data.driverId == null
-              && request.resource.data.driverId == request.auth.uid);
-      allow delete: if false;
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (isAuth()
+                && resource.data.driverId == null
+                && request.resource.data.driverId == request.auth.uid)
+            || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Withdrawals (top-level) ───────────────────────────────────────────
+    match /withdrawals/{withdrawalId} {
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow create: if isAuth()
+          && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Promotions ────────────────────────────────────────────────────────
+    match /promotions/{promoId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
     }
 
     // ── Driver Alerts ─────────────────────────────────────────────────────
@@ -208,29 +262,26 @@ service cloud.firestore {
     // ── Support Tickets ───────────────────────────────────────────────────
     match /supportTickets/{ticketId} {
       allow create: if isAuth()
-        && request.resource.data.userId == request.auth.uid;
-      allow read: if isAuth()
-        && resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+          && request.resource.data.userId == request.auth.uid;
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── Profile Photos ────────────────────────────────────────────────────
     match /profile_photos/{userId} {
       allow read:  if true;
-      allow write: if isOwner(userId);
-    }
-
-    // ── Promotions ────────────────────────────────────────────────────────
-    match /promotions/{promoId} {
-      allow read:  if isAuth();
-      allow write: if false;
+      allow write: if isOwner(userId) || isAdmin();
     }
 
     // ── Data Export Requests ──────────────────────────────────────────────
     match /data_export_requests/{id} {
       allow create: if isAuth()
-        && request.resource.data.userId == request.auth.uid;
-      allow read, update: if false;
+          && request.resource.data.userId == request.auth.uid;
+      allow read, update: if isAdmin();
+      allow delete: if isAdmin();
     }
   }
 }

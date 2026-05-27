@@ -1,12 +1,12 @@
 // lib/features/delivery/presentation/delivery_matching_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
 import '../models/delivery_request.dart';
 import '../../delivery/providers/delivery_provider.dart';
 import 'delivery_tracking_screen.dart';
+
+const _kPrimary = AppColors.primary;
 
 class DeliveryMatchingScreen extends ConsumerStatefulWidget {
   final String deliveryId;
@@ -30,35 +30,48 @@ class DeliveryMatchingScreen extends ConsumerStatefulWidget {
 class _DeliveryMatchingScreenState
     extends ConsumerState<DeliveryMatchingScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _pulseController;
-  int  _dotsCount  = 1;
+
+  late final AnimationController _pulseCtrl;
+  late final Animation<double>   _scaleOuter;
+  late final Animation<double>   _scaleInner;
+
+  int  _dots      = 1;
   bool _navigating = false;
+  bool _cancelling = false;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
+    _pulseCtrl = AnimationController(
       vsync:    this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1400),
     )..repeat();
+
+    _scaleOuter = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+    _scaleInner = Tween<double>(begin: 1.0, end: 1.25).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+
     _tickDots();
   }
 
   void _tickDots() {
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted) return;
-      setState(() => _dotsCount = (_dotsCount % 3) + 1);
+      setState(() => _dots = (_dots % 3) + 1);
       _tickDots();
     });
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _pulseCtrl.dispose();
     super.dispose();
   }
 
-  void _goToTracking(DeliveryRequest delivery) {
+  void _goToTracking() {
     if (_navigating) return;
     _navigating = true;
     Navigator.pushReplacement(
@@ -72,182 +85,237 @@ class _DeliveryMatchingScreenState
   }
 
   Future<void> _cancel() async {
-    await ref
-        .read(deliveryRepositoryProvider)
-        .cancelDelivery(widget.deliveryId, reason: 'Cancelled by passenger');
-    if (mounted) Navigator.pop(context);
+    if (_cancelling) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title:   const Text('Cancel request?',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text(
+            'Are you sure you want to cancel this delivery request?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    setState(() => _cancelling = true);
+
+    try {
+      await ref
+          .read(deliveryRepositoryProvider)
+          .cancelDelivery(widget.deliveryId, reason: 'Cancelled by passenger');
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _cancelling = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:         Text('Could not cancel: $e'),
+          backgroundColor: AppColors.error,
+          behavior:        SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+        ));
+      }
+    }
   }
 
-  IconData get _vehicleIcon {
-    if (widget.vehicleName == 'Aboboya') return Icons.electric_rickshaw_rounded;
-    if (widget.vehicleName == 'Mini Truck') return Icons.local_shipping_rounded;
-    return Icons.two_wheeler_rounded;
-  }
+  IconData get _vehicleIcon => switch (widget.vehicleName) {
+    'Aboboya'   => Icons.electric_rickshaw_rounded,
+    'Mini Truck' => Icons.local_shipping_rounded,
+    _           => Icons.two_wheeler_rounded,
+  };
 
   @override
   Widget build(BuildContext context) {
-    // ── Listen to Firestore — navigate when driver assigned ──
     ref.listen(
       deliveryStreamProvider(widget.deliveryId),
       (_, next) {
-        final delivery = next.value;
-        if (delivery == null) return;
-        if (delivery.status == DeliveryStatus.cancelled) {
+        final d = next.value;
+        if (d == null) return;
+        if (d.status == DeliveryStatus.cancelled) {
           if (mounted) Navigator.pop(context);
           return;
         }
-        if (delivery.status != DeliveryStatus.pending) {
-          _goToTracking(delivery);
-        }
+        if (d.status != DeliveryStatus.pending) _goToTracking();
       },
     );
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  GestureDetector(
-                    onTap: _cancel,
-                    child: Container(
-                      width: 36, height: 36,
-                      decoration: BoxDecoration(
-                        color:        AppColors.surfaceAlt,
-                        borderRadius: BorderRadius.circular(10),
-                        border:       Border.all(color: AppColors.border),
-                      ),
-                      child: const Icon(Icons.close_rounded,
-                          size: 18, color: AppColors.textSecondary),
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+            child: Column(
+              children: [
+                // ── Header ──
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _CancelBtn(
+                      onTap:    _cancel,
+                      loading:  _cancelling,
+                    ),
+                    Text(widget.vehicleName,
+                        style: const TextStyle(
+                          fontSize:   16,
+                          fontWeight: FontWeight.w700,
+                          color:      AppColors.textPrimary,
+                        )),
+                    const SizedBox(width: 36),
+                  ],
+                ),
+
+                const Spacer(),
+
+                // ── Pulse animation ──
+                AnimatedBuilder(
+                  animation: _pulseCtrl,
+                  builder: (_, __) => SizedBox(
+                    width: 180, height: 180,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Outer pulse
+                        Transform.scale(
+                          scale: _scaleOuter.value,
+                          child: Container(
+                            width:  140, height: 140,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _kPrimary.withValues(
+                                  alpha: (1 - _pulseCtrl.value) * 0.1),
+                            ),
+                          ),
+                        ),
+                        // Inner pulse
+                        Transform.scale(
+                          scale: _scaleInner.value,
+                          child: Container(
+                            width:  110, height: 110,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _kPrimary.withValues(
+                                  alpha: (1 - _pulseCtrl.value) * 0.15),
+                            ),
+                          ),
+                        ),
+                        // Icon
+                        Container(
+                          width:  80, height: 80,
+                          decoration: const BoxDecoration(
+                            color: _kPrimary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(_vehicleIcon,
+                              color: Colors.white, size: 36),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(widget.vehicleName, style: AppTextStyles.heading4),
-                  const SizedBox(width: 36),
-                ],
-              ),
-
-              const Spacer(),
-
-              // Pulse animation
-              AnimatedBuilder(
-                animation: _pulseController,
-                builder: (_, __) => Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Transform.scale(
-                      scale: 1.0 + (_pulseController.value * 0.4),
-                      child: Container(
-                        width: 140, height: 140,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.primary.withValues(
-                              alpha: (1 - _pulseController.value) * 0.12),
-                        ),
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 1.0 + (_pulseController.value * 0.2),
-                      child: Container(
-                        width: 110, height: 110,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.primary.withValues(
-                              alpha: (1 - _pulseController.value) * 0.15),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 80, height: 80,
-                      decoration: const BoxDecoration(
-                          color: AppColors.primary, shape: BoxShape.circle),
-                      child: Icon(_vehicleIcon,
-                          color: Colors.white, size: 36),
-                    ),
-                  ],
                 ),
-              ),
 
-              const SizedBox(height: 40),
+                const SizedBox(height: 40),
 
-              Text(
-                'Finding a rider${'.' * _dotsCount}',
-                style: AppTextStyles.heading2,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Looking for a nearby ${widget.vehicleName} rider',
-                style: AppTextStyles.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 40),
-
-              // Summary
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color:        AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border:       Border.all(color: AppColors.border),
+                Text(
+                  'Finding a rider${'.' * _dots}',
+                  style: const TextStyle(
+                    fontSize:   24,
+                    fontWeight: FontWeight.w800,
+                    color:      AppColors.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                child: Column(
-                  children: [
-                    _SummaryRow(icon: Icons.location_on_rounded,
-                        iconColor: AppColors.primary,
-                        label: 'Delivering to',
-                        value: widget.dropoff),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Divider(height: 0.5, color: AppColors.border),
-                    ),
-                    _SummaryRow(icon: Icons.payments_rounded,
-                        iconColor: AppColors.success,
-                        label: 'Estimated fare',
-                        value: widget.fare),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Divider(height: 0.5, color: AppColors.border),
-                    ),
-                    const _SummaryRow(
-                        icon: Icons.account_balance_wallet_rounded,
-                        iconColor: AppColors.info,
-                        label: 'Payment',
-                        value: 'CTSRide Wallet'),
-                  ],
+                const SizedBox(height: 8),
+                Text(
+                  'Looking for a nearby ${widget.vehicleName} rider',
+                  style: const TextStyle(
+                      fontSize: 14, color: AppColors.textSecondary),
+                  textAlign: TextAlign.center,
                 ),
-              ),
 
-              const Spacer(),
+                const SizedBox(height: 40),
 
-              GestureDetector(
-                onTap: _cancel,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                // ── Summary card ──
+                Container(
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color:        AppColors.errorLight,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                        color: AppColors.error.withValues(alpha: 0.2)),
+                    color:        AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border:       Border.all(color: AppColors.border),
                   ),
-                  child: const Text('Cancel request',
-                      style: TextStyle(
-                        fontFamily:  'Inter',
-                        fontSize:    15,
-                        fontWeight:  FontWeight.w600,
-                        color:       AppColors.error,
+                  child: Column(
+                    children: [
+                      _SummaryRow(
+                        icon:      Icons.location_on_rounded,
+                        iconColor: _kPrimary,
+                        label:     'Delivering to',
+                        value:     widget.dropoff,
                       ),
-                      textAlign: TextAlign.center),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 10),
+                        child:   Divider(height: 0.5, color: AppColors.border),
+                      ),
+                      _SummaryRow(
+                        icon:      Icons.payments_rounded,
+                        iconColor: AppColors.success,
+                        label:     'Estimated fare',
+                        value:     widget.fare,
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 10),
+                        child:   Divider(height: 0.5, color: AppColors.border),
+                      ),
+                      const _SummaryRow(
+                        icon:      Icons.account_balance_wallet_rounded,
+                        iconColor: AppColors.info,
+                        label:     'Payment',
+                        value:     'CTSRide Wallet',
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-            ],
+
+                const Spacer(),
+
+                // ── Cancel button ──
+                _cancelling
+                    ? const CircularProgressIndicator(color: _kPrimary)
+                    : SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: _cancel,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                            side: BorderSide(
+                                color: AppColors.error.withValues(alpha: 0.4)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: const Text('Cancel Request',
+                              style: TextStyle(
+                                fontSize:   15,
+                                fontWeight: FontWeight.w700,
+                              )),
+                        ),
+                      ),
+              ],
+            ),
           ),
         ),
       ),
@@ -255,10 +323,40 @@ class _DeliveryMatchingScreenState
   }
 }
 
+class _CancelBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  final bool         loading;
+  const _CancelBtn({required this.onTap, required this.loading});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: loading ? null : onTap,
+        child: Container(
+          width:  36, height: 36,
+          decoration: BoxDecoration(
+            color:        AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(10),
+            border:       Border.all(color: AppColors.border),
+          ),
+          child: loading
+              ? const Padding(
+                  padding: EdgeInsets.all(8),
+                  child:   CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color:       AppColors.error,
+                  ),
+                )
+              : const Icon(Icons.close_rounded,
+                  size: 18, color: AppColors.textSecondary),
+        ),
+      );
+}
+
 class _SummaryRow extends StatelessWidget {
   final IconData icon;
   final Color    iconColor;
-  final String   label, value;
+  final String   label;
+  final String   value;
 
   const _SummaryRow({
     required this.icon,
@@ -270,13 +368,32 @@ class _SummaryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          Icon(icon, color: iconColor, size: 18),
+          Container(
+            width:  32, height: 32,
+            decoration: BoxDecoration(
+              color:        iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: iconColor, size: 16),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: Text(label, style: AppTextStyles.bodySmall)),
-          Text(value,
-              style:    AppTextStyles.labelLarge,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color:    AppColors.textSecondary,
+                )),
+          ),
+          Flexible(
+            child: Text(value,
+                style: const TextStyle(
+                  fontSize:   13,
+                  fontWeight: FontWeight.w700,
+                  color:      AppColors.textPrimary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
         ],
       );
 }

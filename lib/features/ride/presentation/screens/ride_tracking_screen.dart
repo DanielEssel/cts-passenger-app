@@ -1,222 +1,331 @@
-// features/ride/screens/ride_tracking_screen.dart
-
+// lib/features/ride/presentation/screens/ride_tracking_screen.dart
 import 'dart:async';
+import 'dart:math';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
-
-import '../../../../core/constants/app_colors.dart';
-import '../../../../core/constants/app_text_styles.dart';
-import '../../../../widgets/common/shared_widgets.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../trip_complete_screen.dart';
 
-// ---------------------------------------------------------------------------
-// Trip status — matches Firestore string values exactly
-// ---------------------------------------------------------------------------
+// ── Constants ─────────────────────────────────────────────────────────────────
+const _kPrimary = Color(0xFF16A34A);
+const _kAccra   = LatLng(5.6037, -0.1870);
 
+// ── Trip status ───────────────────────────────────────────────────────────────
 enum _TripStatus {
   searching,
-  pending,
+  tripAccepted,
   driverArrived,
-  inProgress,
-  arriving,
+  tripStarted,
   completed,
   cancelledByDriver,
   cancelledByPassenger,
   unknown;
 
-  static _TripStatus fromString(String value) => switch (value) {
-        'searching' => searching,
-        'pending' => pending,
-        'driverArrived' => driverArrived,
-        'inProgress' => inProgress,
-        'arriving' => arriving,
-        'completed' => completed,
-        'cancelledByDriver' => cancelledByDriver,
-        'cancelledByPassenger' => cancelledByPassenger,
-        _ => unknown,
-      };
+  static _TripStatus fromString(String? v) => switch (v) {
+    'searching'            => searching,
+    'tripAccepted'         => tripAccepted,
+    'driverArrived'        => driverArrived,
+    'tripStarted'          => tripStarted,
+    'inProgress'           => tripStarted,
+    'completed'            => completed,
+    'cancelledByDriver'    => cancelledByDriver,
+    'cancelledByPassenger' => cancelledByPassenger,
+    _                      => unknown,
+  };
 
-  /// Maps Firestore status → 0-based step index for the progress stepper.
   int get stepIndex => switch (this) {
-        pending => 0,
-        driverArrived => 1,
-        inProgress => 2,
-        arriving => 3,
-        _ => 0,
-      };
+    tripAccepted  => 0,
+    driverArrived => 1,
+    tripStarted   => 2,
+    completed     => 3,
+    _             => 0,
+  };
+
+  bool get isTerminal =>
+      this == completed ||
+      this == cancelledByDriver ||
+      this == cancelledByPassenger;
+
+  bool get isCancelled =>
+      this == cancelledByDriver || this == cancelledByPassenger;
 }
 
-// ---------------------------------------------------------------------------
-// Screen
-// ---------------------------------------------------------------------------
-
+// ── Screen ────────────────────────────────────────────────────────────────────
 class RideTrackingScreen extends StatefulWidget {
+  /// Only tripId needed — everything else fetched live from Firestore
   final String tripId;
-  final String rideType;
-  final String destination;
-  final String fare;
-  final String driverName;
-  final double driverRating;
-  final String driverPlate;
-  final String eta;
-  final String? driverPhone; // optional — used for call/SMS
 
-  const RideTrackingScreen({
-    super.key,
-    required this.tripId,
-    required this.rideType,
-    required this.destination,
-    required this.fare,
-    required this.driverName,
-    required this.driverRating,
-    required this.driverPlate,
-    required this.eta,
-    this.driverPhone,
-  });
+  const RideTrackingScreen({super.key, required this.tripId});
 
   @override
   State<RideTrackingScreen> createState() => _RideTrackingScreenState();
 }
 
-class _RideTrackingScreenState extends State<RideTrackingScreen> {
-  StreamSubscription<DocumentSnapshot>? _tripSubscription;
+class _RideTrackingScreenState extends State<RideTrackingScreen>
+    with WidgetsBindingObserver {
 
-  _TripStatus _status = _TripStatus.pending;
-  String _eta = '';
-  bool _isCancelling = false;
+  // ── Trip data ─────────────────────────────────
+  Map<String, dynamic> _tripData = {};
+  _TripStatus _status   = _TripStatus.tripAccepted;
+  bool        _isLoading = true;
+
+  // ── Map ───────────────────────────────────────
+  GoogleMapController? _mapController;
+  LatLng?   _driverLatLng;
+  LatLng?   _pickupLatLng;
+  LatLng?   _dropoffLatLng;
+  bool      _mapReady = false;
+  BitmapDescriptor? _driverIcon;
+
+  // ── State ─────────────────────────────────────
+  bool _isCancelling          = false;
   bool _isNavigatingToComplete = false;
 
-  // Step metadata — purely presentational
+  // ── Subscriptions ──────────────────────────────
+  StreamSubscription<DocumentSnapshot>? _tripSub;
+
+  static const _mapStyle = '''
+[
+  {"elementType":"geometry","stylers":[{"color":"#f5f5f5"}]},
+  {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#e8f5e9"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#b3d9f2"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d8f0e4"}]}
+]
+''';
+
   static const _steps = [
-    (
-      label: 'Driver on the way',
-      sub: 'Your driver is heading to pickup',
-      icon: Icons.directions_car_rounded,
-      color: AppColors.info,
-    ),
-    (
-      label: 'Driver arrived',
-      sub: 'Your driver is at the pickup point',
-      icon: Icons.location_on_rounded,
-      color: AppColors.warning,
-    ),
-    (
-      label: 'On the way',
-      sub: 'Sit back and enjoy the ride',
-      icon: Icons.electric_bolt_rounded,
-      color: AppColors.primary,
-    ),
-    (
-      label: 'Arriving soon',
-      sub: 'Almost at your destination',
-      icon: Icons.flag_rounded,
-      color: AppColors.success,
-    ),
+    (label: 'Driver on the way',  icon: Icons.directions_car_rounded,  color: _kPrimary),
+    (label: 'Driver arrived',     icon: Icons.location_on_rounded,      color: Colors.orange),
+    (label: 'Trip in progress',   icon: Icons.electric_bolt_rounded,    color: Colors.blue),
+    (label: 'Completed',          icon: Icons.flag_rounded,             color: Colors.purple),
   ];
 
   @override
   void initState() {
     super.initState();
-    _eta = widget.eta;
-
-    // ✅ SystemChrome once, not in build()
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-
-    _listenToTripUpdates();
+    WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    _loadDriverIcon();
+    _subscribeToTrip();
   }
 
   @override
-  void dispose() {
-    _tripSubscription?.cancel();
-    super.dispose();
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refitMap();
   }
 
-  // ---------------------------------------------------------------------------
-  // Firestore listener
-  // ---------------------------------------------------------------------------
+  // ── Init ──────────────────────────────────────
 
-  void _listenToTripUpdates() {
-    _tripSubscription = FirebaseFirestore.instance
+  Future<void> _loadDriverIcon() async {
+    try {
+      _driverIcon = await BitmapDescriptor.asset(
+        const ImageConfiguration(size: Size(48, 48)),
+        'assets/icons/car_marker.png',
+      );
+      if (mounted) setState(() {});
+    } catch (_) {
+      _driverIcon = BitmapDescriptor.defaultMarkerWithHue(
+          BitmapDescriptor.hueAzure);
+    }
+  }
+
+  void _subscribeToTrip() {
+    _tripSub = FirebaseFirestore.instance
         .collection('trips')
         .doc(widget.tripId)
         .snapshots()
         .listen((snap) {
-      if (!mounted || !snap.exists) return;
+      if (!snap.exists || !mounted) return;
 
-      final data = snap.data()!;
-      final newStatus = _TripStatus.fromString(data['status'] as String? ?? '');
-      final newEta = data['eta'] as String? ?? _eta;
+      final data      = snap.data()!;
+      final newStatus = _TripStatus.fromString(data['status'] as String?);
+
+      // Extract driver location
+      final geo = data['driverCurrentLocation'] as GeoPoint?;
+      final newDriverLatLng = geo != null
+          ? LatLng(geo.latitude, geo.longitude)
+          : null;
+
+      // Extract pickup/dropoff
+      final pickup  = data['pickupLocation']  as GeoPoint?;
+      final dropoff = data['dropoffLocation'] as GeoPoint?;
 
       setState(() {
-        _status = newStatus;
-        _eta = newEta;
+        _tripData       = data;
+        _status         = newStatus;
+        _isLoading      = false;
+        _driverLatLng   = newDriverLatLng;
+        if (pickup  != null) _pickupLatLng  = LatLng(pickup.latitude,  pickup.longitude);
+        if (dropoff != null) _dropoffLatLng = LatLng(dropoff.latitude, dropoff.longitude);
       });
 
+      // Animate map to driver
+      if (newDriverLatLng != null && _mapReady) {
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLng(newDriverLatLng),
+        );
+      }
+
+      // Handle terminal states
       if (newStatus == _TripStatus.completed) {
-        _navigateToTripComplete(data);
+        _navigateToComplete(data);
       } else if (newStatus == _TripStatus.cancelledByDriver) {
         _showDriverCancelledDialog();
       }
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Navigation
-  // ---------------------------------------------------------------------------
+  // ── Map helpers ───────────────────────────────
 
-  void _navigateToTripComplete(Map<String, dynamic> data) {
-    if (!mounted || _isNavigatingToComplete) return;
-    _isNavigatingToComplete = true;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-          builder: (_) => TripCompleteScreen(
-                tripId: widget.tripId,
-                driverId: data['driverId'] as String? ??
-                    '', // ← from Firestore trip doc
-                driverName: widget.driverName,
-                driverRating: widget.driverRating,
-                destination: widget.destination,
-                fare: data['actualFare'] != null
-                    ? 'GHS ${(data['actualFare'] as num).toStringAsFixed(0)}'
-                    : widget.fare,
-                rideType: widget.rideType,
-              )),
+  void _refitMap() {
+    if (!_mapReady || _pickupLatLng == null || _dropoffLatLng == null) return;
+    final sw = LatLng(
+      min(_pickupLatLng!.latitude,  _dropoffLatLng!.latitude),
+      min(_pickupLatLng!.longitude, _dropoffLatLng!.longitude),
+    );
+    final ne = LatLng(
+      max(_pickupLatLng!.latitude,  _dropoffLatLng!.latitude),
+      max(_pickupLatLng!.longitude, _dropoffLatLng!.longitude),
+    );
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+          LatLngBounds(southwest: sw, northeast: ne), 80),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
+  Set<Marker> _buildMarkers() {
+    final markers = <Marker>{};
+
+    if (_pickupLatLng != null) {
+      markers.add(Marker(
+        markerId:   const MarkerId('pickup'),
+        position:   _pickupLatLng!,
+        icon:       BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen),
+        infoWindow: const InfoWindow(title: 'Pickup'),
+      ));
+    }
+
+    if (_dropoffLatLng != null) {
+      markers.add(Marker(
+        markerId:   const MarkerId('dropoff'),
+        position:   _dropoffLatLng!,
+        icon:       BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueRed),
+        infoWindow: const InfoWindow(title: 'Drop-off'),
+      ));
+    }
+
+    if (_driverLatLng != null) {
+      markers.add(Marker(
+        markerId:   const MarkerId('driver'),
+        position:   _driverLatLng!,
+        icon:       _driverIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        infoWindow: InfoWindow(
+            title: _tripData['driverName'] as String? ?? 'Your driver'),
+        flat:       true,
+      ));
+    }
+
+    return markers;
+  }
+
+  // ── Navigation ────────────────────────────────
+
+  void _navigateToComplete(Map<String, dynamic> data) {
+    if (!mounted || _isNavigatingToComplete) return;
+    _isNavigatingToComplete = true;
+
+    final fare = data['actualFare'] != null
+        ? 'GHS ${(data['actualFare'] as num).toStringAsFixed(2)}'
+        : data['estimatedFare'] != null
+            ? 'GHS ${(data['estimatedFare'] as num).toStringAsFixed(2)}'
+            : 'GHS 0.00';
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TripCompleteScreen(
+            tripId:       widget.tripId,
+            driverId:     data['driverId']     as String? ?? '',
+            driverName:   data['driverName']   as String? ?? 'Your driver',
+            driverRating: (data['driverRating'] as num?)?.toDouble() ?? 5.0,
+            destination:  data['dropoffAddress'] as String? ?? '',
+            fare:         fare,
+            rideType:     data['serviceType']  as String? ?? 'Ride',
+          ),
+        ),
+      );
+    });
+  }
+
+  // ── Actions ───────────────────────────────────
 
   Future<void> _callDriver() async {
-    final phone = widget.driverPhone;
-    if (phone == null || phone.isEmpty) return;
+    final phone = _tripData['driverPhone'] as String?;
+    if (phone == null || phone.isEmpty) {
+      _snack('Driver phone not available.');
+      return;
+    }
     final uri = Uri(scheme: 'tel', path: phone);
     if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   Future<void> _messageDriver() async {
-    final phone = widget.driverPhone;
-    if (phone == null || phone.isEmpty) return;
+    final phone = _tripData['driverPhone'] as String?;
+    if (phone == null || phone.isEmpty) {
+      _snack('Driver phone not available.');
+      return;
+    }
     final uri = Uri(scheme: 'sms', path: phone);
     if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   void _shareTrip() {
     Share.share(
-      'I\'m on my way to ${widget.destination}. '
-      'Track my trip: https://ctstrip.app/track/${widget.tripId}',
+      'I\'m on a CTSRide trip to ${_tripData['dropoffAddress'] ?? 'my destination'}. '
+      'Track me: https://ctstrip.app/track/${widget.tripId}',
       subject: 'My CTSRide trip',
     );
   }
 
   Future<void> _cancelRide() async {
     if (_isCancelling) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title:   const Text('Cancel ride?',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text(
+          'Cancelling after a driver has been assigned may incur a cancellation fee.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep Ride'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Cancel Ride'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
     setState(() => _isCancelling = true);
 
     try {
@@ -224,272 +333,315 @@ class _RideTrackingScreenState extends State<RideTrackingScreen> {
           .collection('trips')
           .doc(widget.tripId)
           .update({
-        'status': 'cancelledByPassenger',
-        'cancelledAt': FieldValue.serverTimestamp(),
-        'cancellationReason': 'Cancelled by passenger during ride',
+        'status':             'cancelledByPassenger',
+        'cancelledAt':        FieldValue.serverTimestamp(),
+        'cancellationReason': 'Cancelled by passenger',
       });
-
       if (mounted) {
-        Navigator.pop(context); // close dialog
-        Navigator.pop(context); // back to booking
+        Navigator.pushNamedAndRemoveUntil(
+            context, '/shell', (_) => false);
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not cancel. Please try again.')),
-        );
+        setState(() => _isCancelling = false);
+        _snack('Could not cancel. Please try again.', isError: true);
       }
-    } finally {
-      if (mounted) setState(() => _isCancelling = false);
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Dialogs / sheets
-  // ---------------------------------------------------------------------------
-
-  void _showCancelDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel ride?', style: AppTextStyles.heading3),
-        content: const Text(
-          'Cancelling after a driver has been assigned may incur a small fee.',
-          style: AppTextStyles.bodySmall,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Keep ride',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: _isCancelling ? null : _cancelRide,
-            child: Text(
-              'Cancel ride',
-              style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _snack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content:         Text(msg),
+        backgroundColor: isError ? Colors.red[700] : null,
+        behavior:        SnackBarBehavior.floating,
+        shape:           RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ));
   }
+
+  // ── Dialogs ───────────────────────────────────
 
   void _showDriverCancelledDialog() {
     if (!mounted) return;
     showDialog<void>(
-      context: context,
+      context:            context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Driver Cancelled'),
-        content: const Text(
-          'The driver cancelled your trip. Please book again.',
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64, height: 64,
+              decoration: BoxDecoration(
+                color:        Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.cancel_rounded,
+                  color: Colors.red, size: 32),
+            ),
+            const SizedBox(height: 16),
+            const Text('Driver Cancelled',
+                style: TextStyle(
+                  fontSize:   18,
+                  fontWeight: FontWeight.w700,
+                )),
+            const SizedBox(height: 8),
+            const Text(
+              'Your driver cancelled the trip. We\'ll find you another driver.',
+              textAlign: TextAlign.center,
+              style:     TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogCtx);
+                  if (context.mounted) {
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/shell', (_) => false);
+                  }
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: _kPrimary,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Book Again'),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context); // close dialog
-              Navigator.pop(context); // back to booking
-            },
-            child: const Text('OK'),
-          ),
-        ],
       ),
     );
   }
 
   void _showSOSSheet() {
     showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
+      context:         context,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _SOSSheet(tripId: widget.tripId),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tripSub?.cancel();
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  // ── Build ─────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final stepIndex = _status.stepIndex;
-    final currentStep = _steps[stepIndex];
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: _kPrimary),
+        ),
+      );
+    }
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          _MapOverlay(
-            statusLabel: currentStep.label,
-            statusIcon: currentStep.icon,
-            eta: _eta,
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    _StatusStepper(currentStep: stepIndex, steps: _steps),
-                    const SizedBox(height: 16),
-                    _DriverCard(
-                      driverName: widget.driverName,
-                      driverRating: widget.driverRating,
-                      driverPlate: widget.driverPlate,
-                      rideType: widget.rideType,
-                      destination: widget.destination,
-                      fare: widget.fare,
+    // Prevent back navigation during active trip
+    return PopScope(
+      canPop: _status.isTerminal,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _showCantLeaveSnack();
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAF9),
+        body: Column(
+          children: [
+            // ── Map ──
+            Expanded(
+              flex: 55,
+              child: Stack(
+                children: [
+                  GoogleMap(
+                    style: _mapStyle,
+                    onMapCreated: (c) {
+                      _mapController = c;
+                      setState(() => _mapReady = true);
+                      WidgetsBinding.instance.addPostFrameCallback(
+                          (_) => _refitMap());
+                    },
+                    initialCameraPosition: CameraPosition(
+                      target: _pickupLatLng ?? _kAccra,
+                      zoom:   14,
                     ),
-                    const SizedBox(height: 12),
-                    _ActionButtonRow(
-                      onCall: _callDriver,
-                      onMessage: _messageDriver,
-                      onShare: _shareTrip,
-                      onCancel: () => _showCancelDialog(),
+                    markers:              _buildMarkers(),
+                    myLocationEnabled:    true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled:  false,
+                    mapToolbarEnabled:    false,
+                    compassEnabled:       false,
+                  ),
+
+                  // Recenter button
+                  Positioned(
+                    top:   MediaQuery.of(context).padding.top + 12,
+                    right: 16,
+                    child: _MapBtn(
+                      icon:  Icons.my_location_rounded,
+                      color: _kPrimary,
+                      onTap: _refitMap,
                     ),
-                    const SizedBox(height: 12),
-                    _SOSButton(onTap: _showSOSSheet),
-                    const SizedBox(height: 16),
-                  ],
+                  ),
+
+                  // Status overlay at bottom of map
+                  Positioned(
+                    bottom: 0, left: 0, right: 0,
+                    child:  _buildStatusBar(),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Bottom panel ──
+            Expanded(
+              flex: 45,
+              child: Container(
+                color: Colors.white,
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    20, 0, 20,
+                    MediaQuery.of(context).padding.bottom + 16,
+                  ),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 8),
+                      _buildStepper(),
+                      const SizedBox(height: 16),
+                      _buildDriverCard(),
+                      const SizedBox(height: 12),
+                      _buildActionRow(),
+                      const SizedBox(height: 12),
+                      _buildSOSButton(),
+                    ],
+                  ),
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCantLeaveSnack() {
+    _snack('Please wait for your trip to complete before leaving.');
+  }
+
+  // ── Status bar ────────────────────────────────
+
+  Widget _buildStatusBar() {
+    final (color, icon, label) = switch (_status) {
+      _TripStatus.tripAccepted  => (_kPrimary,     Icons.directions_car_rounded,  'Driver is on the way'),
+      _TripStatus.driverArrived => (Colors.orange, Icons.location_on_rounded,     'Driver has arrived'),
+      _TripStatus.tripStarted   => (Colors.blue,   Icons.electric_bolt_rounded,   'Trip in progress'),
+      _TripStatus.completed     => (Colors.purple, Icons.flag_rounded,            'Trip completed'),
+      _TripStatus.cancelledByDriver    => (Colors.red, Icons.cancel_rounded, 'Cancelled by driver'),
+      _TripStatus.cancelledByPassenger => (Colors.red, Icons.cancel_rounded, 'Cancelled'),
+      _                         => (_kPrimary, Icons.search_rounded, 'Finding driver...'),
+    };
+
+    final eta = _tripData['eta'] as String?;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color:        color,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                  color:      Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize:   14,
+                )),
           ),
+          if (eta != null)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color:        Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(eta,
+                  style: const TextStyle(
+                    color:      Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize:   12,
+                  )),
+            ),
         ],
       ),
     );
   }
-}
 
-// =============================================================================
-// Sub-widgets
-// =============================================================================
+  // ── Stepper ───────────────────────────────────
 
-class _MapOverlay extends StatelessWidget {
-  final String statusLabel;
-  final IconData statusIcon;
-  final String eta;
-
-  const _MapOverlay({
-    required this.statusLabel,
-    required this.statusIcon,
-    required this.eta,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const MapPlaceholder(height: 280, showRoute: true),
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 12,
-          left: 16,
-          right: 16,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              children: [
-                Icon(statusIcon, color: AppColors.background, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    statusLabel,
-                    style: AppTextStyles.labelLarge
-                        .copyWith(color: AppColors.background),
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    eta,
-                    style: AppTextStyles.caption
-                        .copyWith(color: AppColors.background),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatusStepper extends StatelessWidget {
-  final int currentStep;
-  final List<({String label, String sub, IconData icon, Color color})> steps;
-
-  const _StatusStepper({
-    required this.currentStep,
-    required this.steps,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildStepper() {
+    final step = _status.stepIndex;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color:        Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        border:       Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Row(
-        children: List.generate(steps.length, (i) {
-          final isDone = i < currentStep;
-          final isCurrent = i == currentStep;
+        children: List.generate(_steps.length, (i) {
+          final done    = i < step;
+          final current = i == step;
           return Expanded(
             child: Row(
               children: [
                 Container(
-                  width: 24,
-                  height: 24,
+                  width:  24, height: 24,
                   decoration: BoxDecoration(
-                    color: isDone
-                        ? AppColors.success
-                        : isCurrent
-                            ? AppColors.primary
-                            : AppColors.surfaceAlt,
+                    color: done
+                        ? _kPrimary
+                        : current
+                            ? _steps[i].color
+                            : const Color(0xFFF3F4F6),
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isDone
-                          ? AppColors.success
-                          : isCurrent
-                              ? AppColors.primary
-                              : AppColors.border,
+                      color: done || current
+                          ? Colors.transparent
+                          : const Color(0xFFD1D5DB),
                     ),
                   ),
                   child: Icon(
-                    isDone ? Icons.check_rounded : steps[i].icon,
-                    size: 12,
-                    color: isDone || isCurrent
-                        ? AppColors.background
-                        : AppColors.textTertiary,
+                    done ? Icons.check_rounded : _steps[i].icon,
+                    size:  12,
+                    color: done || current
+                        ? Colors.white
+                        : const Color(0xFF9CA3AF),
                   ),
                 ),
-                if (i < steps.length - 1)
+                if (i < _steps.length - 1)
                   Expanded(
                     child: Container(
                       height: 2,
-                      color: isDone ? AppColors.success : AppColors.border,
+                      color:  done ? _kPrimary : const Color(0xFFE5E7EB),
                     ),
                   ),
               ],
@@ -499,117 +651,120 @@ class _StatusStepper extends StatelessWidget {
       ),
     );
   }
-}
 
-class _DriverCard extends StatelessWidget {
-  final String driverName;
-  final double driverRating;
-  final String driverPlate;
-  final String rideType;
-  final String destination;
-  final String fare;
+  // ── Driver card ───────────────────────────────
 
-  const _DriverCard({
-    required this.driverName,
-    required this.driverRating,
-    required this.driverPlate,
-    required this.rideType,
-    required this.destination,
-    required this.fare,
-  });
+  Widget _buildDriverCard() {
+    final driverName   = _tripData['driverName']   as String? ?? 'Your Driver';
+    final driverRating = (_tripData['driverRating'] as num?)?.toDouble() ?? 5.0;
+    final driverPlate  = _tripData['driverPlate']  as String? ?? '';
+    final serviceType  = _tripData['serviceType']  as String? ?? 'Ride';
+    final destination  = _tripData['dropoffAddress'] as String? ?? '';
+    final estimatedFare = (_tripData['estimatedFare'] as num?)?.toDouble() ?? 0.0;
 
-  /// ✅ Safe initials — never crashes on short names
-  String get _initials {
     final parts = driverName.trim().split(' ');
-    if (parts.isEmpty || parts.first.isEmpty) return '?';
-    if (parts.length == 1) return parts.first[0].toUpperCase();
-    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-  }
+    final initials = parts.length >= 2
+        ? '${parts.first[0]}${parts.last[0]}'.toUpperCase()
+        : driverName.isNotEmpty
+            ? driverName[0].toUpperCase()
+            : 'D';
 
-  @override
-  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color:        Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        border:       Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Column(
         children: [
           Row(
             children: [
               CircleAvatar(
-                radius: 26,
-                backgroundColor: AppColors.primary,
-                child: Text(
-                  _initials,
-                  style: AppTextStyles.heading4
-                      .copyWith(color: AppColors.background),
-                ),
+                radius:          26,
+                backgroundColor: _kPrimary,
+                child: Text(initials,
+                    style: const TextStyle(
+                      color:      Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize:   16,
+                    )),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(driverName, style: AppTextStyles.heading4),
-                    const SizedBox(height: 2),
+                    Text(driverName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize:   15,
+                        )),
                     Row(
                       children: [
                         const Icon(Icons.star_rounded,
-                            color: AppColors.warning, size: 14),
-                        const SizedBox(width: 4),
-                        Text('$driverRating', style: AppTextStyles.bodySmall),
+                            color: Color(0xFFFFB74D), size: 14),
+                        const SizedBox(width: 3),
+                        Text(driverRating.toStringAsFixed(1),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color:    Color(0xFF6B7280),
+                            )),
                         const SizedBox(width: 8),
-                        const Text('·', style: AppTextStyles.bodySmall),
+                        const Text('·',
+                            style: TextStyle(color: Color(0xFF6B7280))),
                         const SizedBox(width: 8),
-                        Text(rideType, style: AppTextStyles.bodySmall),
+                        Text(serviceType,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color:    Color(0xFF6B7280),
+                            )),
                       ],
                     ),
                   ],
                 ),
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.darkNavy,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  driverPlate,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.background,
-                    letterSpacing: 1,
+              if (driverPlate.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color:        const Color(0xFF1F2937),
+                    borderRadius: BorderRadius.circular(8),
                   ),
+                  child: Text(driverPlate,
+                      style: const TextStyle(
+                        fontSize:      12,
+                        fontWeight:    FontWeight.w700,
+                        color:         Colors.white,
+                        letterSpacing: 1,
+                      )),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 12),
-          const Divider(height: 0.5, color: AppColors.border),
+          const Divider(height: 1, color: Color(0xFFF3F4F6)),
           const SizedBox(height: 12),
           Row(
             children: [
-              const Icon(Icons.flag_rounded,
-                  color: AppColors.primary, size: 16),
+              const Icon(Icons.flag_rounded, color: _kPrimary, size: 16),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  destination,
-                  style: AppTextStyles.bodySmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(destination,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color:    Color(0xFF374151),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
               ),
               Text(
-                fare,
-                style:
-                    AppTextStyles.labelLarge.copyWith(color: AppColors.primary),
+                'GHS ${estimatedFare.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize:   13,
+                  fontWeight: FontWeight.w700,
+                  color:      _kPrimary,
+                ),
               ),
             ],
           ),
@@ -617,64 +772,108 @@ class _DriverCard extends StatelessWidget {
       ),
     );
   }
-}
 
-class _ActionButtonRow extends StatelessWidget {
-  final VoidCallback onCall;
-  final VoidCallback onMessage;
-  final VoidCallback onShare;
-  final VoidCallback onCancel;
+  // ── Action row ────────────────────────────────
 
-  const _ActionButtonRow({
-    required this.onCall,
-    required this.onMessage,
-    required this.onShare,
-    required this.onCancel,
-  });
+  Widget _buildActionRow() => Row(
+        children: [
+          Expanded(child: _ActionBtn(
+            icon:  Icons.phone_rounded,
+            label: 'Call',
+            onTap: _callDriver,
+          )),
+          const SizedBox(width: 8),
+          Expanded(child: _ActionBtn(
+            icon:  Icons.chat_bubble_rounded,
+            label: 'Message',
+            onTap: _messageDriver,
+          )),
+          const SizedBox(width: 8),
+          Expanded(child: _ActionBtn(
+            icon:  Icons.share_rounded,
+            label: 'Share',
+            onTap: _shareTrip,
+          )),
+          const SizedBox(width: 8),
+          Expanded(child: _ActionBtn(
+            icon:      Icons.close_rounded,
+            label:     'Cancel',
+            color:     Colors.red.withValues(alpha: 0.08),
+            iconColor: Colors.red,
+            onTap:     _status.isTerminal ? null : _cancelRide,
+          )),
+        ],
+      );
 
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _ActionButton(
-              icon: Icons.phone_rounded, label: 'Call', onTap: onCall),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _ActionButton(
-              icon: Icons.chat_bubble_rounded,
-              label: 'Message',
-              onTap: onMessage),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _ActionButton(
-              icon: Icons.share_rounded, label: 'Share trip', onTap: onShare),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _ActionButton(
-            icon: Icons.close_rounded,
-            label: 'Cancel',
-            color: AppColors.errorLight,
-            iconColor: AppColors.error,
-            onTap: onCancel,
+  // ── SOS button ────────────────────────────────
+
+  Widget _buildSOSButton() => GestureDetector(
+        onTap: _showSOSSheet,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color:        Colors.red.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border:       Border.all(
+                color: Colors.red.withValues(alpha: 0.2)),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.emergency_rounded,
+                  color: Colors.red, size: 18),
+              SizedBox(width: 8),
+              Text('SOS Emergency',
+                  style: TextStyle(
+                    fontSize:   14,
+                    fontWeight: FontWeight.w600,
+                    color:      Colors.red,
+                  )),
+            ],
           ),
         ),
-      ],
-    );
-  }
+      );
 }
 
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final Color? color;
-  final Color? iconColor;
+// ═══════════════════════════════════════════════
+// WIDGETS
+// ═══════════════════════════════════════════════
 
-  const _ActionButton({
+class _MapBtn extends StatelessWidget {
+  final IconData     icon;
+  final Color        color;
+  final VoidCallback onTap;
+  const _MapBtn({required this.icon, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width:  42, height: 42,
+          decoration: BoxDecoration(
+            color:  Colors.white,
+            shape:  BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color:      Colors.black.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset:     const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+      );
+}
+
+class _ActionBtn extends StatelessWidget {
+  final IconData      icon;
+  final String        label;
+  final VoidCallback? onTap;
+  final Color?        color;
+  final Color?        iconColor;
+
+  const _ActionBtn({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -683,63 +882,36 @@ class _ActionButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: color ?? AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: iconColor ?? AppColors.textSecondary, size: 20),
-            const SizedBox(height: 4),
-            Text(label,
-                style: AppTextStyles.caption, textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SOSButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _SOSButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.errorLight,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.emergency_rounded, color: AppColors.error, size: 18),
-            SizedBox(width: 8),
-            Text(
-              'SOS Emergency',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.error,
-              ),
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedOpacity(
+          opacity:  onTap == null ? 0.4 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color:        color ?? const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+              border:       Border.all(color: const Color(0xFFE5E7EB)),
             ),
-          ],
+            child: Column(
+              children: [
+                Icon(icon,
+                    color: iconColor ?? const Color(0xFF6B7280),
+                    size:  20),
+                const SizedBox(height: 4),
+                Text(label,
+                    style: const TextStyle(
+                      fontSize:   11,
+                      fontWeight: FontWeight.w500,
+                      color:      Color(0xFF6B7280),
+                    ),
+                    textAlign: TextAlign.center),
+              ],
+            ),
+          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class _SOSSheet extends StatelessWidget {
@@ -747,96 +919,106 @@ class _SOSSheet extends StatelessWidget {
   const _SOSSheet({required this.tripId});
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Icon(Icons.emergency_rounded, color: AppColors.error, size: 40),
-          const SizedBox(height: 12),
-          const Text('Emergency options', style: AppTextStyles.heading3),
-          const SizedBox(height: 20),
-          _SOSOption(
-            icon: Icons.local_police_rounded,
-            label: 'Call Police (191)',
-            onTap: () async {
-              Navigator.pop(context);
-              final uri = Uri(scheme: 'tel', path: '191');
-              if (await canLaunchUrl(uri)) await launchUrl(uri);
-            },
-          ),
-          _SOSOption(
-            icon: Icons.local_hospital_rounded,
-            label: 'Call Ambulance (193)',
-            onTap: () async {
-              Navigator.pop(context);
-              final uri = Uri(scheme: 'tel', path: '193');
-              if (await canLaunchUrl(uri)) await launchUrl(uri);
-            },
-          ),
-          _SOSOption(
-            icon: Icons.people_rounded,
-            label: 'Share trip with emergency contact',
-            onTap: () {
-              Navigator.pop(context);
-              Share.share(
-                'I need help. My trip ID is $tripId. '
-                'Track me at: https://ctstrip.app/track/$tripId',
-                subject: 'Emergency — CTSRide trip',
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _SOSOption extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _SOSOption({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.errorLight,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          24, 12, 24,
+          MediaQuery.of(context).padding.bottom + 24,
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: AppColors.error, size: 20),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: AppTextStyles.labelLarge.copyWith(color: AppColors.error),
+            Container(
+              width:  40, height: 4,
+              decoration: BoxDecoration(
+                color:        Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              width:  64, height: 64,
+              decoration: BoxDecoration(
+                color:        Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.emergency_rounded,
+                  color: Colors.red, size: 32),
+            ),
+            const SizedBox(height: 12),
+            const Text('Emergency',
+                style: TextStyle(
+                  fontSize:   20,
+                  fontWeight: FontWeight.w800,
+                )),
+            const SizedBox(height: 4),
+            const Text('Select an option below',
+                style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 20),
+            _SOSOption(
+              icon:  Icons.local_police_rounded,
+              label: 'Call Police (191)',
+              onTap: () async {
+                Navigator.pop(context);
+                final uri = Uri(scheme: 'tel', path: '191');
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+            ),
+            _SOSOption(
+              icon:  Icons.local_hospital_rounded,
+              label: 'Call Ambulance (193)',
+              onTap: () async {
+                Navigator.pop(context);
+                final uri = Uri(scheme: 'tel', path: '193');
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+            ),
+            _SOSOption(
+              icon:  Icons.people_rounded,
+              label: 'Share location with emergency contact',
+              onTap: () {
+                Navigator.pop(context);
+                Share.share(
+                  'I need help. My trip ID is $tripId. '
+                  'Track me: https://ctstrip.app/track/$tripId',
+                  subject: 'Emergency — CTSRide',
+                );
+              },
             ),
           ],
         ),
-      ),
-    );
-  }
+      );
+}
+
+class _SOSOption extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final VoidCallback onTap;
+  const _SOSOption({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin:  const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color:        Colors.red.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border:       Border.all(
+                color: Colors.red.withValues(alpha: 0.15)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.red, size: 20),
+              const SizedBox(width: 12),
+              Text(label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color:      Colors.red,
+                    fontSize:   14,
+                  )),
+            ],
+          ),
+        ),
+      );
 }

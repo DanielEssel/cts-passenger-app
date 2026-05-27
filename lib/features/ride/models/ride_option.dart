@@ -1,6 +1,7 @@
 // lib/features/ride/services/ride_options_service.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/services/pricing_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../models/service_type.dart';
 
@@ -71,28 +72,22 @@ extension ServiceTypeExtension on ServiceType {
   }
 
   double get baseFare {
+    final p = PricingService.instance;
     switch (this) {
-      case ServiceType.taxi:
-        return 5.0;
-      case ServiceType.okada:
-        return 3.0;
-      case ServiceType.delivery:
-        return 8.0;
-      case ServiceType.gas:
-        return 10.0;
+      case ServiceType.taxi:     return p.taxiBaseFare;
+      case ServiceType.okada:    return p.okadaBaseFare;
+      case ServiceType.delivery: return p.deliveryBaseFare;
+      case ServiceType.gas:      return p.gasDeliveryFee;
     }
   }
 
   double get pricePerKm {
+    final p = PricingService.instance;
     switch (this) {
-      case ServiceType.taxi:
-        return 2.5;
-      case ServiceType.okada:
-        return 1.5;
-      case ServiceType.delivery:
-        return 3.0;
-      case ServiceType.gas:
-        return 0;
+      case ServiceType.taxi:     return p.taxiPerKmRate;
+      case ServiceType.okada:    return p.okadaPerKmRate;
+      case ServiceType.delivery: return p.deliveryPerKmRate;
+      case ServiceType.gas:      return 0;
     }
   }
 
@@ -268,26 +263,20 @@ class RideOptionsService {
     );
   }
 
-  /// Dynamic pricing algorithm based on distance
+  /// Dynamic pricing algorithm based on distance — reads from Firestore settings
   static double calculateDynamicPrice(RideOption option, double distanceKm) {
-    const pricePerKmTaxi = 2.5;
-    const pricePerKmOkada = 1.8;
-    const pricePerKmDelivery = 2.2;
-
-    final pricePerKm = switch (option.serviceType) {
-      ServiceType.taxi => pricePerKmTaxi,
-      ServiceType.okada => pricePerKmOkada,
-      ServiceType.delivery => pricePerKmDelivery,
-      ServiceType.gas => 0,
+    final pricing = PricingService.instance;
+    return switch (option.serviceType) {
+      ServiceType.taxi     => pricing.calculateRideFare('taxi',     distanceKm),
+      ServiceType.okada    => pricing.calculateRideFare('okada',    distanceKm),
+      ServiceType.delivery => pricing.calculateDeliveryFare(distanceKm),
+      ServiceType.gas      => pricing.gasDeliveryFee,
     };
-
-    return option.basePrice + (pricePerKm * distanceKm);
   }
 
-  /// Calculate price with surge multiplier
+  /// Calculate price with surge — surge is already applied inside PricingService
   static double calculatePriceWithSurge(RideOption option, double distanceKm, double surgeMultiplier) {
-    final basePrice = calculateDynamicPrice(option, distanceKm);
-    return basePrice * surgeMultiplier;
+    return calculateDynamicPrice(option, distanceKm);
   }
 
   /// Get estimated time based on distance and service type

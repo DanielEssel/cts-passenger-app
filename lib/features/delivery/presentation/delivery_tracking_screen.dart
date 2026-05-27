@@ -1,6 +1,7 @@
 // lib/features/delivery/delivery_tracking_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -112,6 +113,8 @@ class _TrackingBody extends ConsumerWidget {
                   ],
                 ],
 
+                _buildOtpCard(context),
+                const SizedBox(height: 12),
                 _buildRiderCard(context, ref),
                 const SizedBox(height: 12),
 
@@ -309,6 +312,203 @@ class _TrackingBody extends ConsumerWidget {
 
   // ── Rider card ────────────────────────────────────────────────────────────
 
+  Widget _buildOtpCard(BuildContext context) {
+    final otp = delivery.deliveryOtp;
+    if (otp == null || otp.isEmpty) return const SizedBox.shrink();
+    if (_isCompleted || _isCancelled) return const SizedBox.shrink();
+
+    final receiverName  = delivery.receiverName  ?? 'Recipient';
+    final receiverPhone = delivery.receiverPhone ?? '';
+
+    // WhatsApp share message
+    final shareMsg = 'Hi $receiverName, your delivery OTP is: *$otp*\n\n'
+        'Please give this code to the delivery rider when they arrive. '
+        'CTSRide Delivery';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color:        AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border:       Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color:      Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8, offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color:        AppColors.primaryDim,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.lock_rounded,
+                  color: AppColors.primary, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Delivery OTP',
+                      style: TextStyle(
+                        fontSize:   13,
+                        fontWeight: FontWeight.w700,
+                        color:      AppColors.textPrimary,
+                      )),
+                  const Text(
+                    'Share this code with the recipient',
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+
+          const SizedBox(height: 16),
+
+          // OTP display
+          Container(
+            width:  double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color:        AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
+              border:       Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: otp.split('').map((digit) => Container(
+                width:  44, height: 52,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color:        AppColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border:       Border.all(color: AppColors.primary),
+                  boxShadow: [
+                    BoxShadow(
+                      color:      AppColors.primary.withValues(alpha: 0.1),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(digit,
+                      style: const TextStyle(
+                        fontSize:   24,
+                        fontWeight: FontWeight.w900,
+                        color:      AppColors.primary,
+                        fontFamily: 'monospace',
+                      )),
+                ),
+              )).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // Info text
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color:        const Color(0xFFFFF7ED),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(children: [
+              const Icon(Icons.info_outline_rounded,
+                  color: Color(0xFFD97706), size: 14),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'The rider will ask $receiverName for this code to complete delivery.',
+                  style: const TextStyle(
+                    fontSize: 11, color: Color(0xFF92400E),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Share buttons
+          Row(children: [
+            // Share via WhatsApp
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final waUrl = Uri.parse(
+                    'https://wa.me/${receiverPhone.replaceAll('+', '')}?text=${Uri.encodeComponent(shareMsg)}'
+                  );
+                  if (await canLaunchUrl(waUrl)) {
+                    await launchUrl(waUrl,
+                        mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color:        const Color(0xFF25D366),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.chat_rounded,
+                          color: Colors.white, size: 15),
+                      SizedBox(width: 6),
+                      Text('Send via WhatsApp',
+                          style: TextStyle(
+                            color:      Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize:   12,
+                          )),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Share via SMS/other
+            GestureDetector(
+              onTap: () => Share.share(shareMsg,
+                  subject: 'Your CTSRide Delivery OTP'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color:        AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                  border:       Border.all(color: AppColors.border),
+                ),
+                child: const Row(children: [
+                  Icon(Icons.share_rounded,
+                      color: AppColors.textSecondary, size: 15),
+                  SizedBox(width: 6),
+                  Text('Share',
+                      style: TextStyle(
+                        fontSize:   12,
+                        fontWeight: FontWeight.w600,
+                        color:      AppColors.textSecondary,
+                      )),
+                ]),
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRiderCard(BuildContext context, WidgetRef ref) {
     final name   = delivery.driverName   ?? 'Your rider';
     final rating = delivery.driverRating ?? 0.0;
@@ -346,7 +546,7 @@ class _TrackingBody extends ConsumerWidget {
                       const Icon(Icons.star_rounded,
                           color: AppColors.warning, size: 13),
                       const SizedBox(width: 3),
-                      Text('${rating.toStringAsFixed(1)}',
+                      Text(rating.toStringAsFixed(1),
                           style: AppTextStyles.bodySmall),
                       const SizedBox(width: 6),
                     ],

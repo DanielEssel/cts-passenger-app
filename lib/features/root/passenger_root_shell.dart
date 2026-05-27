@@ -183,10 +183,14 @@ case AppRoutes.deliveryTracking:
         );
 
       case AppRoutes.rideTracking:
-        final rideId = settings.arguments as String;
-        return MaterialPageRoute(
+        final args = settings.arguments;
+        final tripId = args is String
+            ? args
+            : args is Map ? (args['rideId'] ?? args['tripId'] ?? '') as String
+            : '';
+        return MaterialPageRoute<void>(
           builder: (context) => RideTrackingScreen(
-            rideId: rideId,
+            tripId: tripId,
           ),
           settings: settings,
         );

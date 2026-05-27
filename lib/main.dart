@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
+import 'core/services/pricing_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Add this
 import 'core/constants/app_colors.dart';
 import 'core/providers/navigation_providers.dart';
@@ -45,8 +46,12 @@ import 'features/profile/presentation/about_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Pre-load pricing settings
+  // (called again after Firebase init)
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await PricingService.instance.fetch();
+
 
   await FirebaseAppCheck.instance.activate(
     providerAndroid:
@@ -331,12 +336,13 @@ class RiderApp extends StatelessWidget {
   );
 
       case AppRoutes.rideTracking:
-        final args = settings.arguments as Map<String, dynamic>?;
+        final args = settings.arguments;
+        final tripId = args is String
+            ? args
+            : args is Map ? (args['tripId'] ?? args['rideId'] ?? '') as String
+            : '';
         return MaterialPageRoute(
-          builder: (context) => RideTrackingScreen(
-            rideId: args?['rideId'] ??
-                '', // ✅ was 'tripId', must match constructor param name
-          ),
+          builder: (context) => RideTrackingScreen(tripId: tripId),
           settings: settings,
         );
 

@@ -1,6 +1,8 @@
 // lib/features/gas/models/gas_refill_request.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/utils/otp_utils.dart';
+import '../../../core/services/pricing_service.dart';
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────
@@ -71,15 +73,18 @@ enum CylinderSize {
         CylinderSize.kg45 => 45.0,
       };
 
-  // Prices in GHS (Ghana Cedis)
-  double get refillPrice => switch (this) {
-        CylinderSize.kg3 => 48.00,
-        CylinderSize.kg6 => 96.00,
-        CylinderSize.kg12_5 => 195.00,
-        CylinderSize.kg14_5 => 228.00,
-        CylinderSize.kg19 => 300.00,
-        CylinderSize.kg45 => 710.00,
-      };
+  // Prices in GHS — fetched from Firestore settings/platform via PricingService
+  double get refillPrice {
+    final p = PricingService.instance;
+    return switch (this) {
+      CylinderSize.kg3    => p.gasCylinder3kg,
+      CylinderSize.kg6    => p.gasCylinder6kg,
+      CylinderSize.kg12_5 => p.gasCylinder12kg,
+      CylinderSize.kg14_5 => p.gasCylinder14kg,
+      CylinderSize.kg19   => p.gasCylinder19kg,
+      CylinderSize.kg45   => p.gasCylinder45kg,
+    };
+  }
 
   String get firestoreValue => name;
 
@@ -216,6 +221,10 @@ class GasRefillRequest {
   final String id;
   final String passengerId;
   final String? driverId;
+  final String?   driverName;
+  final String?   driverPhone;
+  final String?   driverVehicle;    // e.g. "Motorcycle · GR-1234-22"
+  final GeoPoint? driverLocation;   // live location, nullable
   final GasRefillType refillType;
   final CylinderSize cylinderSize;
   final GasBrand? preferredBrand;
@@ -265,6 +274,8 @@ class GasRefillRequest {
   final double? passengerRating;
   final double? driverRating;
 
+  // OTP for delivery confirmation
+  final String? deliveryOtp;
   // Extra
   final Map<String, dynamic> metadata;
 
@@ -272,6 +283,10 @@ class GasRefillRequest {
     required this.id,
     required this.passengerId,
     this.driverId,
+    this.driverName,
+    this.driverPhone,
+    this.driverVehicle,
+    this.driverLocation,
     required this.refillType,
     required this.cylinderSize,
     this.preferredBrand,
@@ -306,6 +321,7 @@ class GasRefillRequest {
     this.receiptEmail,
     this.passengerRating,
     this.driverRating,
+    this.deliveryOtp,
     required this.metadata,
   });
 
@@ -314,7 +330,11 @@ class GasRefillRequest {
   Map<String, dynamic> toFirestore() {
     return {
       'passengerId': passengerId,
-      'driverId': driverId,
+      'driverId':       driverId,
+    'driverName':     driverName,
+    'driverPhone':    driverPhone,
+    'driverVehicle':  driverVehicle,
+    'driverLocation': driverLocation,
       'refillType': refillType.firestoreValue,
       'cylinderSize': cylinderSize.firestoreValue,
       'preferredBrand': preferredBrand?.firestoreValue,
@@ -355,7 +375,8 @@ class GasRefillRequest {
       'receiptEmail': receiptEmail,
       'passengerRating': passengerRating,
       'driverRating': driverRating,
-      'metadata': metadata,
+      'metadata':    metadata,
+      'deliveryOtp':  deliveryOtp ?? OtpUtils.generate(),
     };
   }
 
@@ -366,7 +387,11 @@ class GasRefillRequest {
     return GasRefillRequest(
       id: doc.id,
       passengerId: d['passengerId'] as String,
-      driverId: d['driverId'] as String?,
+      driverId:       d['driverId']       as String?,
+      driverName:     d['driverName']     as String?,
+      driverPhone:    d['driverPhone']    as String?,
+      driverVehicle:  d['driverVehicle']  as String?,
+      driverLocation: d['driverLocation'] as GeoPoint?,
       refillType: GasRefillType.fromFirestore(d['refillType'] as String),
       cylinderSize: CylinderSize.fromFirestore(d['cylinderSize'] as String),
       preferredBrand: d['preferredBrand'] != null
@@ -406,7 +431,8 @@ class GasRefillRequest {
       requiresReceipt: d['requiresReceipt'] as bool? ?? false,
       receiptEmail: d['receiptEmail'] as String?,
       passengerRating: (d['passengerRating'] as num?)?.toDouble(),
-      driverRating: (d['driverRating'] as num?)?.toDouble(),
+      driverRating:  (d['driverRating']  as num?)?.toDouble(),
+      deliveryOtp:    d['deliveryOtp']    as String?,
       metadata: Map<String, dynamic>.from(d['metadata'] as Map? ?? {}),
     );
   }
@@ -415,6 +441,10 @@ class GasRefillRequest {
     String? id,
     String? passengerId,
     String? driverId,
+    String?   driverName,
+    String?   driverPhone,
+    String?   driverVehicle,
+    GeoPoint? driverLocation,
     GasRefillType? refillType,
     CylinderSize? cylinderSize,
     GasBrand? preferredBrand,
@@ -454,7 +484,11 @@ class GasRefillRequest {
     return GasRefillRequest(
       id: id ?? this.id,
       passengerId: passengerId ?? this.passengerId,
-      driverId: driverId ?? this.driverId,
+      driverId:       driverId       ?? this.driverId,
+      driverName:     driverName     ?? this.driverName,
+      driverPhone:    driverPhone    ?? this.driverPhone,
+      driverVehicle:  driverVehicle  ?? this.driverVehicle,
+      driverLocation: driverLocation ?? this.driverLocation,
       refillType: refillType ?? this.refillType,
       cylinderSize: cylinderSize ?? this.cylinderSize,
       preferredBrand: preferredBrand ?? this.preferredBrand,

@@ -1,6 +1,5 @@
 // features/ride/screens/trip_complete_screen.dart
 
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
@@ -9,10 +8,9 @@ import '../../../core/routes/app_routes.dart';
 import '../../../widgets/common/shared_widgets.dart';
 
 class TripCompleteScreen extends StatefulWidget {
-  final String tripId;        // ✅ required to save rating against the trip
-  final String driverId;      // ✅ required to update driver's rating aggregate
+  final String tripId; // ✅ required to save rating against the trip
+  final String driverId; // ✅ required to update driver's rating aggregate
   final String driverName;
-  final double driverRating;  // current average — shown in the card
   final String destination;
   final String fare;
   final String rideType;
@@ -22,7 +20,6 @@ class TripCompleteScreen extends StatefulWidget {
     required this.tripId,
     required this.driverId,
     required this.driverName,
-    required this.driverRating,
     required this.destination,
     required this.fare,
     required this.rideType,
@@ -39,7 +36,7 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
   final TextEditingController _feedbackController = TextEditingController();
   bool _isSubmitting = false;
 
-  static const _tipOptions = [2, 5, 10];
+  static const List<int> _tipOptions = [2, 5, 10];
 
   final List<String> _positiveTags = [
     'Great driver',
@@ -91,57 +88,40 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
     setState(() => _isSubmitting = true);
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
+      final db = FirebaseFirestore.instance;
+      final batch = db.batch();
 
-      // 1. Save rating on the trip document
-      final tripRef = FirebaseFirestore.instance
-          .collection('trips')
-          .doc(widget.tripId);
+      final hasRating = _selectedStars > 0;
+      final hasTip = _selectedTip >= 0;
 
-      batch.update(tripRef, {
-        'passengerRating': _selectedStars,
-        'passengerTip': _selectedTip >= 0 ? _tipOptions[_selectedTip] : 0,
-        'passengerTags': _selectedTags,
-        'passengerFeedback': _feedbackController.text.trim(),
-        'ratedAt': FieldValue.serverTimestamp(),
-      });
+      if (hasRating) {
+        batch.update(db.collection('trips').doc(widget.tripId), {
+          'passengerRating': _selectedStars,
+          'passengerTip': hasTip ? _tipOptions[_selectedTip] : 0,
+          'passengerTags': _selectedTags,
+          'passengerFeedback': _feedbackController.text.trim(),
+          'ratedAt': FieldValue.serverTimestamp(),
+        });
 
-      // 2. Update driver's aggregate rating atomically
-      //    Firestore FieldValue.increment avoids read-modify-write races
-      if (_selectedStars > 0) {
-        final driverRef = FirebaseFirestore.instance
-            .collection('drivers')
-            .doc(widget.driverId);
-
-        batch.update(driverRef, {
+        batch.update(db.collection('drivers').doc(widget.driverId), {
           'ratingTotal': FieldValue.increment(_selectedStars),
           'ratingCount': FieldValue.increment(1),
-          // averageRating is recomputed in a Cloud Function triggered on
-          // driver document update — or compute client-side as a fallback:
-          // 'averageRating': newAvg  ← race-prone; prefer Cloud Function
         });
       }
 
-      // 3. Record tip as a pending transaction if one was selected
-      if (_selectedTip >= 0) {
-        final tipAmount = _tipOptions[_selectedTip];
-        final tipRef = FirebaseFirestore.instance
-            .collection('tip_transactions')
-            .doc();
-
-        batch.set(tipRef, {
+      if (hasTip) {
+        batch.set(db.collection('tip_transactions').doc(), {
           'tripId': widget.tripId,
           'driverId': widget.driverId,
-          'amount': tipAmount,
+          'amount': _tipOptions[_selectedTip],
           'currency': 'GHS',
           'status': 'pending',
           'createdAt': FieldValue.serverTimestamp(),
         });
       }
 
-      await batch.commit();
+      if (hasRating || hasTip) await batch.commit();
     } catch (_) {
-      // Non-fatal — user should still be able to go home
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -159,12 +139,11 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
   }
 
   void _goHome() {
-    Navigator.pushNamedAndRemoveUntil(
-      context,
-      AppRoutes.shell,
-      (route) => false,
-    );
-  }
+  Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
+    AppRoutes.shell,
+    (route) => false,
+  );
+}
 
   // ---------------------------------------------------------------------------
   // Build
@@ -199,8 +178,7 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
               _RatingSection(
                 driverName: widget.driverName,
                 selectedStars: _selectedStars,
-                onStarTap: (stars) =>
-                    setState(() => _selectedStars = stars),
+                onStarTap: (stars) => setState(() => _selectedStars = stars),
               ),
               const SizedBox(height: 16),
               if (_selectedStars > 0) ...[
@@ -230,7 +208,13 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
                     : _selectedStars == 0
                         ? 'Skip & go home'
                         : 'Submit rating',
-                onTap: _isSubmitting ? null : _submitRating,
+                onTap: _isSubmitting
+                    ? null
+                    : _selectedStars == 0
+                        ? () =>
+                            _goHome() // ← explicit lambda, uniform VoidCallback
+                        : () =>
+                            _submitRating(), // ← explicit lambda, Future discarded cleanly
               ),
               if (!_isSubmitting && _selectedStars == 0) ...[
                 const SizedBox(height: 12),
@@ -445,13 +429,10 @@ class _RatingSection extends StatelessWidget {
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      filled
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      key: ValueKey(filled),
-                      color: filled
-                          ? AppColors.warning
-                          : AppColors.textTertiary,
+                      filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                      key: ValueKey('$i-$filled'),
+                      color:
+                          filled ? AppColors.warning : AppColors.textTertiary,
                       size: 40,
                     ),
                   ),
@@ -509,17 +490,15 @@ class _TagsSection extends StatelessWidget {
                 onTap: () => onTagToggle(tag),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? AppColors.primary.withValues(alpha: 0.1)
                         : AppColors.surfaceAlt,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.border,
+                      color: isSelected ? AppColors.primary : AppColors.border,
                       width: isSelected ? 1.5 : 0.5,
                     ),
                   ),
@@ -529,9 +508,8 @@ class _TagsSection extends StatelessWidget {
                       color: isSelected
                           ? AppColors.primary
                           : AppColors.textSecondary,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
                 ),
@@ -571,8 +549,7 @@ class _TipSection extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             '100% goes directly to your driver',
-            style:
-                AppTextStyles.caption.copyWith(color: AppColors.success),
+            style: AppTextStyles.caption.copyWith(color: AppColors.success),
           ),
           const SizedBox(height: 12),
           Row(
@@ -580,8 +557,8 @@ class _TipSection extends StatelessWidget {
               final isSelected = selectedTip == i;
               return Expanded(
                 child: Padding(
-                  padding: EdgeInsets.only(
-                      right: i < tipOptions.length - 1 ? 8 : 0),
+                  padding:
+                      EdgeInsets.only(right: i < tipOptions.length - 1 ? 8 : 0),
                   child: GestureDetector(
                     onTap: () => onTipTap(i),
                     child: AnimatedContainer(
@@ -593,9 +570,8 @@ class _TipSection extends StatelessWidget {
                             : AppColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isSelected
-                              ? AppColors.primary
-                              : AppColors.border,
+                          color:
+                              isSelected ? AppColors.primary : AppColors.border,
                         ),
                       ),
                       child: Text(

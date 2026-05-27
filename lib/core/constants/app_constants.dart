@@ -13,13 +13,20 @@ class AppConstants {
   static const int otpTimeout = 60;
   static const int requestTimeout = 30;
   
-  // Pricing
+  // Pricing — now managed via Firestore settings/platform
+  // Use PricingService.instance instead
+  @Deprecated('Use PricingService.instance instead')
   static const double baseDeliveryFee = 5.0;
+  @Deprecated('Use PricingService.instance instead')
   static const double perKmDeliveryRate = 1.5;
+  @Deprecated('Use PricingService.instance instead')
   static const double minDeliveryFee = 10.0;
   
-  // Gas Delivery
+  // Gas Delivery — prices now managed via Firestore settings/platform
+  // Use PricingService.instance.gasDeliveryFee etc instead
+  @Deprecated('Use PricingService.instance instead')
   static const double gasDeliveryBaseFee = 30.0;
+  @Deprecated('Use PricingService.instance instead')
   static const double gasRefillServiceFee = 10.0;
   
   // Animation Durations

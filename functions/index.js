@@ -3,6 +3,7 @@ const { onSchedule }        = require("firebase-functions/v2/scheduler");
 const admin                 = require("firebase-admin");
 
 admin.initializeApp();
+const trips = require("./trips");
 
 // ── onDriverAlertCreated ──────────────────────────────────────────────────────
 
@@ -252,5 +253,11 @@ exports.onGasOrderStatusChanged = notifications.onGasOrderStatusChanged;
 exports.onGasOrderCreated       = notifications.onGasOrderCreated;
 exports.onDeliveryStatusChanged = notifications.onDeliveryStatusChanged;
 exports.onWalletChanged         = notifications.onWalletChanged;
-exports.onDeliveryCompleted     = notifications.onDeliveryCompleted;
+exports.onDeliveryNotification  = notifications.onDeliveryCompleted;
 exports.checkDocumentExpiry     = notifications.checkDocumentExpiry;
+
+// ── Trip lifecycle (fare validation + wallet deduction + driver credit) ────────
+exports.onTripCreated       = trips.onTripCreated;
+exports.onTripCompleted     = trips.onTripCompleted;
+exports.onDeliveryCompleted = trips.onDeliveryCompleted;
+exports.onGasOrderCompleted = trips.onGasOrderCompleted;

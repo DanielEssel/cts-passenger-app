@@ -276,7 +276,7 @@ class _NotifTile extends ConsumerWidget {
       final tripId = item.metadata['tripId'] as String?;
       if (tripId != null) {
         Navigator.pushNamed(context, '/ride-tracking',
-            arguments: {'rideId': tripId});
+            arguments: tripId);
       }
       return;
     }

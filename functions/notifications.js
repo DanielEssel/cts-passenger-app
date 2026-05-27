@@ -1,35 +1,73 @@
 // functions/notifications.js
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { onSchedule } = require("firebase-functions/v2/scheduler");
-const admin = require("firebase-admin");
+const { onSchedule }                           = require("firebase-functions/v2/scheduler");
+const admin                                    = require("firebase-admin");
 
-const db  = admin.firestore();
-const fcm = admin.messaging();
+// Lazy getters — avoids calling before admin.initializeApp()
+const getDb  = () => admin.firestore();
+const getFcm = () => admin.messaging();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper
+// HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sendNotification(uid, { type, title, body, route, metadata = {} }) {
+function statusChanged(before, after) {
+  return before.status !== after.status;
+}
+
+// ── Send to PASSENGER ────────────────────────────────────────────────────────
+// Reads FCM token from users/{uid}
+
+async function notifyPassenger(uid, { type, title, body, route, metadata = {} }) {
   if (!uid) return;
 
-  await db.collection("notifications").doc(uid)
+  // Write in-app notification
+  await getDb().collection("notifications").doc(uid)
     .collection("items").add({
-      type,
-      title,
-      body,
+      type, title, body,
       route:     route ?? null,
       metadata,
       isRead:    false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    }).catch(e => console.error("Passenger notif write error:", e.message));
 
-  const userDoc = await db.collection("users").doc(uid).get();
+  // FCM push
+  const userDoc = await getDb().collection("users").doc(uid).get();
   const token   = userDoc.data()?.fcmToken;
   if (!token) return;
 
+  await _sendFcm(token, { type, title, body, route, metadata });
+}
+
+// ── Send to DRIVER ────────────────────────────────────────────────────────────
+// Reads FCM token from drivers/{uid}
+
+async function notifyDriver(uid, { type, title, body, route, metadata = {} }) {
+  if (!uid) return;
+
+  // Write in-app notification to driver notifications subcollection
+  await getDb().collection("drivers").doc(uid)
+    .collection("notifications").add({
+      type, title, body,
+      route:     route ?? null,
+      metadata,
+      isRead:    false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch(e => console.error("Driver notif write error:", e.message));
+
+  // FCM push — token from drivers/{uid}
+  const driverDoc = await getDb().collection("drivers").doc(uid).get();
+  const token     = driverDoc.data()?.fcmToken;
+  if (!token) return;
+
+  await _sendFcm(token, { type, title, body, route, metadata });
+}
+
+// ── FCM sender ────────────────────────────────────────────────────────────────
+
+async function _sendFcm(token, { type, title, body, route, metadata = {} }) {
   try {
-    await fcm.send({
+    await getFcm().send({
       token,
       notification: { title, body },
       data: {
@@ -40,6 +78,7 @@ async function sendNotification(uid, { type, title, body, route, metadata = {} }
         ),
       },
       android: {
+        priority: "high",
         notification: {
           channelId: "ctsride_general",
           priority:  "high",
@@ -47,9 +86,7 @@ async function sendNotification(uid, { type, title, body, route, metadata = {} }
         },
       },
       apns: {
-        payload: {
-          aps: { sound: "default", badge: 1 },
-        },
+        payload: { aps: { sound: "default", badge: 1 } },
       },
     });
   } catch (e) {
@@ -57,72 +94,154 @@ async function sendNotification(uid, { type, title, body, route, metadata = {} }
   }
 }
 
-function statusChanged(before, after) {
-  return before.status !== after.status;
+// ── Document label ────────────────────────────────────────────────────────────
+
+function _docLabel(key) {
+  const labels = {
+    profile_photo:          "Profile Photo",
+    national_id:            "National ID",
+    drivers_license:        "Driver's License",
+    vehicle_registration:   "Vehicle Registration",
+    roadworthy_certificate: "Roadworthy Certificate",
+    insurance:              "Vehicle Insurance",
+    police_clearance:       "Police Clearance",
+    vehicle_photo_front:    "Vehicle Front Photo",
+    vehicle_photo_side:     "Vehicle Side Photo",
+  };
+  return labels[key] ?? key;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RIDE
+// TRIPS — Passenger & Driver notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.onTripStatusChanged = onDocumentUpdated(
-  "trips/{tripId}",
+  {region: "europe-west2", document: "trips/{tripId}"},
   async (event) => {
-    const before = event.data.before.data();
-    const after  = event.data.after.data();
-    const tripId = event.params.tripId;
+    const before     = event.data.before.data();
+    const after      = event.data.after.data();
+    const tripId     = event.params.tripId;
 
     if (!statusChanged(before, after)) return;
 
-    const uid      = after.passengerId;
-    const route    = `/ride-tracking?tripId=${tripId}`;
-    const metadata = { tripId };
+    const passengerId = after.passengerId;
+    const driverId    = after.driverId;
+    const driverName  = after.driverName  ?? "Your driver";
+    const passengerName = after.passengerName ?? "Passenger";
+    const dropoff     = after.dropoffAddress ?? "destination";
+    const pickup      = after.pickupAddress  ?? "pickup";
+    const fare        = (after.actualFare ?? after.estimatedFare ?? 0).toFixed(2);
+
+    const passengerRoute = `/ride-tracking?tripId=${tripId}`;
+    const driverRoute    = `/driver/trip-active?tripId=${tripId}`;
+    const meta           = { tripId };
 
     switch (after.status) {
+
+      // ── Driver accepted — notify passenger ──
       case "tripAccepted":
-        await sendNotification(uid, {
-          type: "ride", title: "Driver assigned 🚗",
-          body: `${after.metadata?.driverName ?? "Your driver"} is on the way.`,
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "ride",
+          title: "Driver assigned 🚗",
+          body:  `${driverName} is on the way to ${pickup}.`,
+          route: passengerRoute,
+          metadata: meta,
         });
         break;
+
+      // ── Driver arrived — notify passenger ──
       case "driverArrived":
-        await sendNotification(uid, {
-          type: "ride", title: "Driver has arrived 📍",
-          body: `${after.metadata?.driverName ?? "Your driver"} is waiting at your pickup.`,
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "ride",
+          title: "Driver has arrived 📍",
+          body:  `${driverName} is waiting at your pickup point.`,
+          route: passengerRoute,
+          metadata: meta,
         });
         break;
+
+      // ── Trip started — notify passenger ──
       case "tripStarted":
-      case "inProgress":
-        await sendNotification(uid, {
-          type: "ride", title: "Trip started 🚦",
-          body: `You're on your way to ${after.dropoffAddress ?? "your destination"}.`,
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "ride",
+          title: "Trip started 🚦",
+          body:  `You're on your way to ${dropoff}. Sit back and enjoy!`,
+          route: passengerRoute,
+          metadata: meta,
         });
         break;
-      case "completed": {
-        const fare = after.actualFare?.toFixed(2) ?? after.estimatedFare?.toFixed(2) ?? "0.00";
-        await sendNotification(uid, {
-          type: "ride", title: "Trip completed ✓",
-          body: `Your trip to ${after.dropoffAddress} was GHS ${fare}. Rate your driver!`,
-          route: `/trip-complete?tripId=${tripId}`,
-          metadata: { ...metadata, fare },
-        });
+
+      // ── Trip completed — notify both ──
+      case "completed":
+        await Promise.all([
+          // Passenger
+          notifyPassenger(passengerId, {
+            type:  "ride",
+            title: "Trip completed ✓",
+            body:  `Your trip to ${dropoff} was GHS ${fare}. Rate your driver!`,
+            route: `/trip-complete?tripId=${tripId}`,
+            metadata: { ...meta, fare },
+          }),
+          // Driver
+          driverId ? notifyDriver(driverId, {
+            type:  "ride",
+            title: "Trip completed 💰",
+            body:  `GHS ${fare} earned. Great job!`,
+            route: "/driver-shell",
+            metadata: meta,
+          }) : Promise.resolve(),
+          // Reset driver availability
+          driverId ? getDb().collection("drivers").doc(driverId).update({
+            isAvailable:   true,
+            currentTripId: admin.firestore.FieldValue.delete(),
+          }).catch(e => console.error("Driver reset error:", e.message)) : Promise.resolve(),
+        ]);
         break;
-      }
-      case "cancelled":
-        await sendNotification(uid, {
-          type: "ride", title: "Trip cancelled",
-          body: "Your trip was cancelled. Book a new ride anytime.",
-          route: "/shell", metadata,
-        });
+
+      // ── Cancelled by passenger — notify driver ──
+      case "cancelledByPassenger":
+        await Promise.all([
+          driverId ? notifyDriver(driverId, {
+            type:  "ride",
+            title: "Trip cancelled by passenger",
+            body:  `${passengerName} cancelled the trip. You're available for new requests.`,
+            route: "/driver-shell",
+            metadata: meta,
+          }) : Promise.resolve(),
+          // Reset driver
+          driverId ? getDb().collection("drivers").doc(driverId).update({
+            isAvailable:   true,
+            currentTripId: admin.firestore.FieldValue.delete(),
+          }).catch(e => console.error("Driver reset error:", e.message)) : Promise.resolve(),
+        ]);
         break;
-      case "noDrivers":
-        await sendNotification(uid, {
-          type: "ride", title: "No drivers nearby 😔",
-          body: "We couldn't find a driver right now. Please try again.",
-          route: "/shell", metadata,
+
+      // ── Cancelled by driver — notify passenger ──
+      case "cancelledByDriver":
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "ride",
+            title: "Driver cancelled",
+            body:  "Your driver cancelled the trip. Please book again.",
+            route: "/shell",
+            metadata: meta,
+          }),
+          // Reset driver
+          driverId ? getDb().collection("drivers").doc(driverId).update({
+            isAvailable:   true,
+            currentTripId: admin.firestore.FieldValue.delete(),
+          }).catch(e => console.error("Driver reset error:", e.message)) : Promise.resolve(),
+        ]);
+        break;
+
+      // ── No drivers — notify passenger ──
+      case "noDriversAvailable":
+        await notifyPassenger(passengerId, {
+          type:  "ride",
+          title: "No drivers nearby 😔",
+          body:  "We couldn't find a driver right now. Please try again in a few minutes.",
+          route: "/shell",
+          metadata: meta,
         });
         break;
     }
@@ -130,17 +249,17 @@ exports.onTripStatusChanged = onDocumentUpdated(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GAS ORDERS
+// GAS ORDERS — Passenger & Driver notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.onGasOrderCreated = onDocumentCreated(
-  "gas_orders/{orderId}",
+  {region: "europe-west2", document: "gas_orders/{orderId}"},
   async (event) => {
     const data    = event.data.data();
     const orderId = event.params.orderId;
     const uid     = data.passengerId;
 
-    await sendNotification(uid, {
+    await notifyPassenger(uid, {
       type:  "gas",
       title: "Gas order placed ✓",
       body:  `Your ${data.cylinderSize ?? "gas"} order is pending approval.`,
@@ -151,7 +270,7 @@ exports.onGasOrderCreated = onDocumentCreated(
 );
 
 exports.onGasOrderStatusChanged = onDocumentUpdated(
-  "gas_orders/{orderId}",
+  {region: "europe-west2", document: "gas_orders/{orderId}"},
   async (event) => {
     const before  = event.data.before.data();
     const after   = event.data.after.data();
@@ -159,67 +278,107 @@ exports.onGasOrderStatusChanged = onDocumentUpdated(
 
     if (!statusChanged(before, after)) return;
 
-    const uid      = after.passengerId;
-    const route    = `/gas-tracking?orderId=${orderId}`;
-    const metadata = { orderId };
+    const passengerId  = after.passengerId;
+    const driverId     = after.driverId;
+    const driverName   = after.driverName ?? "Your driver";
+    const cylinderSize = after.cylinderSize ?? "gas cylinder";
+    const totalPrice   = (after.totalPrice ?? 0).toFixed(2);
+
+    const passengerRoute = `/gas-tracking?orderId=${orderId}`;
+    const driverRoute    = `/driver/active-gas?orderId=${orderId}`;
+    const meta           = { orderId };
 
     switch (after.status) {
-      case "approved":
+
       case "driverAssigned":
-        await sendNotification(uid, {
-          type: "gas", title: "Gas order confirmed 🔥",
-          body: `Your ${after.cylinderSize ?? "gas"} order is confirmed. Driver is on the way.`,
-          route, metadata,
-        });
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "gas",
+            title: "Gas order confirmed 🔥",
+            body:  `${driverName} will pick up your ${cylinderSize} shortly.`,
+            route: passengerRoute, metadata: meta,
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "gas",
+            title: "New gas order 🔥",
+            body:  `Pick up ${cylinderSize} for delivery.`,
+            route: driverRoute, metadata: meta,
+          }) : Promise.resolve(),
+        ]);
         break;
+
       case "driverEnRoute":
-        await sendNotification(uid, {
-          type: "gas", title: "Driver en route 🚗",
-          body: "Your gas delivery driver is heading to your location.",
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "Driver en route 🚗",
+          body:  `${driverName} is heading to your location.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
+
       case "driverArrived":
-        await sendNotification(uid, {
-          type: "gas", title: "Driver has arrived 📍",
-          body: "Your gas delivery driver is at your location.",
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "Driver has arrived 📍",
+          body:  `${driverName} is at your location with your ${cylinderSize}.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
+
       case "pickedUp":
       case "refilling":
-        await sendNotification(uid, {
-          type: "gas", title: "Cylinder picked up ✓",
-          body: "Your cylinder has been collected for refilling.",
-          route, metadata,
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "Cylinder picked up ✓",
+          body:  `Your ${cylinderSize} has been collected for refilling.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
-      case "delivered": {
-        const total = after.totalPrice?.toFixed(2) ?? "0.00";
-        await sendNotification(uid, {
-          type: "gas", title: "Gas delivered! 🎉",
-          body: `Your gas cylinder has been delivered. Total: GHS ${total}.`,
-          route: "/shell", metadata: { ...metadata, total },
-        });
+
+      case "delivered":
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "gas",
+            title: "Gas delivered! 🎉",
+            body:  `Your ${cylinderSize} has been delivered. Total: GHS ${totalPrice}.`,
+            route: "/shell", metadata: { ...meta, totalPrice },
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "gas",
+            title: "Gas order completed 💰",
+            body:  `GHS ${totalPrice} earned for gas delivery.`,
+            route: "/driver-shell", metadata: meta,
+          }) : Promise.resolve(),
+        ]);
         break;
-      }
+
+      case "cancelledByPassenger":
       case "cancelled":
-        await sendNotification(uid, {
-          type: "gas", title: "Gas order cancelled",
-          body: "Your gas order was cancelled. Any wallet deduction will be refunded.",
-          route: "/shell", metadata,
-        });
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "gas",
+            title: "Gas order cancelled",
+            body:  "Your gas order was cancelled. Any charges will be refunded.",
+            route: "/shell", metadata: meta,
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "gas",
+            title: "Gas order cancelled",
+            body:  "The gas order was cancelled by the passenger.",
+            route: "/driver-shell", metadata: meta,
+          }) : Promise.resolve(),
+        ]);
         break;
     }
   }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELIVERY
+// DELIVERIES — Passenger & Driver notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.onDeliveryStatusChanged = onDocumentUpdated(
-  "delivery_requests/{deliveryId}",
+  {region: "europe-west2", document: "deliveries/{deliveryId}"},   // ✅ Fixed collection name
   async (event) => {
     const before     = event.data.before.data();
     const after      = event.data.after.data();
@@ -227,62 +386,124 @@ exports.onDeliveryStatusChanged = onDocumentUpdated(
 
     if (!statusChanged(before, after)) return;
 
-    const uid      = after.passengerId ?? after.userId;
-    const route    = `/delivery-tracking?deliveryId=${deliveryId}`;
-    const metadata = { deliveryId };
+    const passengerId  = after.passengerId ?? after.userId;
+    const driverId     = after.driverId;
+    const driverName   = after.driverName ?? "Your rider";
+    const dropoff      = after.dropoffAddress ?? "destination";
+    const fare         = (after.actualFare ?? after.estimatedFare ?? 0).toFixed(2);
+
+    const passengerRoute = `/delivery-tracking?deliveryId=${deliveryId}`;
+    const driverRoute    = `/driver/active-delivery?deliveryId=${deliveryId}`;
+    const meta           = { deliveryId };
 
     switch (after.status) {
+
       case "driverAssigned":
-      case "accepted":
-        await sendNotification(uid, {
-          type: "delivery", title: "Rider assigned 🏍️",
-          body: `${after.driverName ?? "Your rider"} will pick up your parcel shortly.`,
-          route, metadata,
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "delivery",
+            title: "Rider assigned 🏍️",
+            body:  `${driverName} will pick up your parcel shortly.`,
+            route: passengerRoute, metadata: meta,
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "delivery",
+            title: "New delivery request 📦",
+            body:  `Pick up parcel for delivery to ${dropoff}.`,
+            route: driverRoute, metadata: meta,
+          }) : Promise.resolve(),
+        ]);
+        break;
+
+      case "pickupEnroute":
+        await notifyPassenger(passengerId, {
+          type:  "delivery",
+          title: "Rider on the way 🏍️",
+          body:  `${driverName} is heading to pick up your parcel.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
-      case "pickupComplete":
-      case "pickedUp":
-        await sendNotification(uid, {
-          type: "delivery", title: "Parcel picked up 📦",
-          body: `${after.driverName ?? "Your rider"} has collected your parcel.`,
-          route, metadata,
+
+      case "arrivedAtPickup":
+        await notifyPassenger(passengerId, {
+          type:  "delivery",
+          title: "Rider arrived at pickup 📍",
+          body:  `${driverName} has arrived to collect your parcel.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
-      case "inTransit":
-      case "outForDelivery":
-        await sendNotification(uid, {
-          type: "delivery", title: "Parcel out for delivery 🚀",
-          body: `Your parcel is heading to ${after.dropoffAddress ?? "the destination"}.`,
-          route, metadata,
+
+      case "packagePicked":
+        await notifyPassenger(passengerId, {
+          type:  "delivery",
+          title: "Parcel picked up 📦",
+          body:  `${driverName} has collected your parcel and is heading to ${dropoff}.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
-      case "delivered":
-      case "completed": {
-        const fare = after.actualFare?.toFixed(2) ?? "0.00";
-        await sendNotification(uid, {
-          type: "delivery", title: "Parcel delivered! ✓",
-          body: `Your parcel was delivered to ${after.dropoffAddress ?? "the destination"}.`,
-          route: "/shell", metadata: { ...metadata, fare },
+
+      case "deliveryEnroute":
+        await notifyPassenger(passengerId, {
+          type:  "delivery",
+          title: "Parcel out for delivery 🚀",
+          body:  `Your parcel is on the way to ${dropoff}.`,
+          route: passengerRoute, metadata: meta,
         });
         break;
-      }
+
+      case "arrivedAtDropoff":
+        await notifyPassenger(passengerId, {
+          type:  "delivery",
+          title: "Rider at drop-off 📍",
+          body:  `${driverName} has arrived at ${dropoff} with your parcel.`,
+          route: passengerRoute, metadata: meta,
+        });
+        break;
+
+      case "completed":
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "delivery",
+            title: "Parcel delivered! ✓",
+            body:  `Your parcel was delivered to ${dropoff}. Total: GHS ${fare}.`,
+            route: "/shell", metadata: { ...meta, fare },
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "delivery",
+            title: "Delivery completed 💰",
+            body:  `GHS ${fare} earned for delivery to ${dropoff}.`,
+            route: "/driver-shell", metadata: meta,
+          }) : Promise.resolve(),
+        ]);
+        break;
+
+      case "cancelledByPassenger":
       case "cancelled":
-        await sendNotification(uid, {
-          type: "delivery", title: "Delivery cancelled",
-          body: "Your delivery was cancelled. Contact support if you need help.",
-          route: "/shell", metadata,
-        });
+        await Promise.all([
+          notifyPassenger(passengerId, {
+            type:  "delivery",
+            title: "Delivery cancelled",
+            body:  "Your delivery was cancelled. Contact support if you need help.",
+            route: "/shell", metadata: meta,
+          }),
+          driverId ? notifyDriver(driverId, {
+            type:  "delivery",
+            title: "Delivery cancelled",
+            body:  "The delivery was cancelled by the passenger.",
+            route: "/driver-shell", metadata: meta,
+          }) : Promise.resolve(),
+        ]);
         break;
     }
   }
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WALLET
+// WALLET — Low balance alert (passengers only)
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.onWalletChanged = onDocumentUpdated(
-  "wallets/{uid}",
+  {region: "europe-west2", document: "wallets/{uid}"},
   async (event) => {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -294,8 +515,10 @@ exports.onWalletChanged = onDocumentUpdated(
 
     if (Math.abs(diff) < 0.01) return;
 
+    // ✅ Only notify on top-up (credit) or low balance — not every debit
     if (diff > 0) {
-      await sendNotification(uid, {
+      // Wallet topped up
+      await notifyPassenger(uid, {
         type:  "wallet",
         title: "Wallet topped up 💳",
         body:  `GHS ${diff.toFixed(2)} added. Balance: GHS ${newBalance.toFixed(2)}.`,
@@ -303,7 +526,8 @@ exports.onWalletChanged = onDocumentUpdated(
         metadata: { amount: diff, balance: newBalance },
       });
     } else if (newBalance < 10 && prevBalance >= 10) {
-      await sendNotification(uid, {
+      // Only notify once when balance drops below threshold
+      await notifyPassenger(uid, {
         type:  "wallet",
         title: "Low wallet balance ⚠️",
         body:  `Your balance is GHS ${newBalance.toFixed(2)}. Top up to keep using CTSRide.`,
@@ -314,16 +538,17 @@ exports.onWalletChanged = onDocumentUpdated(
   }
 );
 
-// ── Wallet deduction on delivery completion ──────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELIVERY WALLET DEDUCTION — on delivery completion
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.onDeliveryCompleted = onDocumentUpdated(
-  "deliveries/{deliveryId}",
+  {region: "europe-west2", document: "deliveries/{deliveryId}"},
   async (event) => {
     const before     = event.data.before.data();
     const after      = event.data.after.data();
     const deliveryId = event.params.deliveryId;
 
-    // Only fire on status → completed
     if (before.status === after.status) return;
     if (after.status !== "completed")   return;
 
@@ -333,48 +558,34 @@ exports.onDeliveryCompleted = onDocumentUpdated(
     if (!uid || fare <= 0) return;
 
     try {
-      // 1 — Deduct from wallet
-      const walletRef = db.collection("wallets").doc(uid);
-      await db.runTransaction(async (tx) => {
+      const walletRef = getDb().collection("wallets").doc(uid);
+
+      await getDb().runTransaction(async (tx) => {
         const wallet = await tx.get(walletRef);
         if (!wallet.exists) throw new Error("Wallet not found");
-
-        const currentBalance = wallet.data().balance ?? 0;
-        if (currentBalance < fare) throw new Error("Insufficient balance");
-
+        const balance = wallet.data().balance ?? 0;
+        if (balance < fare) throw new Error("Insufficient balance");
         tx.update(walletRef, {
           balance:   admin.firestore.FieldValue.increment(-fare),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
 
-      // 2 — Write transaction record
-      await db.collection("transactions").add({
-        userId:      uid,
-        type:        "debit",
-        amount:      fare,
-        currency:    "GHS",
-        description: `Delivery to ${after.dropoffAddress ?? "destination"}`,
-        referenceId: deliveryId,
+      await getDb().collection("transactions").add({
+        userId:        uid,
+        type:          "debit",
+        amount:        fare,
+        currency:      "GHS",
+        description:   `Delivery to ${after.dropoffAddress ?? "destination"}`,
+        referenceId:   deliveryId,
         referenceType: "delivery",
-        status:      "completed",
-        createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // 3 — Notify passenger
-      await sendNotification(uid, {
-        type:  "wallet",
-        title: "Payment deducted 💳",
-        body:  `GHS ${fare.toFixed(2)} deducted for your delivery to ${after.dropoffAddress ?? "destination"}.`,
-        route: "/shell?tab=wallet",
-        metadata: { amount: fare, deliveryId },
+        status:        "completed",
+        createdAt:     admin.firestore.FieldValue.serverTimestamp(),
       });
 
     } catch (e) {
       console.error("Delivery wallet deduction failed:", e.message);
-
-      // Notify passenger of failure
-      await sendNotification(uid, {
+      await notifyPassenger(uid, {
         type:  "wallet",
         title: "Payment failed ⚠️",
         body:  "We couldn't process your delivery payment. Please top up your wallet.",
@@ -384,108 +595,21 @@ exports.onDeliveryCompleted = onDocumentUpdated(
     }
   }
 );
-// ── Document expiry check — runs daily at 8am Ghana time ─────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCUMENT EXPIRY CHECK — daily at 8am Ghana time
+// ─────────────────────────────────────────────────────────────────────────────
+
 exports.checkDocumentExpiry = onSchedule(
-  { schedule: '0 8 * * *', timeZone: 'Africa/Accra' },
+  { schedule: "0 8 * * *", timeZone: "Africa/Accra" },
   async () => {
-    const db      = admin.firestore();
     const now     = new Date();
-    const in30    = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const in7     = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000);
 
-    const drivers = await db.collection('drivers')
-      .where('isApproved', '==', true)
+    const drivers = await getDb().collection("drivers")
+      .where("isApproved", "==", true)
       .get();
 
-    for (const driverDoc of drivers.docs) {
-      const data      = driverDoc.data();
-      const documents = data.documents ?? {};
-      const fcmToken  = data.fcmToken;
-      const uid       = driverDoc.id;
-
-      for (const [key, value] of Object.entries(documents)) {
-        if (!value?.expiryDate) continue;
-
-        const expiry      = value.expiryDate.toDate();
-        const daysLeft    = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-        const docLabel    = _docLabel(key);
-
-        if (daysLeft <= 0) {
-          // Already expired
-          await _sendDriverNotif(db, uid, fcmToken, {
-            type:  'documentExpiry',
-            title: `⚠️ ${docLabel} Expired`,
-            body:  `Your ${docLabel} has expired. Please upload a new one to continue driving.`,
-            route: '/driver/documents',
-          });
-        } else if (daysLeft <= 7) {
-          // Expiring in 7 days
-          await _sendDriverNotif(db, uid, fcmToken, {
-            type:  'documentExpiry',
-            title: `⏰ ${docLabel} Expiring Soon`,
-            body:  `Your ${docLabel} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Update it now.`,
-            route: '/driver/documents',
-          });
-        } else if (daysLeft <= 30) {
-          // Expiring in 30 days — notify once
-          await _sendDriverNotif(db, uid, fcmToken, {
-            type:  'documentExpiry',
-            title: `📅 ${docLabel} Expiring in ${daysLeft} Days`,
-            body:  `Your ${docLabel} expires on ${expiry.toDateString()}. Plan to renew it soon.`,
-            route: '/driver/documents',
-          });
-        }
-      }
-    }
-  }
-);
-
-async function _sendDriverNotif(db, uid, fcmToken, payload) {
-  // Write to Firestore
-  await db.collection('drivers').doc(uid)
-    .collection('notifications').add({
-      ...payload,
-      isRead:    false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-  // FCM push
-  if (fcmToken) {
-    try {
-      await admin.messaging().send({
-        token:        fcmToken,
-        notification: { title: payload.title, body: payload.body },
-        data:         { type: payload.type, route: payload.route ?? '' },
-      });
-    } catch (e) {
-      console.error('FCM error for', uid, e.message);
-    }
-  }
-}
-
-function _docLabel(key) {
-  const labels = {
-    profile_photo:          'Profile Photo',
-    national_id:            'National ID',
-    drivers_license:        "Driver's License",
-    vehicle_registration:   'Vehicle Registration',
-    roadworthy_certificate: 'Roadworthy Certificate',
-    insurance:              'Vehicle Insurance',
-    police_clearance:       'Police Clearance',
-  };
-  return labels[key] ?? key;
-}
-
-// ── Document expiry check — runs daily at 8am Ghana time ─────────────────────
-exports.checkDocumentExpiry = onSchedule(
-  { schedule: '0 8 * * *', timeZone: 'Africa/Accra' },
-  async () => {
-    const now  = new Date();
-    const db2  = admin.firestore();
-
-    const drivers = await db2.collection('drivers')
-      .where('isApproved', '==', true)
-      .get();
+    const promises = [];
 
     for (const driverDoc of drivers.docs) {
       const data      = driverDoc.data();
@@ -500,62 +624,149 @@ exports.checkDocumentExpiry = onSchedule(
         const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
         const label    = _docLabel(key);
 
+        let payload = null;
+
         if (daysLeft <= 0) {
-          await _sendDriverNotif(db2, uid, fcmToken, {
-            type:  'documentExpiry',
+          payload = {
+            type:  "documentExpiry",
             title: `⚠️ ${label} Expired`,
             body:  `Your ${label} has expired. Upload a new one to continue driving.`,
-            route: '/driver/documents',
-          });
+            route: "/driver/documents",
+          };
         } else if (daysLeft <= 7) {
-          await _sendDriverNotif(db2, uid, fcmToken, {
-            type:  'documentExpiry',
+          payload = {
+            type:  "documentExpiry",
             title: `⏰ ${label} Expiring Soon`,
-            body:  `Your ${label} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Update it now.`,
-            route: '/driver/documents',
-          });
+            body:  `Your ${label} expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Update it now.`,
+            route: "/driver/documents",
+          };
         } else if (daysLeft <= 30) {
-          await _sendDriverNotif(db2, uid, fcmToken, {
-            type:  'documentExpiry',
+          payload = {
+            type:  "documentExpiry",
             title: `📅 ${label} Expiring in ${daysLeft} Days`,
             body:  `Your ${label} expires on ${expiry.toDateString()}. Plan to renew it soon.`,
-            route: '/driver/documents',
-          });
+            route: "/driver/documents",
+          };
+        }
+
+        if (payload) {
+          promises.push(notifyDriver(uid, payload));
         }
       }
     }
+
+    await Promise.allSettled(promises);
+    console.log(`Document expiry check complete. Processed ${drivers.size} drivers.`);
   }
 );
 
-async function _sendDriverNotif(db2, uid, fcmToken, payload) {
-  await db2.collection('drivers').doc(uid)
-    .collection('notifications').add({
-      ...payload,
-      isRead:    false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+// ── Admin broadcast notification ──────────────────────────────────────────────
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 
-  if (fcmToken) {
-    try {
-      await admin.messaging().send({
-        token:        fcmToken,
-        notification: { title: payload.title, body: payload.body },
-        data:         { type: payload.type, route: payload.route ?? '' },
-      });
-    } catch (e) {
-      console.error('FCM error for', uid, e.message);
+exports.broadcastNotification = onCall(
+  { region: "europe-west2" },
+  async (request) => {
+    // Verify admin
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be signed in");
+
+    const adminDoc = await getDb().collection("admins").doc(uid).get();
+    if (!adminDoc.exists || !adminDoc.data()?.active) {
+      throw new HttpsError("permission-denied", "Admin access required");
     }
-  }
-}
 
-function _docLabel(key) {
-  const labels = {
-    national_id:            'National ID',
-    drivers_license:        "Driver's License",
-    vehicle_registration:   'Vehicle Registration',
-    roadworthy_certificate: 'Roadworthy Certificate',
-    insurance:              'Vehicle Insurance',
-    police_clearance:       'Police Clearance',
-  };
-  return labels[key] ?? key;
-}
+    const { title, message, target, userId } = request.data;
+    if (!title || !message) {
+      throw new HttpsError("invalid-argument", "Title and message required");
+    }
+
+    let tokens = [];
+    let targetUids = [];
+
+    if (target === "all_passengers") {
+      const snap = await getDb().collection("users")
+        .where("fcmToken", "!=", null).get();
+      snap.docs.forEach(d => {
+        if (d.data().fcmToken) {
+          tokens.push(d.data().fcmToken);
+          targetUids.push(d.id);
+        }
+      });
+    } else if (target === "all_drivers") {
+      const snap = await getDb().collection("drivers")
+        .where("fcmToken", "!=", null).get();
+      snap.docs.forEach(d => {
+        if (d.data().fcmToken) {
+          tokens.push(d.data().fcmToken);
+          targetUids.push(d.id);
+        }
+      });
+    } else if (target === "specific_user" && userId) {
+      // Try users first, then drivers
+      const userDoc   = await getDb().collection("users").doc(userId).get();
+      const driverDoc = await getDb().collection("drivers").doc(userId).get();
+      const token = userDoc.data()?.fcmToken || driverDoc.data()?.fcmToken;
+      if (token) { tokens.push(token); targetUids.push(userId); }
+    }
+
+    if (tokens.length === 0) {
+      return { success: false, message: "No FCM tokens found for target audience" };
+    }
+
+    // Send FCM in batches of 500
+    const batchSize = 500;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < tokens.length; i += batchSize) {
+      const batch = tokens.slice(i, i + batchSize);
+      try {
+        const response = await getFcm().sendEachForMulticast({
+          tokens: batch,
+          notification: { title, body: message },
+          data: { type: "admin_broadcast", route: "" },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "ctsride_general",
+              sound: "default",
+            },
+          },
+          apns: {
+            payload: { aps: { sound: "default", badge: 1 } },
+          },
+        });
+        successCount += response.successCount;
+        failCount    += response.failureCount;
+      } catch (e) {
+        console.error("Batch FCM error:", e.message);
+        failCount += batch.length;
+      }
+    }
+
+    // Write to in-app notifications for all targets
+    const batch = getDb().batch();
+    for (const uid of targetUids) {
+      const collection = target === "all_drivers"
+        ? getDb().collection("drivers").doc(uid).collection("notifications")
+        : getDb().collection("notifications").doc(uid).collection("items");
+      const ref = collection.doc();
+      batch.set(ref, {
+        type:      "admin_broadcast",
+        title,
+        body:      message,
+        isRead:    false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit().catch(e => console.error("Batch write error:", e.message));
+
+    console.log(`Broadcast: ${successCount} sent, ${failCount} failed to ${tokens.length} devices`);
+    return {
+      success:      true,
+      sent:         successCount,
+      failed:       failCount,
+      totalTargets: tokens.length,
+    };
+  }
+);

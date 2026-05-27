@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/services/pricing_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,7 +37,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   late final AnimationController _animController;
   late final Animation<double>   _fadeAnim;
 
-  static const double _deliveryFee = 30.0;
+  double get _deliveryFee => PricingService.instance.gasDeliveryFee;
 
   double get _basePrice    => _selectedSize.refillPrice * _quantity;
   double get _brandPremium => _selectedBrand != null &&

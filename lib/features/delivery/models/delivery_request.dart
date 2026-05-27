@@ -1,6 +1,7 @@
 // lib/features/delivery/models/delivery_request.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/utils/otp_utils.dart';
 
 enum DeliveryStatus {
   pending,
@@ -82,6 +83,9 @@ class DeliveryRequest {
   final DateTime? completedAt;
   final DateTime? cancelledAt;
 
+  // OTP for delivery confirmation
+  final String? deliveryOtp;
+
   // Payment
   final String paymentMethod;
 
@@ -117,6 +121,7 @@ class DeliveryRequest {
     this.pickedUpAt,
     this.completedAt,
     this.cancelledAt,
+    this.deliveryOtp,
     required this.paymentMethod,
     this.passengerRating,
   });
@@ -155,6 +160,7 @@ class DeliveryRequest {
       cancelledAt:     (d['cancelledAt']    as Timestamp?)?.toDate(),
       paymentMethod:   d['paymentMethod']   as String? ?? 'wallet',
       passengerRating: (d['passengerRating'] as num?)?.toDouble(),
+      deliveryOtp:     d['deliveryOtp']     as String?,
     );
   }
 
@@ -179,6 +185,7 @@ class DeliveryRequest {
     'vehicleType':     vehicleType,
     'receiverPhone':   receiverPhone,
     'receiverName':    receiverName,
+    'deliveryOtp':     deliveryOtp ?? OtpUtils.generate(),
     'estimatedFare':   estimatedFare,
     'actualFare':      actualFare,
     'createdAt':       FieldValue.serverTimestamp(),

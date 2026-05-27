@@ -11,7 +11,6 @@ import '../providers/drivers_nearby_provider.dart';
 import '../providers/ride_request_provider.dart';
 import '../providers/wallet_provider.dart';
 import '../services/payment_method_service.dart';
-import '../models/ride_option.dart' hide RideOptionsService;
 import '../services/ride_options_service.dart';
 import '../constants/ride_constants.dart';
 import 'ride_option_card.dart';

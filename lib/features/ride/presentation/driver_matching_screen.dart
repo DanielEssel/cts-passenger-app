@@ -359,7 +359,7 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               const Spacer(),
 
               // ── Pulsing ring ──
-              _PulsingRing(controller: _pulseController),
+              _PulsingRing(controller: _pulseController, rideType: widget.rideType),
 
               const SizedBox(height: 32),
 
@@ -474,48 +474,113 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
 
 class _PulsingRing extends StatelessWidget {
   final AnimationController controller;
-  const _PulsingRing({required this.controller});
+  final String rideType;
+  const _PulsingRing({required this.controller, required this.rideType});
+
+  IconData get _icon => switch (rideType.toLowerCase()) {
+    'okada'        => Icons.two_wheeler_rounded,
+    'motorcycle'   => Icons.two_wheeler_rounded,
+    'aboboya'      => Icons.electric_rickshaw_rounded,
+    'mini truck'   => Icons.local_shipping_rounded,
+    'delivery'     => Icons.inventory_2_rounded,
+    _              => Icons.directions_car_rounded,
+  };
+
+  String get _label => switch (rideType.toLowerCase()) {
+    'okada'        => 'Okada',
+    'motorcycle'   => 'Motorcycle',
+    'aboboya'      => 'Aboboya',
+    'mini truck'   => 'Mini Truck',
+    _              => 'Taxi',
+  };
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: controller,
-        builder: (_, __) => Stack(
-          alignment: Alignment.center,
+        builder: (_, __) => Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Transform.scale(
-              scale: 1.0 + (controller.value * 0.4),
-              child: Container(
-                width: 140, height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.primary.withValues(
-                    alpha: (1.0 - controller.value) * 0.12,
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                // Outermost pulse ring
+                Transform.scale(
+                  scale: 1.0 + (controller.value * 0.5),
+                  child: Container(
+                    width: 150, height: 150,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.primary.withValues(
+                        alpha: (1.0 - controller.value) * 0.08,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            Transform.scale(
-              scale: 1.0 + (controller.value * 0.2),
-              child: Container(
-                width: 110, height: 110,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.primary.withValues(
-                    alpha: (1.0 - controller.value) * 0.15,
+                // Middle pulse ring
+                Transform.scale(
+                  scale: 1.0 + (controller.value * 0.3),
+                  child: Container(
+                    width: 120, height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.primary.withValues(
+                        alpha: (1.0 - controller.value) * 0.12,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                // Inner ring
+                Transform.scale(
+                  scale: 1.0 + (controller.value * 0.15),
+                  child: Container(
+                    width: 96, height: 96,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.primary.withValues(
+                        alpha: (1.0 - controller.value) * 0.18,
+                      ),
+                    ),
+                  ),
+                ),
+                // Vehicle icon circle
+                Container(
+                  width: 80, height: 80,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF16A34A), Color(0xFF15803D)],
+                      begin:  Alignment.topLeft,
+                      end:    Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color:      Color(0x4416A34A),
+                        blurRadius: 16,
+                        offset:     Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Icon(_icon, color: Colors.white, size: 38),
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
+            // Vehicle type badge
             Container(
-              width: 80, height: 80,
-              decoration: const BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+              decoration: BoxDecoration(
+                color:        AppColors.primaryDim,
+                borderRadius: BorderRadius.circular(20),
+                border:       Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.3)),
               ),
-              child: const Icon(
-                Icons.directions_car_rounded,
-                color: AppColors.background,
-                size:  36,
+              child: Text(
+                _label,
+                style: const TextStyle(
+                  fontSize:   12,
+                  fontWeight: FontWeight.w700,
+                  color:      AppColors.primary,
+                ),
               ),
             ),
           ],

@@ -1,486 +1,332 @@
 // lib/features/gas/presentation/widgets/address_picker_sheet.dart
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:cts_transport_app/core/theme/app_theme.dart';
-import 'package:cts_transport_app/widgets/common/glass_card.dart';
 
-/// Returns: `{'address': String, 'location': GeoPoint}` or `null` if dismissed.
-class AddressPickerSheet extends StatefulWidget {
-  const AddressPickerSheet({super.key});
+import '../../../../core/constants/app_colors.dart';
+import '../../../ride/models/place_result.dart';
+import '../../../ride/repositories/google_places_repository.dart';
+
+// ── Brand tokens ──────────────────────────────────────────────────────────────
+const _kPrimary     = AppColors.primary;
+const _kPrimaryDim  = AppColors.primaryDim;
+const _kBg          = AppColors.background;
+const _kSurface     = AppColors.surface;
+const _kBorder      = AppColors.border;
+const _kTextPrimary = AppColors.textPrimary;
+const _kTextSecond  = AppColors.textSecondary;
+const _kTextTert    = AppColors.textTertiary;
+const _kError       = AppColors.error;
+const _kErrorLight  = AppColors.errorLight;
+
+/// Returns `{'address': String, 'location': GeoPoint}` or null if dismissed.
+class AddressPickerSheet extends ConsumerStatefulWidget {
+  final String? title;
+  final String? subtitle;
+
+  const AddressPickerSheet({
+    super.key,
+    this.title,
+    this.subtitle,
+  });
 
   @override
-  State<AddressPickerSheet> createState() => _AddressPickerSheetState();
+  ConsumerState<AddressPickerSheet> createState() =>
+      _AddressPickerSheetState();
 }
 
-class _AddressPickerSheetState extends State<AddressPickerSheet> {
-  final TextEditingController _manualController = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+class _AddressPickerSheetState extends ConsumerState<AddressPickerSheet> {
+  final _searchCtrl  = TextEditingController();
+  final _focusNode   = FocusNode();
+  final _scrollCtrl  = ScrollController();
 
-  bool _isLoadingLocation = false;
-  String? _detectedAddress;
-  GeoPoint? _detectedGeoPoint;
-  String? _errorMessage;
+  // ── State ─────────────────────────────────────────────────────────────────
+  List<PlaceResult> _suggestions  = [];
+  bool              _isSearching  = false;
+  bool              _isLocating   = false;
+  String?           _locatedAddr;
+  GeoPoint?         _locatedGeo;
+  String?           _error;
+  Timer?            _debounce;
 
-  // Recent addresses (in a real app, load from local storage / Firestore)
-  final List<_SavedAddress> _recentAddresses = [
-    _SavedAddress(
-      label: 'Home',
-      address: 'East Legon, Accra',
-      icon: Icons.home_rounded,
-      geoPoint: const GeoPoint(5.6365, -0.1542),
+  static const _savedPlaces = [
+    (
+      label:    'Home',
+      address:  'East Legon, Accra',
+      icon:     Icons.home_rounded,
+      geo:      GeoPoint(5.6365, -0.1542),
     ),
-    _SavedAddress(
-      label: 'Work',
-      address: 'Airport City, Accra',
-      icon: Icons.work_rounded,
-      geoPoint: const GeoPoint(5.6037, -0.1870),
+    (
+      label:    'Work',
+      address:  'Airport City, Accra',
+      icon:     Icons.work_rounded,
+      geo:      GeoPoint(5.6037, -0.1870),
     ),
   ];
 
   @override
   void dispose() {
-    _manualController.dispose();
+    _searchCtrl.dispose();
     _focusNode.dispose();
+    _scrollCtrl.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────
-  // GPS detection
-  // ─────────────────────────────────────────────
+  // ── Search ─────────────────────────────────────────────────────────────────
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    if (value.trim().isEmpty) {
+      setState(() { _suggestions = []; _isSearching = false; });
+      return;
+    }
+    setState(() => _isSearching = true);
+    _debounce = Timer(const Duration(milliseconds: 400), () => _search(value));
+  }
 
-  Future<void> _detectCurrentLocation() async {
-    setState(() {
-      _isLoadingLocation = true;
-      _errorMessage = null;
-    });
-
+  Future<void> _search(String query) async {
     try {
-      // 1. Check / request permission
-      LocationPermission permission = await Geolocator.checkPermission();
+      final repo    = ref.read(placeRepositoryProvider);
+      final results = await repo.search(query);
+      if (mounted) setState(() { _suggestions = results; _isSearching = false; });
+    } catch (_) {
+      if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  // ── GPS ────────────────────────────────────────────────────────────────────
+  Future<void> _detectLocation() async {
+    setState(() { _isLocating = true; _error = null; _locatedAddr = null; });
+    try {
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.deniedForever ||
           permission == LocationPermission.denied) {
-        throw Exception('Location permission denied. Please enable it in Settings.');
+        throw Exception('Location permission denied. Enable it in Settings.');
+      }
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        throw Exception('Location services are off. Please enable GPS.');
       }
 
-      // 2. Check if location services are on
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        throw Exception('Location services are disabled. Please turn on GPS.');
-      }
-
-      // 3. Get position
-     final position = await Geolocator.getCurrentPosition(
-  locationSettings: const LocationSettings(
-    accuracy: LocationAccuracy.high,
-    timeLimit: Duration(seconds: 15),
-  ),
-);
-
-      // 4. Reverse geocode
-      final placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy:  LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
 
-      if (placemarks.isEmpty) throw Exception('Unable to determine address.');
+      final marks = await placemarkFromCoordinates(
+          pos.latitude, pos.longitude);
+      if (marks.isEmpty) throw Exception('Unable to determine address.');
 
-      final place = placemarks.first;
-      final address = _formatPlacemark(place);
+      final p    = marks.first;
+      final addr = [
+        if (p.name?.isNotEmpty == true && p.name != p.thoroughfare) p.name,
+        if (p.thoroughfare?.isNotEmpty == true) p.thoroughfare,
+        if (p.subLocality?.isNotEmpty == true) p.subLocality,
+        if (p.locality?.isNotEmpty == true) p.locality,
+      ].whereType<String>().take(3).join(', ');
 
       setState(() {
-        _detectedAddress = address;
-        _detectedGeoPoint = GeoPoint(position.latitude, position.longitude);
-        _isLoadingLocation = false;
+        _locatedAddr = addr;
+        _locatedGeo  = GeoPoint(pos.latitude, pos.longitude);
+        _isLocating  = false;
       });
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
-        _isLoadingLocation = false;
+        _error      = e.toString().replaceFirst('Exception: ', '');
+        _isLocating = false;
       });
     }
   }
 
-  String _formatPlacemark(Placemark p) {
-    final parts = <String>[
-      if (p.name != null && p.name!.isNotEmpty && p.name != p.thoroughfare)
-        p.name!,
-      if (p.thoroughfare != null && p.thoroughfare!.isNotEmpty) p.thoroughfare!,
-      if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality!,
-      if (p.locality != null && p.locality!.isNotEmpty) p.locality!,
-    ];
-    return parts.take(3).join(', ');
+  // ── Confirm ────────────────────────────────────────────────────────────────
+  void _confirm(String address, GeoPoint geo) {
+    Navigator.pop(context, {'address': address, 'location': geo});
   }
 
-  // ─────────────────────────────────────────────
-  // Geocode manually typed address
-  // ─────────────────────────────────────────────
-
-  Future<void> _geocodeManualAddress() async {
-    final text = _manualController.text.trim();
-    if (text.isEmpty) return;
-
-    setState(() {
-      _isLoadingLocation = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final locations = await locationFromAddress('$text, Ghana');
-      if (locations.isEmpty) throw Exception('Address not found. Try being more specific.');
-
-      final loc = locations.first;
-      final placemarks = await placemarkFromCoordinates(loc.latitude, loc.longitude);
-      final address = placemarks.isNotEmpty
-          ? _formatPlacemark(placemarks.first)
-          : text;
-
-      setState(() {
-        _detectedAddress = address;
-        _detectedGeoPoint = GeoPoint(loc.latitude, loc.longitude);
-        _isLoadingLocation = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
-        _isLoadingLocation = false;
-      });
-    }
-  }
-
-  void _confirmAddress(String address, GeoPoint geoPoint) {
-    Navigator.pop(context, {'address': address, 'location': geoPoint});
-  }
-
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final bottomPad   = MediaQuery.of(context).padding.bottom;
+
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.background,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      decoration: const BoxDecoration(
+        color:        _kSurface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: EdgeInsets.only(bottom: bottomInset),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle
+            // ── Handle ──
             Center(
               child: Container(
-                width: 40,
-                height: 4,
+                width: 40, height: 4,
                 margin: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[700],
+                  color:        _kBorder,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
 
-            // Title
+            // ── Header ──
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                'Select Delivery Address',
-                style: AppTheme.titleLarge.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                'Where should we deliver your gas?',
-                style: AppTheme.bodyMedium.copyWith(color: Colors.grey),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // ── GPS button ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: GlassCard(
-                padding: EdgeInsets.zero,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: _isLoadingLocation ? null : _detectCurrentLocation,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: const BoxDecoration(
-                              gradient: AppTheme.primaryGradient,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.my_location_rounded,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Use Current Location',
-                                  style: AppTheme.bodyMedium.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                Text(
-                                  _isLoadingLocation
-                                      ? 'Detecting your location...'
-                                      : 'Tap to detect via GPS',
-                                  style: AppTheme.labelSmall
-                                      .copyWith(color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (_isLoadingLocation)
-                            const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          else
-                            const Icon(Icons.chevron_right, color: Colors.grey),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // ── Detected address confirm card ──
-            if (_detectedAddress != null && _detectedGeoPoint != null) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: GlassCard(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.check_circle,
-                              color: Colors.green, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Location Detected',
-                            style: AppTheme.labelSmall.copyWith(
-                              color: Colors.green,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _detectedAddress!,
-                        style: AppTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () =>
-                              _confirmAddress(_detectedAddress!, _detectedGeoPoint!),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryColor,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text('Confirm This Address'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-
-            // ── Error message ──
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline, color: Colors.red, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: AppTheme.labelSmall.copyWith(color: Colors.red),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-
-            // ── Divider ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(child: Divider(color: Colors.grey)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'OR TYPE ADDRESS',
-                      style: AppTheme.labelSmall.copyWith(color: Colors.grey),
+                  Text(
+                    widget.title ?? 'Select Delivery Address',
+                    style: const TextStyle(
+                      fontSize:   20,
+                      fontWeight: FontWeight.w800,
+                      color:      _kTextPrimary,
                     ),
                   ),
-                  const Expanded(child: Divider(color: Colors.grey)),
-                ],
-              ),
-            ),
-
-            // ── Manual text input ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _manualController,
-                      focusNode: _focusNode,
-                      style: AppTheme.bodyMedium,
-                      decoration: InputDecoration(
-                        hintText: 'e.g. East Legon, Accra',
-                        hintStyle: AppTheme.bodyMedium.copyWith(color: Colors.grey),
-                        filled: true,
-                        fillColor: AppTheme.surface,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        prefixIcon:
-                            const Icon(Icons.search_rounded, color: Colors.grey),
-                      ),
-                      onSubmitted: (_) => _geocodeManualAddress(),
-                      textInputAction: TextInputAction.search,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: _geocodeManualAddress,
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: const BoxDecoration(
-                        gradient: AppTheme.primaryGradient,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.arrow_forward_rounded,
-                          color: Colors.white, size: 20),
-                    ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.subtitle ?? 'Where should we deliver your gas?',
+                    style: const TextStyle(
+                        fontSize: 13, color: _kTextSecond),
                   ),
                 ],
               ),
             ),
 
-            // ── Saved / recent addresses ──
-            if (_recentAddresses.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'SAVED ADDRESSES',
-                  style: AppTheme.labelSmall.copyWith(
-                    color: Colors.grey,
-                    letterSpacing: 1,
-                  ),
+            // ── Search bar ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color:        _kBg,
+                  borderRadius: BorderRadius.circular(14),
+                  border:       Border.all(color: _kBorder),
                 ),
-              ),
-              const SizedBox(height: 10),
-              ..._recentAddresses.map(
-                (saved) => Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                  child: GlassCard(
-                    padding: EdgeInsets.zero,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () =>
-                            _confirmAddress(saved.address, saved.geoPoint),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryColor.withValues(alpha: 0.15),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(saved.icon,
-                                    color: AppTheme.primaryColor, size: 20),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      saved.label,
-                                      style: AppTheme.bodyMedium.copyWith(
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                    Text(
-                                      saved.address,
-                                      style: AppTheme.labelSmall
-                                          .copyWith(color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(Icons.chevron_right, color: Colors.grey),
-                            ],
-                          ),
+                child: Row(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(left: 14),
+                      child: Icon(Icons.search_rounded,
+                          color: _kTextTert, size: 20),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller:     _searchCtrl,
+                        focusNode:      _focusNode,
+                        onChanged:      _onSearchChanged,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(
+                            fontSize: 14, color: _kTextPrimary),
+                        decoration: const InputDecoration(
+                          hintText:        'Search address or landmark...',
+                          hintStyle:       TextStyle(
+                              fontSize: 14, color: _kTextTert),
+                          border:          InputBorder.none,
+                          contentPadding:  EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 14),
                         ),
                       ),
                     ),
-                  ),
+                    if (_searchCtrl.text.isNotEmpty)
+                      IconButton(
+                        icon:      const Icon(Icons.clear_rounded,
+                            color: _kTextTert, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() {
+                            _suggestions = [];
+                            _isSearching = false;
+                          });
+                        },
+                      ),
+                    if (_isSearching)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 12),
+                        child: SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _kPrimary),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            ],
+            ),
 
-            const SizedBox(height: 20),
+            // ── Scrollable content ──
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.5,
+              ),
+              child: ListView(
+                controller:  _scrollCtrl,
+                shrinkWrap:  true,
+                padding:     EdgeInsets.fromLTRB(
+                    20, 0, 20, bottomPad + 16),
+                children: [
+                  // Search results
+                  if (_suggestions.isNotEmpty) ...[
+                    _SectionLabel('RESULTS'),
+                    const SizedBox(height: 8),
+                    ..._suggestions.map((p) => _PlaceTile(
+                          icon:    p.icon,
+                          title:   p.name,
+                          subtitle: p.address,
+                          onTap:   () => _confirm(p.address, p.location),
+                        )),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // GPS button
+                  if (_suggestions.isEmpty) ...[
+                    _GpsButton(
+                      isLoading: _isLocating,
+                      onTap:     _detectLocation,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Detected location card
+                  if (_locatedAddr != null && _locatedGeo != null) ...[
+                    _DetectedCard(
+                      address: _locatedAddr!,
+                      onConfirm: () =>
+                          _confirm(_locatedAddr!, _locatedGeo!),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Error
+                  if (_error != null) ...[
+                    _ErrorCard(message: _error!),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Saved places — shown when not searching
+                  if (_suggestions.isEmpty && _searchCtrl.text.isEmpty) ...[
+                    _SectionLabel('SAVED PLACES'),
+                    const SizedBox(height: 8),
+                    ..._savedPlaces.map((s) => _PlaceTile(
+                          icon:    s.icon,
+                          title:   s.label,
+                          subtitle: s.address,
+                          onTap:   () => _confirm(s.address, s.geo),
+                        )),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -488,20 +334,237 @@ class _AddressPickerSheetState extends State<AddressPickerSheet> {
   }
 }
 
-// ─────────────────────────────────────────────
-// Internal model for saved addresses
-// ─────────────────────────────────────────────
+// ── GPS button ────────────────────────────────────────────────────────────────
+class _GpsButton extends StatelessWidget {
+  final bool         isLoading;
+  final VoidCallback onTap;
+  const _GpsButton({required this.isLoading, required this.onTap});
 
-class _SavedAddress {
-  final String label;
-  final String address;
-  final IconData icon;
-  final GeoPoint geoPoint;
+  @override
+  Widget build(BuildContext context) => Material(
+        color:        Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap:        isLoading ? null : onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color:        _kPrimaryDim,
+              borderRadius: BorderRadius.circular(14),
+              border:       Border.all(
+                  color: _kPrimary.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width:  40, height: 40,
+                  decoration: BoxDecoration(
+                    color:  _kPrimary,
+                    shape:  BoxShape.circle,
+                  ),
+                  child: isLoading
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child:   CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color:       Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.my_location_rounded,
+                          color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Use Current Location',
+                          style: TextStyle(
+                            fontSize:   14,
+                            fontWeight: FontWeight.w700,
+                            color:      _kTextPrimary,
+                          )),
+                      Text(
+                        isLoading
+                            ? 'Detecting your location...'
+                            : 'Tap to detect via GPS',
+                        style: const TextStyle(
+                            fontSize: 12, color: _kTextSecond),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isLoading)
+                  const Icon(Icons.chevron_right_rounded,
+                      color: _kTextTert),
+              ],
+            ),
+          ),
+        ),
+      );
+}
 
-  const _SavedAddress({
-    required this.label,
-    required this.address,
+// ── Detected address card ─────────────────────────────────────────────────────
+class _DetectedCard extends StatelessWidget {
+  final String       address;
+  final VoidCallback onConfirm;
+  const _DetectedCard({required this.address, required this.onConfirm});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color:        _kPrimaryDim,
+          borderRadius: BorderRadius.circular(14),
+          border:       Border.all(
+              color: _kPrimary.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.check_circle_rounded,
+                  color: _kPrimary, size: 16),
+              const SizedBox(width: 8),
+              const Text('Location Detected',
+                  style: TextStyle(
+                    fontSize:   12,
+                    fontWeight: FontWeight.w700,
+                    color:      _kPrimary,
+                  )),
+            ]),
+            const SizedBox(height: 8),
+            Text(address,
+                style: const TextStyle(
+                  fontSize: 13, color: _kTextPrimary)),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onConfirm,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _kPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Confirm This Address',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+// ── Error card ────────────────────────────────────────────────────────────────
+class _ErrorCard extends StatelessWidget {
+  final String message;
+  const _ErrorCard({required this.message});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color:        _kErrorLight,
+          borderRadius: BorderRadius.circular(12),
+          border:       Border.all(
+              color: _kError.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: _kError, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(message,
+                  style: const TextStyle(
+                      fontSize: 12, color: _kError)),
+            ),
+          ],
+        ),
+      );
+}
+
+// ── Place tile ────────────────────────────────────────────────────────────────
+class _PlaceTile extends StatelessWidget {
+  final IconData     icon;
+  final String       title;
+  final String       subtitle;
+  final VoidCallback onTap;
+  const _PlaceTile({
     required this.icon,
-    required this.geoPoint,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
   });
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color:        Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap:        onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width:  38, height: 38,
+                  decoration: BoxDecoration(
+                    color:        _kPrimaryDim,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: _kPrimary, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                            fontSize:   13,
+                            fontWeight: FontWeight.w600,
+                            color:      _kTextPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 11, color: _kTextTert),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded,
+                    color: _kTextTert, size: 18),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+// ── Section label ─────────────────────────────────────────────────────────────
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: const TextStyle(
+          fontSize:      10,
+          fontWeight:    FontWeight.w700,
+          color:         _kTextTert,
+          letterSpacing: 1,
+        ),
+      );
 }

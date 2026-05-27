@@ -1,6 +1,8 @@
 // lib/features/home/presentation/home_screen.dart
 
 import 'dart:async';
+import '../../../core/utils/vehicle_icons.dart';
+import '../../ride/providers/drivers_nearby_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -228,6 +230,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  // ── Live driver markers ──────────────────────────────────────────────────
+  void _updateDriverMarkers(List<NearbyDriver> drivers) {
+    if (!mounted) return;
+    setState(() {
+      _markers.removeWhere((m) => m.markerId.value.startsWith('driver_'));
+      for (final d in drivers) {
+        _markers.add(Marker(
+          markerId:   MarkerId('driver_${d.location.latitude}_${d.location.longitude}'),
+          position:   d.location,
+          icon:       BitmapDescriptor.defaultMarkerWithHue(
+            d.serviceType == 'okada'
+                ? BitmapDescriptor.hueGreen
+                : BitmapDescriptor.hueAzure,
+          ),
+          infoWindow: InfoWindow(
+            title:   vehicleLabel(d.serviceType),
+            snippet: 'Available nearby',
+          ),
+          flat:   true,
+          anchor: const Offset(0.5, 0.5),
+        ));
+      }
+    });
+  }
+
   void _updateUserMarker(LatLng pos) {
     if (!mounted) return;
     setState(() {
@@ -331,6 +358,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    // ── Live driver markers ──────────────────────────────────────────────────
+    ref.listen<AsyncValue<List<NearbyDriver>>>(
+      driversNearbyProvider,
+      (_, next) {
+        next.whenData(_updateDriverMarkers);
+      },
+    );
     final topPad = MediaQuery.of(context).padding.top;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
