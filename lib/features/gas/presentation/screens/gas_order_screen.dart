@@ -2,6 +2,8 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import '../../../../core/services/escrow_service.dart';
 import '../../../../core/services/pricing_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -1065,6 +1067,29 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
 
     if (paymentConfirmed != true || !mounted) return;
 
+    // ── Hold funds before placing gas order ──────────────────────────────
+    final escrowResult = await EscrowService.instance.holdBalance(
+      amount:        _total,
+      serviceType:   'gas',
+      referenceType: 'gas_order',
+    );
+    if (!escrowResult.success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(escrowResult.shortfall != null
+            ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
+            : escrowResult.error ?? 'Payment hold failed.'),
+          backgroundColor: const Color(0xFFDC2626),
+          action: SnackBarAction(
+            label: 'Top Up',
+            onPressed: () => Navigator.pushNamed(context, '/wallet'),
+          ),
+        ));
+      }
+      return;
+    }
+    final escrowId = escrowResult.escrowId!;
+
     setState(() => _isSubmitting = true);
 
     try {
@@ -1119,6 +1144,18 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       final repo    = ref.read(gasOrderRepositoryProvider);
       final orderId = await repo.createGasOrder(order);
 
+      await EscrowService.instance.attachToOrder(
+        escrowId:      escrowId,
+        referenceId:   orderId,
+        referenceType: 'gas_order',
+      );
+
+      // Save escrowId to gas order document for CF cancellation refund
+      await FirebaseFirestore.instance
+          .collection('gas_orders')
+          .doc(orderId)
+          .update({'escrowId': escrowId});
+
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -1127,6 +1164,15 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         );
       }
     } catch (e) {
+      // Rollback escrow if order creation failed
+      try {
+        final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');
+        await fns.httpsCallable('refundEscrowOnError').call({
+          'escrowId': escrowId,
+          'reason':   'order_creation_failed',
+        });
+      } catch (_) { /* Stuck escrow auto-releases after 2hrs */ }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(e.toString().replaceFirst('Exception: ', '')),

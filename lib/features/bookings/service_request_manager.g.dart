@@ -34,7 +34,7 @@ final class ActiveServiceRequestProvider extends $StreamNotifierProvider<
 }
 
 String _$activeServiceRequestHash() =>
-    r'486e1696c1f3e736c0f27186c596e975f4b65eab';
+    r'1e2fde4e61479933513516561e38575bcc73c995';
 
 abstract class _$ActiveServiceRequest
     extends $StreamNotifier<ServiceRequestWrapper?> {

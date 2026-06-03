@@ -121,7 +121,7 @@ class _TopUpDialogState extends ConsumerState<TopUpDialog> {
 
             // Action button
             CTAButton(
-              onPressed: _isProcessing ? null : _processTopUp,
+              onTap: _isProcessing ? null : _processTopUp,
               text: _isProcessing
                   ? 'Processing...'
                   : (_selectedAmountValue != null

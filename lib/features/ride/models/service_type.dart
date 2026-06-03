@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-
 enum ServiceType {
   taxi,
   okada,
@@ -20,4 +19,5 @@ enum ServiceType {
         ServiceType.delivery => Icons.local_shipping,
         ServiceType.gas => Icons.local_fire_department,
       };
+
 }

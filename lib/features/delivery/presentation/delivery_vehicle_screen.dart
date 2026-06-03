@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import '../../../core/services/escrow_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../widgets/common/shared_widgets.dart';
@@ -463,6 +465,30 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
+    // ── Step 1: Hold funds ────────────────────────────────────────────────
+    final escrowResult = await EscrowService.instance.holdBalance(
+      amount:        _totalFare,
+      serviceType:   'delivery',
+      referenceType: 'delivery',
+    );
+    if (!escrowResult.success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(escrowResult.shortfall != null
+            ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up your wallet.'
+            : escrowResult.error ?? 'Payment hold failed.'),
+          backgroundColor: const Color(0xFFDC2626),
+          action: SnackBarAction(
+            label: 'Top Up',
+            onPressed: () => Navigator.pushNamed(context, '/wallet'),
+          ),
+        ));
+      }
+      return;
+    }
+    final escrowId = escrowResult.escrowId!;
+    // ─────────────────────────────────────────────────────────────────────
+
     setState(() => _isCreating = true);
 
     try {
@@ -493,6 +519,19 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       final repo = ref.read(deliveryRepositoryProvider);
       final deliveryId = await repo.createDelivery(request);
 
+      // ── Step 2: Attach escrow ─────────────────────────────────────────────
+      await EscrowService.instance.attachToOrder(
+        escrowId:      escrowId,
+        referenceId:   deliveryId,
+        referenceType: 'delivery',
+      );
+
+      // Save escrowId to delivery document for CF cancellation refund
+      await FirebaseFirestore.instance
+          .collection('deliveries')
+          .doc(deliveryId)
+          .update({'escrowId': escrowId});
+
       if (!mounted) return;
 
       Navigator.pushReplacement(
@@ -507,6 +546,16 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
         ),
       );
     } catch (e) {
+      // Rollback escrow if delivery creation failed
+      if (escrowId.isNotEmpty) {
+        try {
+          final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');
+          await fns.httpsCallable('refundEscrowOnError').call({
+            'escrowId': escrowId,
+            'reason':   'order_creation_failed',
+          });
+        } catch (_) {}
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(e.toString()),

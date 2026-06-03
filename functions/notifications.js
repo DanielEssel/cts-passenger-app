@@ -7,6 +7,18 @@ const admin                                    = require("firebase-admin");
 const getDb  = () => admin.firestore();
 const getFcm = () => admin.messaging();
 
+// ── Haversine distance formula ────────────────────────────────────────────────
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R    = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a    = Math.sin(dLat/2) * Math.sin(dLat/2)
+             + Math.cos(lat1 * Math.PI / 180)
+             * Math.cos(lat2 * Math.PI / 180)
+             * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,12 +265,13 @@ exports.onTripStatusChanged = onDocumentUpdated(
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.onGasOrderCreated = onDocumentCreated(
-  {region: "europe-west2", document: "gas_orders/{orderId}"},
+  {region: "europe-west2", minInstances: 0, document: "gas_orders/{orderId}"},
   async (event) => {
     const data    = event.data.data();
     const orderId = event.params.orderId;
     const uid     = data.passengerId;
 
+    // ── 1. Notify passenger ───────────────────────────────────────────────
     await notifyPassenger(uid, {
       type:  "gas",
       title: "Gas order placed ✓",
@@ -266,6 +279,139 @@ exports.onGasOrderCreated = onDocumentCreated(
       route: `/gas-tracking?orderId=${orderId}`,
       metadata: { orderId },
     });
+
+    // ── 2. Notify nearby available delivery drivers via FCM ───────────────
+    try {
+      const deliveryLat = data.deliveryLocation?.latitude  ?? data.pickupLocation?.latitude  ?? 0;
+      const deliveryLng = data.deliveryLocation?.longitude ?? data.pickupLocation?.longitude ?? 0;
+
+      const driversSnap = await getDb().collection("drivers")
+        .where("isAvailable", "==", true)
+        .where("isOnline",    "==", true)
+        .where("isApproved",  "==", true)
+        .where("serviceType", "==", "delivery")
+        .get();
+
+      if (driversSnap.empty) {
+        console.log(`Gas order ${orderId}: no available delivery drivers`);
+        return;
+      }
+
+      // Filter by 10km radius
+      const nearby = driversSnap.docs.filter(doc => {
+        const loc = doc.data().location;
+        if (!loc) return false;
+        return haversineKm(
+          deliveryLat, deliveryLng,
+          loc.latitude, loc.longitude
+        ) <= 10.0;
+      });
+
+      if (nearby.length === 0) {
+        console.log(`Gas order ${orderId}: no drivers within 10km`);
+        return;
+      }
+
+      const tokens = nearby.map(d => d.data().fcmToken).filter(Boolean);
+      if (tokens.length > 0) {
+        await admin.messaging().sendEachForMulticast({
+          tokens,
+          notification: {
+            title: "🔥 New Gas Order",
+            body:  `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
+          },
+          data: {
+            type:      "NEW_GAS_REQUEST",
+            orderId,
+            pickupAddress:   data.pickupAddress   ?? "",
+            deliveryAddress: data.deliveryAddress ?? "",
+            cylinderSize:    data.cylinderSize    ?? "",
+            totalPrice:      String(data.totalPrice ?? 0),
+          },
+          android: { priority: "high" },
+        });
+        console.log(`Gas order ${orderId}: FCM sent to ${tokens.length} drivers`);
+      }
+    } catch (e) {
+      console.error(`Gas order ${orderId}: driver notification failed:`, e.message);
+    }
+  }
+);
+
+
+// ── onDeliveryCreated: notify passenger + nearby drivers ─────────────────────
+exports.onDeliveryCreated = onDocumentCreated(
+  {region: "europe-west2", minInstances: 0, document: "deliveries/{deliveryId}"},
+  async (event) => {
+    const data       = event.data.data();
+    const deliveryId = event.params.deliveryId;
+    const uid        = data.passengerId;
+
+    // ── 1. Notify passenger ───────────────────────────────────────────────
+    await notifyPassenger(uid, {
+      type:  "delivery",
+      title: "Delivery request placed ✓",
+      body:  `Looking for a driver to deliver your ${data.parcelType ?? "parcel"}.`,
+      route: `/delivery-tracking?deliveryId=${deliveryId}`,
+      metadata: { deliveryId },
+    });
+
+    // ── 2. Notify nearby delivery drivers ─────────────────────────────────
+    try {
+      const pickupLat = data.pickupLocation?.latitude  ?? 0;
+      const pickupLng = data.pickupLocation?.longitude ?? 0;
+
+      const driversSnap = await getDb().collection("drivers")
+        .where("isAvailable", "==", true)
+        .where("isOnline",    "==", true)
+        .where("isApproved",  "==", true)
+        .where("serviceType", "==", "delivery")
+        .get();
+
+      if (driversSnap.empty) {
+        console.log(`Delivery ${deliveryId}: no available drivers`);
+        return;
+      }
+
+      // Filter by 10km radius
+      const nearby = driversSnap.docs.filter(doc => {
+        const loc = doc.data().location;
+        if (!loc) return false;
+        return haversineKm(
+          pickupLat, pickupLng,
+          loc.latitude, loc.longitude
+        ) <= 10.0;
+      });
+
+      if (nearby.length === 0) {
+        console.log(`Delivery ${deliveryId}: no drivers within 10km`);
+        return;
+      }
+
+      const tokens = nearby.map(d => d.data().fcmToken).filter(Boolean);
+      if (tokens.length > 0) {
+        await admin.messaging().sendEachForMulticast({
+          tokens,
+          notification: {
+            title: "📦 New Delivery Request",
+            body:  `${data.parcelType ?? "Parcel"} — ${data.pickupAddress ?? "Nearby"}`,
+          },
+          data: {
+            type:           "NEW_DELIVERY_REQUEST",
+            deliveryId,
+            pickupAddress:  data.pickupAddress  ?? "",
+            dropoffAddress: data.dropoffAddress ?? "",
+            parcelType:     data.parcelType     ?? "",
+            estimatedFare:  String(data.estimatedFare ?? 0),
+            weightTier:     data.weightTier     ?? "",
+          },
+          android: { priority: "high" },
+        });
+        console.log(`Delivery ${deliveryId}: FCM sent to ${tokens.length} drivers`);
+      }
+    } catch (e) {
+      console.error(`Delivery ${deliveryId}: driver notification failed:`, e.message);
+    }
   }
 );
 
@@ -601,7 +747,7 @@ exports.onDeliveryCompleted = onDocumentUpdated(
 // ─────────────────────────────────────────────────────────────────────────────
 
 exports.checkDocumentExpiry = onSchedule(
-  { schedule: "0 8 * * *", timeZone: "Africa/Accra" },
+  { schedule: "0 8 * * *", timeZone: "Africa/Accra", region: "europe-west2", minInstances: 0 },
   async () => {
     const now     = new Date();
 
@@ -664,7 +810,7 @@ exports.checkDocumentExpiry = onSchedule(
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 
 exports.broadcastNotification = onCall(
-  { region: "europe-west2" },
+  { region: "europe-west2", minInstances: 0 },
   async (request) => {
     // Verify admin
     const uid = request.auth?.uid;

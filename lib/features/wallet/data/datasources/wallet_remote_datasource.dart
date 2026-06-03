@@ -20,7 +20,7 @@ class WalletRemoteDataSource {
     FirebaseFunctions? functions,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
-        _functions = functions ?? FirebaseFunctions.instance;
+        _functions = functions ?? FirebaseFunctions.instanceFor(region: 'europe-west2');
 
   // ─────────────────────────────────────────────
   // Auth helper
@@ -127,7 +127,7 @@ Future<WalletModel> getWallet() async {
         'userId': userId,
         'email': email,
       });
-      return WalletModel.fromJson(result.data as Map<String, dynamic>);
+      return WalletModel.fromJson(Map<String, dynamic>.from(result.data as Map));
     } catch (e) {
       throw _handleException(e);
     }
@@ -199,9 +199,10 @@ Future<WalletModel> getWallet() async {
           await _functions.httpsCallable('getTransactionHistory').call({
         'limit': limit,
       });
-      return (result.data['transactions'] as List)
+      final txList = result.data['transactions'] as List? ?? [];
+      return txList
           .map((json) =>
-              TransactionModel.fromJson(json as Map<String, dynamic>)
+              TransactionModel.fromJson(Map<String, dynamic>.from(json as Map))
                   .toEntity())
           .toList();
     } catch (e) {
@@ -215,15 +216,15 @@ Future<WalletModel> getWallet() async {
     if (uid == null || uid.isEmpty) {
       return Stream.error(Exception('User not authenticated'));
     }
+    // Read from ledger (new) — filter by fromUserId or toUserId
     return _firestore
-        .collection('transactions')
-        .where('userId', isEqualTo: uid)
+        .collection('ledger')
+        .where('toUserId', isEqualTo: uid)
         .orderBy('createdAt', descending: true)
         .limit(20)
         .snapshots()
         .map((snap) => snap.docs
-            .map((doc) =>
-                TransactionModel.fromFirestore(doc).toEntity())
+            .map((doc) => TransactionModel.fromLedger(doc).toEntity())
             .toList());
   }
 

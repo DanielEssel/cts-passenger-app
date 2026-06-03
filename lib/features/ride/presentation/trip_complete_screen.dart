@@ -14,6 +14,7 @@ class TripCompleteScreen extends StatefulWidget {
   final String destination;
   final String fare;
   final String rideType;
+  final double driverRating;   // was Stringptional, for display only. Not used in calculations.
 
   const TripCompleteScreen({
     super.key,
@@ -23,6 +24,7 @@ class TripCompleteScreen extends StatefulWidget {
     required this.destination,
     required this.fare,
     required this.rideType,
+    required this.driverRating,
   });
 
   @override

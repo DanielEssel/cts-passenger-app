@@ -34,7 +34,7 @@ class ErrorWidget extends StatelessWidget {
             ),
             if (onRetry != null) ...[
               const SizedBox(height: 24),
-              PrimaryButton(label: retryLabel, onPressed: onRetry!, width: 200),
+              PrimaryButton(label: retryLabel, onTap: onRetry!),
             ],
           ],
         ),

@@ -119,6 +119,7 @@ class AppColors {
   static const Color black       = Colors.black;
   static const Color transparent = Colors.transparent;
 
+
   // ──────────────────────────────────────────────────────────
   // LEGACY ALIASES — untouched for zero breakage
   // ──────────────────────────────────────────────────────────
@@ -129,4 +130,5 @@ class AppColors {
   static const Color textSecondaryColor = textSecondary;
   static const Color textDisabledColor  = textDisabled;
   static const Color backgroundColor    = background;
+  static const Color backgroundLightColor = backgroundAlt;
 }

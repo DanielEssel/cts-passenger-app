@@ -93,7 +93,7 @@ class CustomDialog extends StatelessWidget {
                   Expanded(
                     child: PrimaryButton(
                       label: positiveButtonLabel!,
-                      onPressed: onPositivePressed ?? () => Navigator.pop(context),
+                      onTap: onPositivePressed ?? () => Navigator.pop(context),
                     ),
                   ),
               ],

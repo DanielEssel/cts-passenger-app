@@ -309,6 +309,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
                 destination: data['dropoffAddress'] as String? ?? '',
                 fare:        fare,
                 rideType:    data['serviceType']   as String? ?? 'Ride',
+                driverRating: (data['driverRating'] as num?)?.toDouble() ?? 5.0,
               ),
             ),
           );

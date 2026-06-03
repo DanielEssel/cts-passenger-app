@@ -193,7 +193,7 @@ exports.acceptTrip = require("firebase-functions/v2/https").onCall(
 // ── expireStaleTrips — runs every 2 minutes ───────────────────────────────────
 
 exports.expireStaleTrips = onSchedule(
-  { schedule: "every 2 minutes", timeZone: "Africa/Accra" },
+  { schedule: "every 2 minutes", timeZone: "Africa/Accra", region: "europe-west2", minInstances: 0 },
   async () => {
     const db  = admin.firestore();
     const now = new Date();
@@ -261,3 +261,23 @@ exports.onTripCreated       = trips.onTripCreated;
 exports.onTripCompleted     = trips.onTripCompleted;
 exports.onDeliveryCompleted = trips.onDeliveryCompleted;
 exports.onGasOrderCompleted = trips.onGasOrderCompleted;
+
+// ── Escrow + Financial integrity ──────────────────────────────────────────────
+const escrow = require("./escrow");
+exports.holdBalance          = escrow.holdBalance;
+exports.attachEscrowToOrder  = escrow.attachEscrowToOrder;
+exports.paystackWebhook      = escrow.paystackWebhook;
+exports.releaseStuckEscrows  = escrow.releaseStuckEscrows;
+exports.dailyReconciliation  = escrow.dailyReconciliation;
+
+// ── Cancellation refunds ──────────────────────────────────────────────────────
+exports.onTripCancelled      = trips.onTripCancelled;
+exports.onDeliveryCancelled  = trips.onDeliveryCancelled;
+exports.onGasOrderCancelled  = trips.onGasOrderCancelled;
+exports.resetDailyEarnings = wallet.resetDailyEarnings;
+exports.getDriverWallet          = wallet.getDriverWallet;
+exports.requestDriverWithdrawal  = wallet.requestDriverWithdrawal;
+exports.migrateWallets = wallet.migrateWallets;
+exports.refundEscrowOnError = escrow.refundEscrowOnError;
+exports.broadcastNotification = notifications.broadcastNotification;
+exports.onDeliveryCreated = notifications.onDeliveryCreated;

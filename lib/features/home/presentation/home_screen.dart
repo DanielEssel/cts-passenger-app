@@ -1,6 +1,6 @@
-// lib/features/home/presentation/home_screen.dart
 
 import 'dart:async';
+
 import '../../../core/utils/vehicle_icons.dart';
 import '../../ride/providers/drivers_nearby_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -29,6 +29,20 @@ import '../services/driver_availability_service.dart';
 final driverAvailabilityServiceProvider =
     Provider((ref) => DriverAvailabilityService());
 
+/// Remembers the last service the user launched into. NULL means "not chosen
+/// yet" — Home does not pre-select anything. The booking/options screen is the
+/// real source of truth for the committed service; this just seeds it.
+// final selectedServiceProvider = StateProvider<ServiceType?>((_) => null);
+class SelectedServiceNotifier extends Notifier<ServiceType> {
+  @override
+  ServiceType build() => ServiceType.taxi;
+  void set(ServiceType s) => state = s;
+}
+
+final selectedServiceProvider =
+    NotifierProvider<SelectedServiceNotifier, ServiceType>(
+        SelectedServiceNotifier.new);
+
 final nearbyDriversProvider =
     StreamProvider.autoDispose.family<int, ServiceType>((ref, service) {
   final svc = ref.watch(driverAvailabilityServiceProvider);
@@ -39,7 +53,6 @@ final savedPlacesProvider =
     StreamProvider.autoDispose<List<_SavedPlace>>((ref) {
   final uid = ref.watch(userIdProvider);
   if (uid == null) return const Stream.empty();
-  // ✅ Use 'users' collection not 'passengers'
   return FirebaseFirestore.instance
       .collection('users')
       .doc(uid)
@@ -82,17 +95,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool                          _isMapReady    = false;
   Timer?                        _debounceTimer;
   StreamSubscription<Position>? _locationSub;
-  bool                          _locationInitialized = false; // ✅ prevent duplicate init
+  bool                          _locationInitialized = false;
+  bool                          _usingFallbackLocation = false; // ✅ allow retry
 
-  ServiceType _selectedService = ServiceType.taxi;
   bool        _isLocating      = true;
   String      _locationLabel   = 'Locating...';
 
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
-  late AnimationController _chipAnimController;
 
   static const LatLng _accra = LatLng(5.6037, -0.1870);
+
+  /// A confirmed pickup is required before booking can start.
+  bool get _hasPickup => _userLocation != null && !_isLocating;
 
   String get _greeting {
     final h = DateTime.now().hour;
@@ -105,36 +120,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _chipAnimController = AnimationController(
-      vsync:    this,
-      duration: const Duration(milliseconds: 350),
-    )..forward();
     _initLocation();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // ✅ Only re-check on resume, don't restart full init
+    super.didChangeAppLifecycleState(state); // ✅ call super
     if (state == AppLifecycleState.resumed) {
       _checkLocationOnResume();
     }
   }
 
   Future<void> _checkLocationOnResume() async {
-    if (_userLocation != null) return; // ✅ Already has location
+    // ✅ Retry if we only have the Accra fallback, not a real fix.
+    if (_userLocation != null && !_usingFallbackLocation) return;
     final permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.always ||
         permission == LocationPermission.whileInUse) {
+      _locationInitialized = false; // allow re-init
       _initLocation();
     }
   }
 
   Future<void> _initLocation() async {
-    if (_locationInitialized && _userLocation != null) return; // ✅ Guard
+    if (_locationInitialized &&
+        _userLocation != null &&
+        !_usingFallbackLocation) {
+      return;
+    }
     setState(() => _isLocating = true);
 
     try {
-      // ✅ Check permission first without showing dialog for every error
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
@@ -159,7 +175,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             _isLocating    = false;
             _locationLabel = 'Location access denied';
           });
-          // ✅ Only show dialog for actual permission denial
           if (permission == LocationPermission.deniedForever) {
             _showLocationErrorDialog(
                 'Location permission is permanently denied. Please enable it in Settings.');
@@ -176,9 +191,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       final ll = LatLng(pos.latitude, pos.longitude);
       setState(() {
-        _userLocation        = ll;
-        _isLocating          = false;
-        _locationInitialized = true;
+        _userLocation          = ll;
+        _isLocating            = false;
+        _locationInitialized   = true;
+        _usingFallbackLocation = false; // ✅ real fix obtained
       });
 
       if (_isMapReady) {
@@ -188,34 +204,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         );
       }
       _updateUserMarker(ll);
-      _startLocationUpdates(); // ✅ No await — runs in background
+      _startLocationUpdates();
       _updateLocationLabel(ll);
     } catch (e) {
       if (!mounted) return;
-      // ✅ Don't show dialog for timeouts/network errors
       setState(() {
-        _isLocating    = false;
-        _locationLabel = 'Location unavailable';
-        _userLocation  = _accra; // ✅ Fall back to Accra
+        _isLocating            = false;
+        _locationLabel         = 'Location unavailable';
+        _userLocation          = _accra;
+        _usingFallbackLocation = true; // ✅ mark fallback so resume retries
       });
       debugPrint('Location error: $e');
     }
   }
 
   void _startLocationUpdates() {
-    // ✅ Cancel existing subscription before creating new one
     _locationSub?.cancel();
     _locationSub = null;
 
     LocationService.instance.startListening(
       onSignificantMove: (d) {
-        if (mounted && d > 50) _recenterMap();
+        // ✅ No auto-recenter — it fights the user panning the map.
+        // (Recenter is available via the FAB.)
       },
     ).then((_) {
       _locationSub = LocationService.instance.positionStream.listen((pos) {
         if (!mounted) return;
         final ll = LatLng(pos.latitude, pos.longitude);
-        setState(() => _userLocation = ll);
+        setState(() {
+          _userLocation          = ll;
+          _usingFallbackLocation = false;
+        });
         _updateUserMarker(ll);
       });
     });
@@ -225,9 +244,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       final label = await LocationService.instance.reverseGeocode(ll);
       if (mounted) setState(() => _locationLabel = label);
-    } catch (_) {
-      // Silently fail — label stays as fallback
-    }
+    } catch (_) {/* keep fallback label */}
   }
 
   // ── Live driver markers ──────────────────────────────────────────────────
@@ -237,7 +254,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _markers.removeWhere((m) => m.markerId.value.startsWith('driver_'));
       for (final d in drivers) {
         _markers.add(Marker(
-          markerId:   MarkerId('driver_${d.location.latitude}_${d.location.longitude}'),
+          // ✅ key by driverId when available, not coordinates
+          markerId: MarkerId('driver_${d.location.latitude}_${d.location.longitude}'),
           position:   d.location,
           icon:       BitmapDescriptor.defaultMarkerWithHue(
             d.serviceType == 'okada'
@@ -256,18 +274,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _updateUserMarker(LatLng pos) {
-    if (!mounted) return;
-    setState(() {
-      _markers
-        ..removeWhere((m) => m.markerId.value == 'user')
-        ..add(Marker(
-          markerId:  const MarkerId('user'),
-          position:  pos,
-          icon:      BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueGreen),
-          infoWindow: const InfoWindow(title: 'You'),
-        ));
-    });
+    // ✅ Rely on myLocationEnabled (blue dot) instead of a duplicate marker.
+    // Intentionally a no-op now; kept so callers don't break.
   }
 
   void _recenterMap() {
@@ -286,7 +294,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: true, // ✅ Allow dismissal
+      barrierDismissible: true,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20)),
@@ -315,35 +323,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Future<void> _selectService(ServiceType service) async {
-    HapticFeedback.selectionClick();
-    setState(() => _selectedService = service);
-    _chipAnimController..reset()..forward();
-    await _goToSearch();
-  }
-
-  Future<void> _goToSearch() async {
+  // ─────────────────────────────────────────────
+  // NAVIGATION — the single booking seam
+  // ────────────────────────────────────────────
+  void _openBooking({
+    String?      destinationLabel,
+    String?      destinationAddress,
+    ServiceType? service,
+  }) {
+    if (!_hasPickup) {
+      _snack('Getting your location — one moment…');
+      return;
+    }
     HapticFeedback.lightImpact();
-    if (!mounted) return;
+
+    final svc = service ??
+        ref.read(selectedServiceProvider) ??
+        ServiceType.taxi;
+
+    if (service != null) {
+      ref.read(selectedServiceProvider.notifier).set(service);// remember
+    }
+
     Navigator.pushNamed(
       context,
-      _selectedService.route,
-      arguments: {'service': _selectedService},
+      svc.route,
+      arguments: {
+        'service': svc,
+        'pickup': _userLocation, // booking screen may use this; harmless if not
+        if (destinationLabel != null) 'destinationLabel': destinationLabel,
+        if (destinationAddress != null) 'destinationAddress': destinationAddress,
+      },
     );
   }
 
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content:  Text(msg),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ));
+  }
+
   Future<void> _refreshData() async {
-    await Future.wait([
-      ref.refresh(nearbyDriversProvider(_selectedService).future),
-      ref.refresh(savedPlacesProvider.future),
-      ref.refresh(promoBannerProvider.future),
-    ]);
+    ref.invalidate(promoBannerProvider);
+    if (ref.read(userIdProvider) != null) {
+      ref.invalidate(savedPlacesProvider);
+    }
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
-    _chipAnimController.dispose();
     _sheetController.dispose();
     _mapController?.dispose();
     _locationSub?.cancel();
@@ -358,12 +394,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    // ── Live driver markers ──────────────────────────────────────────────────
     ref.listen<AsyncValue<List<NearbyDriver>>>(
       driversNearbyProvider,
-      (_, next) {
-        next.whenData(_updateDriverMarkers);
-      },
+      (_, next) => next.whenData(_updateDriverMarkers),
     );
     final topPad = MediaQuery.of(context).padding.top;
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -424,13 +457,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ));
         }
       },
-      markers:                _markers,
-      myLocationEnabled:      true,
+      markers:                 _markers,
+      myLocationEnabled:       true,
       myLocationButtonEnabled: false,
-      zoomControlsEnabled:    false,
-      mapToolbarEnabled:      false,
-      compassEnabled:         false,
-      buildingsEnabled:       true,
+      zoomControlsEnabled:     false,
+      mapToolbarEnabled:       false,
+      compassEnabled:          false,
+      buildingsEnabled:        true,
     );
   }
 
@@ -489,25 +522,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     child: Text(
                       _locationLabel,
                       style: const TextStyle(
-                        color:       Color(0xFF0D1F14),
-                        fontSize:    12.5,
-                        fontWeight:  FontWeight.w600,
+                        color:         Color(0xFF0D1F14),
+                        fontSize:      12.5,
+                        fontWeight:    FontWeight.w600,
                         letterSpacing: 0.1,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Icon(Icons.expand_more_rounded,
-                      color: HomeTheme.textSecondary, size: 18),
+                  Icon(Icons.my_location_rounded,
+                      color: HomeTheme.textSecondary, size: 16),
                 ],
               ),
             ),
           ),
         ),
         const SizedBox(width: 10),
-
-        // Notifications
         Consumer(
           builder: (_, ref, __) {
             final count = ref.watch(unreadNotifCountProvider).value ?? 0;
@@ -521,8 +552,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           },
         ),
         const SizedBox(width: 10),
-
-        // Avatar
         GestureDetector(
           onTap: () => Navigator.pushNamed(context, AppRoutes.profile),
           child: Container(
@@ -541,11 +570,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: ClipOval(
               child: photoUrl != null && photoUrl.isNotEmpty
                   ? CachedNetworkImage(
-                      imageUrl:     photoUrl,
-                      fit:          BoxFit.cover,
-                      placeholder:  (_, __) =>
+                      imageUrl:    photoUrl,
+                      fit:         BoxFit.cover,
+                      placeholder: (_, __) =>
                           Container(color: Colors.grey[200]),
-                      errorWidget:  (_, __, ___) =>
+                      errorWidget: (_, __, ___) =>
                           _avatarFallback(firstName),
                     )
                   : _avatarFallback(firstName),
@@ -557,7 +586,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _avatarFallback(String name) => Container(
-        color: HomeTheme.primary.withValues(alpha: 0.15),
+        color:     HomeTheme.primary.withValues(alpha: 0.15),
         alignment: Alignment.center,
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : 'U',
@@ -616,11 +645,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 parent: ClampingScrollPhysics()),
             slivers: [
               SliverToBoxAdapter(child: _buildDragHandle()),
-              SliverToBoxAdapter(
-                  child: _buildSheetHeader(firstName)),
-              SliverToBoxAdapter(child: _buildServiceGrid()),
-              SliverToBoxAdapter(child: _buildSearchBar()),
-              SliverToBoxAdapter(child: _buildNearbyBadge()),
+              SliverToBoxAdapter(child: _buildSheetHeader(firstName)),
+              // ── HERO: destination-first ──
+              SliverToBoxAdapter(child: _buildWhereTo()),
+              SliverToBoxAdapter(child: _buildServiceLaunchers()),
               SliverToBoxAdapter(child: _buildSavedPlaces()),
               SliverToBoxAdapter(child: _buildRecentTrips()),
               SliverToBoxAdapter(child: _buildPromoBanner()),
@@ -692,10 +720,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     const SizedBox(width: 7),
                     Text('Wallet',
                         style: TextStyle(
-                          fontFamily:  'Inter',
-                          color:       HomeTheme.primary,
-                          fontSize:    13,
-                          fontWeight:  FontWeight.w700,
+                          fontFamily: 'Inter',
+                          color:      HomeTheme.primary,
+                          fontSize:   13,
+                          fontWeight: FontWeight.w700,
                         )),
                   ],
                 ),
@@ -705,68 +733,111 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
-  Widget _buildServiceGrid() => Padding(
+  // ── HERO: "Where to?" ─────────────────────────────────────────────────────
+  Widget _buildWhereTo() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: GestureDetector(
+          onTap: _hasPickup ? () => _openBooking() : null,
+          child: Opacity(
+            opacity: _hasPickup ? 1 : 0.6,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color:        HomeTheme.surfaceAlt,
+                borderRadius: BorderRadius.circular(18),
+                border:       Border.all(color: HomeTheme.border),
+                boxShadow:    HomeTheme.cardShadow,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width:  46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      gradient:     HomeTheme.primaryGradient,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.search_rounded,
+                        color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _hasPickup
+                              ? 'Where to?'
+                              : 'Getting your location…',
+                          style: const TextStyle(
+                            fontFamily:    'Inter',
+                            color:         HomeTheme.textPrimary,
+                            fontSize:      17,
+                            fontWeight:    FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _hasPickup
+                              ? 'Set your destination to see options'
+                              : 'We need your pickup first',
+                          style: TextStyle(
+                            color:    HomeTheme.textTertiary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_rounded,
+                      color: HomeTheme.textSecondary, size: 20),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  // ── Service launchers (NOT selectors) ─────────────────────────────────────
+  // A thin, secondary row. Tapping opens booking preset to that service. There
+  // is intentionally no persistent "selected" highlight on Home.
+  Widget _buildServiceLaunchers() => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
         child: Row(
           children: ServiceType.values.map((svc) {
-            final selected = svc == _selectedService;
             return Expanded(
               child: GestureDetector(
-                onTap: () => _selectService(svc),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve:    Curves.easeOutCubic,
-                  margin:   const EdgeInsets.symmetric(horizontal: 4),
-                  padding:  const EdgeInsets.symmetric(vertical: 14),
+                onTap: () => _openBooking(service: svc),
+                child: Container(
+                  margin:  const EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
-                    color: selected
-                        ? HomeTheme.primary.withValues(alpha: 0.08)
-                        : HomeTheme.surfaceAlt,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: selected
-                          ? HomeTheme.primary.withValues(alpha: 0.5)
-                          : HomeTheme.border,
-                      width: selected ? 1.5 : 1,
-                    ),
-                    boxShadow: selected ? HomeTheme.primaryGlow : null,
+                    color:        HomeTheme.surfaceAlt,
+                    borderRadius: BorderRadius.circular(16),
+                    border:       Border.all(color: HomeTheme.border),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        width:  44,
-                        height: 44,
+                      Container(
+                        width:  40,
+                        height: 40,
                         decoration: BoxDecoration(
-                          gradient: selected
-                              ? HomeTheme.primaryGradient
-                              : null,
-                          color: selected
-                              ? null
-                              : HomeTheme.border.withValues(alpha: 0.5),
+                          color: HomeTheme.primary.withValues(alpha: 0.08),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
-                          svc.icon,
-                          color: selected
-                              ? Colors.white
-                              : HomeTheme.textSecondary,
-                          size: 20,
-                        ),
+                        child: Icon(svc.icon,
+                            color: HomeTheme.primary, size: 20),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 7),
                       Text(
                         svc.displayName,
                         style: TextStyle(
-                          fontFamily:  'Inter',
-                          color:       selected
-                              ? HomeTheme.primary
-                              : HomeTheme.textSecondary,
-                          fontSize:    11,
-                          fontWeight:  selected
-                              ? FontWeight.w700
-                              : FontWeight.w500,
+                          fontFamily: 'Inter',
+                          color:      HomeTheme.textSecondary,
+                          fontSize:   11,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -777,131 +848,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           }).toList(),
         ),
       );
-
-  Widget _buildSearchBar() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        child: GestureDetector(
-          onTap: _goToSearch,
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color:        HomeTheme.surfaceAlt,
-              borderRadius: BorderRadius.circular(18),
-              border:       Border.all(color: HomeTheme.border),
-              boxShadow:    HomeTheme.cardShadow,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width:  42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    gradient:     HomeTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: const Icon(Icons.search_rounded,
-                      color: Colors.white, size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_selectedService.searchHint,
-                          style: const TextStyle(
-                            fontFamily:    'Inter',
-                            color:         HomeTheme.textPrimary,
-                            fontSize:      15,
-                            fontWeight:    FontWeight.w700,
-                            letterSpacing: -0.2,
-                          )),
-                      const SizedBox(height: 2),
-                      Text('Tap to enter destination',
-                          style: TextStyle(
-                            color:   HomeTheme.textTertiary,
-                            fontSize: 11.5,
-                          )),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color:        HomeTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border:       Border.all(
-                      color: HomeTheme.primary.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(_selectedService.icon,
-                          color: HomeTheme.primary, size: 13),
-                      const SizedBox(width: 4),
-                      Text(_selectedService.displayName,
-                          style: TextStyle(
-                            fontFamily:  'Inter',
-                            color:       HomeTheme.primary,
-                            fontSize:    11,
-                            fontWeight:  FontWeight.w700,
-                          )),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-
-  Widget _buildNearbyBadge() {
-    final async = ref.watch(nearbyDriversProvider(_selectedService));
-    return async.when(
-      data: (n) {
-        if (n == 0) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-          child: Row(
-            children: [
-              _PulsingDot(color: HomeTheme.primary, size: 7),
-              const SizedBox(width: 8),
-              Text(
-                '$n ${_selectedService.displayName}${n == 1 ? '' : 's'} available near you',
-                style: TextStyle(
-                  color:      HomeTheme.textSecondary,
-                  fontSize:   12.5,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color:        HomeTheme.success.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border:       Border.all(
-                    color: HomeTheme.success.withValues(alpha: 0.25),
-                  ),
-                ),
-                child: Text('LIVE',
-                    style: TextStyle(
-                      color:         HomeTheme.success,
-                      fontSize:      9,
-                      fontWeight:    FontWeight.w800,
-                      letterSpacing: 0.8,
-                    )),
-              ),
-            ],
-          ),
-        );
-      },
-      loading: () => const SizedBox.shrink(),
-      error:   (_, __) => const SizedBox.shrink(),
-    );
-  }
 
   Widget _buildSavedPlaces() {
     final placesAsync = ref.watch(savedPlacesProvider);
@@ -987,11 +933,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       Navigator.pushNamed(context, AppRoutes.savedPlaces);
       return;
     }
-    Navigator.pushNamed(context, _selectedService.route, arguments: {
-      'service':            _selectedService,
-      'destinationLabel':   place.label,
-      'destinationAddress': place.address,
-    });
+    // ✅ Set destination, then open booking — do NOT auto-pick a service.
+    _openBooking(
+      destinationLabel:   place.label,
+      destinationAddress: place.address,
+    );
   }
 
   Widget _buildRecentTrips() {
@@ -1046,18 +992,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               final date = ts != null
                   ? DateFormat('MMM d').format(ts.toDate())
                   : '';
+              // ✅ Read the ORIGINAL trip's service for rebook.
+              final originalService = _serviceFromString(
+                  d['serviceType'] as String?);
               return _RecentTripTile(
                 from: d['pickupAddress']  as String? ?? '—',
                 to:   d['dropoffAddress'] as String? ?? '—',
                 fare: (d['actualFare']    as num?)?.toDouble() ?? 0,
                 date: date,
-                onRebook: () => Navigator.pushNamed(
-                  context,
-                  _selectedService.route,
-                  arguments: {
-                    'pickupAddress':  d['pickupAddress'],
-                    'dropoffAddress': d['dropoffAddress'],
-                  },
+                onRebook: () => _openBooking(
+                  service:            originalService,
+                  destinationAddress: d['dropoffAddress'] as String?,
                 ),
               );
             }),
@@ -1066,6 +1011,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       },
     );
   }
+
+  ServiceType _serviceFromString(String? v) =>
+      ServiceType.values.firstWhere(
+        (e) => e.name == v,
+        orElse: () => ServiceType.taxi,
+      );
 
   Widget _buildEmptyState() => Padding(
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
@@ -1096,15 +1047,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Text('No trips yet',
                         style: TextStyle(
-                          fontFamily:  'Inter',
-                          color:       HomeTheme.textPrimary,
-                          fontSize:    14,
-                          fontWeight:  FontWeight.w600,
+                          fontFamily: 'Inter',
+                          color:      HomeTheme.textPrimary,
+                          fontSize:   14,
+                          fontWeight: FontWeight.w600,
                         )),
                     const SizedBox(height: 3),
                     Text('Your completed trips will appear here',
                         style: TextStyle(
-                          color:   HomeTheme.textTertiary,
+                          color:    HomeTheme.textTertiary,
                           fontSize: 12,
                         )),
                   ],
@@ -1177,10 +1128,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                         child: Text('Use code CTS50',
                             style: TextStyle(
-                              fontFamily:  'Inter',
-                              color:       HomeTheme.primary,
-                              fontSize:    13,
-                              fontWeight:  FontWeight.w800,
+                              fontFamily: 'Inter',
+                              color:      HomeTheme.primary,
+                              fontSize:   13,
+                              fontWeight: FontWeight.w800,
                             )),
                       ),
                     ),
@@ -1201,11 +1152,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // SHARED WIDGETS
 // ═══════════════════════════════════════════════
 
-class _PulsingDot extends StatefulWidget {
-  final Color  color;
+class _PulsingDot extends StatefulWidget {  // or StatelessWidget
+  final Color color;
   final double size;
   const _PulsingDot({required this.color, this.size = 8});
-
   @override
   State<_PulsingDot> createState() => _PulsingDotState();
 }
@@ -1343,10 +1293,10 @@ class _PlaceChip extends StatelessWidget {
               const SizedBox(height: 7),
               Text(place.label,
                   style: const TextStyle(
-                    fontFamily:  'Inter',
-                    color:       HomeTheme.textPrimary,
-                    fontSize:    12,
-                    fontWeight:  FontWeight.w600,
+                    fontFamily: 'Inter',
+                    color:      HomeTheme.textPrimary,
+                    fontSize:   12,
+                    fontWeight: FontWeight.w600,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
@@ -1412,10 +1362,10 @@ class _RecentTripTile extends StatelessWidget {
                 children: [
                   Text(from,
                       style: const TextStyle(
-                        fontFamily:  'Inter',
-                        color:       HomeTheme.textPrimary,
-                        fontSize:    13,
-                        fontWeight:  FontWeight.w500,
+                        fontFamily: 'Inter',
+                        color:      HomeTheme.textPrimary,
+                        fontSize:   13,
+                        fontWeight: FontWeight.w500,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
@@ -1425,7 +1375,7 @@ class _RecentTripTile extends StatelessWidget {
                       Expanded(
                         child: Text(to,
                             style: TextStyle(
-                              color:   HomeTheme.textTertiary,
+                              color:    HomeTheme.textTertiary,
                               fontSize: 12,
                             ),
                             maxLines: 1,
@@ -1434,7 +1384,7 @@ class _RecentTripTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(date,
                           style: TextStyle(
-                            color:   HomeTheme.textTertiary,
+                            color:    HomeTheme.textTertiary,
                             fontSize: 11,
                           )),
                     ],
@@ -1449,10 +1399,10 @@ class _RecentTripTile extends StatelessWidget {
                 if (fare > 0)
                   Text('₵${fare.toStringAsFixed(2)}',
                       style: const TextStyle(
-                        fontFamily:  'Inter',
-                        color:       HomeTheme.textPrimary,
-                        fontSize:    13,
-                        fontWeight:  FontWeight.w700,
+                        fontFamily: 'Inter',
+                        color:      HomeTheme.textPrimary,
+                        fontSize:   13,
+                        fontWeight: FontWeight.w700,
                       )),
                 const SizedBox(height: 6),
                 GestureDetector(
@@ -1471,10 +1421,10 @@ class _RecentTripTile extends StatelessWidget {
                     ),
                     child: Text('Rebook',
                         style: TextStyle(
-                          fontFamily:  'Inter',
-                          color:       HomeTheme.primary,
-                          fontSize:    11,
-                          fontWeight:  FontWeight.w700,
+                          fontFamily: 'Inter',
+                          color:      HomeTheme.primary,
+                          fontSize:   11,
+                          fontWeight: FontWeight.w700,
                         )),
                   ),
                 ),
@@ -1489,77 +1439,83 @@ class _PromoCard extends StatelessWidget {
   final _PromoBanner promo;
   const _PromoCard({required this.promo});
 
+  // ✅ Guard against malformed hex so a bad promo can't crash the card.
+  Color _parseColor(String hex, Color fallback) {
+    try {
+      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Color(int.parse(
-                    promo.colorStart.replaceFirst('#', '0xFF'))),
-                Color(int.parse(
-                    promo.colorEnd.replaceFirst('#', '0xFF'))),
-              ],
-              begin: Alignment.topLeft,
-              end:   Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
+  Widget build(BuildContext context) {
+    final start = _parseColor(promo.colorStart, HomeTheme.primary);
+    final end   = _parseColor(promo.colorEnd, HomeTheme.primary);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [start, end],
+            begin:  Alignment.topLeft,
+            end:    Alignment.bottomRight,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(promo.tag,
-                        style: const TextStyle(
-                          color:         Colors.white70,
-                          fontSize:      9,
-                          letterSpacing: 1.5,
-                          fontWeight:    FontWeight.w700,
-                        )),
-                    const SizedBox(height: 6),
-                    Text(promo.title,
-                        style: const TextStyle(
-                          fontFamily:    'Inter',
-                          color:         Colors.white,
-                          fontSize:      20,
-                          fontWeight:    FontWeight.w800,
-                          height:        1.2,
-                          letterSpacing: -0.4,
-                        )),
-                    if (promo.code != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color:        Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text('Code: ${promo.code}',
-                            style: TextStyle(
-                              fontFamily:  'Inter',
-                              color:       Color(int.parse(
-                                  promo.colorStart
-                                      .replaceFirst('#', '0xFF'))),
-                              fontSize:    12,
-                              fontWeight:  FontWeight.w800,
-                            )),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Icon(Icons.local_offer_rounded,
-                  color: Colors.white.withValues(alpha: 0.15),
-                  size:  80),
-            ],
-          ),
+          borderRadius: BorderRadius.circular(24),
         ),
-      );
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(promo.tag,
+                      style: const TextStyle(
+                        color:         Colors.white70,
+                        fontSize:      9,
+                        letterSpacing: 1.5,
+                        fontWeight:    FontWeight.w700,
+                      )),
+                  const SizedBox(height: 6),
+                  Text(promo.title,
+                      style: const TextStyle(
+                        fontFamily:    'Inter',
+                        color:         Colors.white,
+                        fontSize:      20,
+                        fontWeight:    FontWeight.w800,
+                        height:        1.2,
+                        letterSpacing: -0.4,
+                      )),
+                  if (promo.code != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color:        Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('Code: ${promo.code}',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            color:      start,
+                            fontSize:   12,
+                            fontWeight: FontWeight.w800,
+                          )),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.local_offer_rounded,
+                color: Colors.white.withValues(alpha: 0.15),
+                size:  80),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────

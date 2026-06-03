@@ -8,6 +8,7 @@ class RideConstants {
 
   static const double defaultDistanceKm = 8.2;
   static const int defaultDurationMin = 18;
+  static const Duration driverSearchTimeout = Duration(seconds: 120);
 
   static const double defaultMapZoom = 14;
   static const double userLocationZoom = 15;

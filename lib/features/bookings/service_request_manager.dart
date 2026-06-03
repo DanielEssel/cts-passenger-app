@@ -162,6 +162,7 @@ class TripRequestCreator extends Notifier<void> {
     required double estimatedFare,
     required PaymentType paymentMethod,
     String? promoCode,
+    String? escrowId,
   }) async {
     final passenger = ref.read(authStateProvider).value;
     if (passenger == null) throw Exception('Not authenticated');
@@ -188,6 +189,8 @@ class TripRequestCreator extends Notifier<void> {
   paymentMethod: paymentMethod,
   isScheduled: false,
   metadata: const {},
+  escrowId: escrowId,
+
 );
 
     final docRef = await FirebaseFirestore.instance

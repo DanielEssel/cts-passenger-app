@@ -1,9 +1,18 @@
+// lib/features/ride/presentation/screens/book_ride_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cts_transport_app/features/payment/models/payment_method.dart';
+// import '../models/service_type.dart';
+
+import '../../../core/services/pricing_service.dart';
+import '../../../core/services/escrow_service.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../bookings/service_request_manager.dart';
@@ -37,7 +46,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   void initState() {
     super.initState();
 
-    // ✅ SystemChrome configured once here, NOT inside build()
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarBrightness: Brightness.dark,
       statusBarIconBrightness: Brightness.light,
@@ -52,44 +60,99 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
       curve: Curves.easeOutBack,
     );
 
-    // ✅ Animation driven by a listener on the provider, NOT a build() if-check
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _initUserLocation(); // handles both success and fallback internally
+      // Route args from Home (service / pickup / destinationAddress).
+      final args =
+          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
-      if (!mounted) return; // guard after the await
+      // Fresh booking session.
+      ref.read(rideRequestProvider.notifier).reset();
+      await PricingService.instance.fetch(force: true);
+      if (!mounted) return;
+
+      // Pickup: use the one Home already resolved; only re-acquire if absent.
+      if (args != null && args['pickup'] is LatLng) {
+        await _applyPickupFromArgs(args['pickup'] as LatLng);
+      } else {
+        await _initUserLocation();
+      }
+      if (!mounted) return;
+
+      // Destination: a saved place / rebook passes an address → geocode it so
+      // the options list appears immediately (skips the empty state).
+      final destAddress = args?['destinationAddress'] as String?;
+      if (destAddress != null && destAddress.trim().isNotEmpty) {
+        await _applyDestinationFromArgs(destAddress);
+      }
+      if (!mounted) return;
+
+      // // Service hint from Home (rebook / launcher). Pre-selecting the matching
+      // // RideOption needs the provider's select API — wire once confirmed:
+      //   final svc = args?['service'] as ServiceType?;
+      //   if (svc != null) ref.read(rideRequestProvider.notifier).preselectService(svc);
 
       ref.listenManual(
         rideRequestProvider.select((s) => s.isDestinationSet),
-        (_, isSet) {
-          if (isSet) {
-            _fabController.forward();
-          } else {
-            _fabController.reverse();
-          }
-        },
+        (_, isSet) => isSet ? _fabController.forward() : _fabController.reverse(),
       );
     });
+  }
+
+  // ── Pickup straight from Home (no second GPS prompt) ──────────────────────
+  Future<void> _applyPickupFromArgs(LatLng pickup) async {
+    String address = 'Current location';
+    try {
+      final pm = await placemarkFromCoordinates(
+          pickup.latitude, pickup.longitude);
+      final p = pm.first;
+      address = p.street ?? p.subLocality ?? p.locality ?? address;
+    } catch (_) {/* keep generic label */}
+    if (!mounted) return;
+    ref.read(rideRequestProvider.notifier).setOrigin(
+          address,
+          GeoPoint(pickup.latitude, pickup.longitude),
+        );
+  }
+
+  // ── Destination from a passed address (saved place / rebook) ──────────────
+  Future<void> _applyDestinationFromArgs(String destAddress) async {
+    try {
+      final locs = await locationFromAddress(destAddress);
+      if (locs.isEmpty || !mounted) return;
+      final loc    = locs.first;
+      final origin = ref.read(rideRequestProvider).pickupLocation;
+      final km = origin == null
+          ? RideConstants.defaultDistanceKm
+          : Geolocator.distanceBetween(
+                origin.latitude, origin.longitude,
+                loc.latitude, loc.longitude,
+              ) /
+              1000.0;
+      final mins = (km / 30.0 * 60).ceil(); // rough ETA; refined by options
+      ref.read(rideRequestProvider.notifier).setDestination(
+            destAddress,
+            GeoPoint(loc.latitude, loc.longitude),
+            km,
+            mins,
+          );
+    } catch (_) {
+      // Geocode failed — leave destination empty; user searches manually.
+    }
   }
 
   Future<void> _initUserLocation() async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
       );
-
-      // Reverse geocode to get a human-readable address
       final placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
+          position.latitude, position.longitude);
       final place = placemarks.first;
       final address = place.street ??
           place.subLocality ??
           place.locality ??
           'Current location';
-
       if (mounted) {
         ref.read(rideRequestProvider.notifier).setOrigin(
               address,
@@ -97,7 +160,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
             );
       }
     } catch (_) {
-      // Location denied or unavailable — fall back to default
       if (mounted) {
         ref.read(rideRequestProvider.notifier).setOrigin(
               RideConstants.defaultOrigin,
@@ -118,7 +180,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Single watch — child widgets use select() for granular rebuilds
     final rideState = ref.watch(rideRequestProvider);
 
     return Scaffold(
@@ -142,14 +203,8 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
             request: activeRequest,
             onTap: () => _navigateToTracking(activeRequest),
           ),
-        MapSection(
-          state: state,
-          onMapTap: _openDestinationSearch,
-        ),
-        RouteSummary(
-          state: state,
-          onDestinationTap: _openDestinationSearch,
-        ),
+        MapSection(state: state, onMapTap: _openDestinationSearch),
+        RouteSummary(state: state, onDestinationTap: _openDestinationSearch),
         Expanded(
           child: AnimatedSwitcher(
             duration: RideConstants.pageTransitionDuration,
@@ -168,15 +223,15 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
                     state: state,
                     onShowPaymentSheet: _showPaymentSheet,
                   )
-                : EmptyDestinationState(
-                    onSearchTap: _openDestinationSearch,
-                  ),
+                : EmptyDestinationState(onSearchTap: _openDestinationSearch),
           ),
         ),
         if (state.isDestinationSet)
           ConfirmRideBar(
             state: state,
             animation: _fabAnim,
+            // ConfirmRideBar should disable its button while state.isLoading
+            // is true — the guard below is the backstop.
             onConfirm: () => _confirmRide(state),
           ),
       ],
@@ -184,7 +239,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   }
 
   // ---------------------------------------------------------------------------
-  // Navigation & Actions — intentionally kept in the screen (coordinator role)
+  // Navigation & Actions
   // ---------------------------------------------------------------------------
 
   Future<void> _openDestinationSearch() async {
@@ -197,7 +252,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
         fullscreenDialog: true,
       ),
     );
-    debugPrint('🎯 Destination result: $result');
+
     if (!mounted || result is! Map<String, dynamic>) return;
 
     ref.read(rideRequestProvider.notifier).setDestination(
@@ -209,40 +264,112 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   }
 
   Future<void> _confirmRide(RideRequestState state) async {
+    // ✅ Double-tap guard (read fresh, not the captured snapshot).
+    if (ref.read(rideRequestProvider).isLoading) return;
+
+    // ✅ No second concurrent trip.
+    if (ref.read(activeServiceRequestProvider).value != null) {
+      _showErrorSnack('You already have an active trip in progress.');
+      return;
+    }
+
     if (!state.hasValidLocations) {
       _showErrorSnack(RideConstants.errorMissingLocations);
       return;
     }
-
     if (state.selectedRide == null) {
       _showErrorSnack('Please select a ride option');
       return;
     }
 
     HapticFeedback.heavyImpact();
-
     ref.read(rideRequestProvider.notifier).setLoading(true);
+
+    String escrowId = '';
+    // ✅ Only wallet payments hold escrow. Cash is collected by the driver.
+    final usesEscrow = state.paymentMethod == PaymentType.wallet;
 
     try {
       final selectedRide = state.selectedRide!;
+      final fare = state.calculatedFare;
 
-      final tripId =
-          await ref.read(tripRequestCreatorProvider.notifier).createTripRequest(
-                serviceType: selectedRide.serviceType,
-                pickupAddress: state.origin ?? RideConstants.defaultOrigin,
-                dropoffAddress: state.destination!,
-                pickupLocation: state.pickupLocation!,
-                dropoffLocation: state.dropoffLocation!,
-                estimatedDistance:
-                    state.estimatedDistance ?? RideConstants.defaultDistanceKm,
-                estimatedDuration:
-                    state.estimatedDuration ?? RideConstants.defaultDurationMin,
-                estimatedFare: state.calculatedFare,
-                paymentMethod: state.paymentMethod,
-              );
+      // ── Step 1: hold funds (wallet only) ─────────────────────────────────
+      if (usesEscrow) {
+        final escrowResult = await EscrowService.instance.holdBalance(
+          amount: fare,
+          serviceType: selectedRide.serviceType.name,
+          referenceType: 'trip',
+        );
+
+        if (!escrowResult.success) {
+          if (mounted) {
+            final shortfall = escrowResult.shortfall;
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                title: const Text('Insufficient Balance',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                content: Text(
+                  shortfall != null
+                      ? 'You need GH\u20b5${shortfall.toStringAsFixed(2)} more. Please top up your wallet.'
+                      : escrowResult.error ?? 'Payment hold failed.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Navigator.pushNamed(context, '/wallet');
+                    },
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF16A34A)),
+                    child: const Text('Top Up Wallet'),
+                  ),
+                ],
+              ),
+            );
+          }
+          return; // finally sets loading=false; no escrow held
+        }
+
+        escrowId = escrowResult.escrowId!;
+      }
+
+      // ── Step 2: create the trip WITH the escrowId baked in ───────────────
+      //    (no post-create update — the package-2 rules forbid touching
+      //     escrowId after creation, and this avoids the crash window.)
+      final tripId = await ref
+          .read(tripRequestCreatorProvider.notifier)
+          .createTripRequest(
+            serviceType: selectedRide.serviceType,
+            pickupAddress: state.origin ?? RideConstants.defaultOrigin,
+            dropoffAddress: state.destination!,
+            pickupLocation: state.pickupLocation!,
+            dropoffLocation: state.dropoffLocation!,
+            estimatedDistance:
+                state.estimatedDistance ?? RideConstants.defaultDistanceKm,
+            estimatedDuration:
+                state.estimatedDuration ?? RideConstants.defaultDurationMin,
+            estimatedFare: state.calculatedFare,
+            paymentMethod: state.paymentMethod,
+            escrowId: escrowId.isEmpty ? null : escrowId, // ← new param
+          );
+
+      // ── Step 3: link escrow → trip (wallet only) ─────────────────────────
+      if (usesEscrow) {
+        await EscrowService.instance.attachToOrder(
+          escrowId: escrowId,
+          referenceId: tripId,
+          referenceType: 'trip',
+        );
+      }
 
       if (!mounted) return;
-
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -255,14 +382,21 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
         ),
       );
     } catch (e, stack) {
-      debugPrint('Trip creation failed: $e');
-      debugPrint(stack.toString());
+      debugPrint('Trip creation failed: $e\n$stack');
 
-      if (mounted) {
-        _showErrorSnack(
-          RideConstants.errorCreateTrip,
-        );
+      // Rollback: refund escrow if it was held and trip creation failed.
+      if (escrowId.isNotEmpty) {
+        try {
+          await FirebaseFunctions.instanceFor(region: 'europe-west2')
+              .httpsCallable('refundEscrowOnError')
+              .call({'escrowId': escrowId, 'reason': 'trip_creation_failed'});
+        } catch (refundErr) {
+          debugPrint('⚠️ Escrow refund failed: $refundErr');
+          // Stuck escrow auto-released after 2h by releaseStuckEscrows.
+        }
       }
+
+      if (mounted) _showErrorSnack(RideConstants.errorCreateTrip);
     } finally {
       if (mounted) {
         ref.read(rideRequestProvider.notifier).setLoading(false);
@@ -273,7 +407,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   void _showPaymentSheet() {
     final currentType = ref.read(rideRequestProvider).paymentMethod;
     final walletAsync = ref.read(walletBalanceProvider);
-
     final walletBalance = switch (walletAsync) {
       AsyncData(:final value) => value,
       _ => 0.0,
@@ -296,14 +429,18 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
   }
 
   void _navigateToTracking(ServiceRequestWrapper request) {
-    if (request is TripRequestWrapper) {
-      Navigator.pushNamed(
-        context,
-        AppRoutes.rideTracking,
-        arguments: {'rideId': request.id},
-      );
-    }
+  switch (request) {
+    case TripRequestWrapper():
+      Navigator.pushNamed(context, AppRoutes.rideTracking,
+          arguments: {'rideId': request.id});
+    case DeliveryRequestWrapper():
+      Navigator.pushNamed(context, AppRoutes.deliveryTracking,
+          arguments: {'deliveryId': request.id});
+    case GasRefillRequestWrapper():
+      Navigator.pushNamed(context, AppRoutes.gasTracking,
+          arguments: {'orderId': request.id});
   }
+}
 
   void _showErrorSnack(String message) {
     if (!mounted) return;

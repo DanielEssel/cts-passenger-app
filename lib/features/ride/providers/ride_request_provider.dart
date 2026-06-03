@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../payment/models/payment_method.dart';
 import '../../ride/models/ride_option.dart';
+import '../../../core/services/pricing_service.dart';
+import '../models/service_type.dart';
 
 final rideRequestProvider =
     StateNotifierProvider<RideRequestNotifier, RideRequestState>(
@@ -80,14 +82,19 @@ class RideRequestState {
       pickupLocation != null && dropoffLocation != null;
 
   double get calculatedFare {
-    if (selectedRide == null || estimatedDistance == null) {
-      return 0;
-    }
+    if (selectedRide == null || estimatedDistance == null) return 0;
+    if (estimatedDistance! <= 0) return 0;
 
-    return RideOptionsService.calculateDynamicPrice(
-      selectedRide!,
-      estimatedDistance!,
-    );
+    // Ensure PricingService has data — uses cached values if available
+    final pricing = PricingService.instance;
+    final serviceType = selectedRide!.serviceType.name; // 'okada' or 'taxi'
+    final fare = pricing.calculateRideFare(serviceType, estimatedDistance!);
+
+    // Never return 0 for a valid ride — use minimum fare as floor
+    final minFare = serviceType == 'okada'
+        ? PricingService.instance.okadaMinFare
+        : PricingService.instance.taxiMinFare;
+    return fare > 0 ? (fare >= minFare ? fare : minFare) : minFare;
   }
 
   /// Convenient getter for full payment model
@@ -108,6 +115,15 @@ class RideRequestNotifier extends StateNotifier<RideRequestState> {
       pickupLocation: location,
     );
   }
+
+  void preselectService(ServiceType service) {
+  if (state.selectedRide != null) return;
+  final match = RideOptionsService.availableRides.firstWhere(
+    (o) => o.serviceType == service,
+    orElse: () => RideOptionsService.availableRides.first,
+  );
+  state = state.copyWith(selectedRide: match);
+}
 
   void setDestination(
     String destination,

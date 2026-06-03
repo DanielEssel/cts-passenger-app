@@ -1,6 +1,5 @@
 // features/ride/screens/destination_search_screen.dart
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,30 +25,43 @@ class _DestinationSearchScreenState
   final FocusNode _focusNode = FocusNode();
 
   @override
-  void initState() {
-    super.initState();
+void initState() {
+  super.initState();
 
-    // ✅ Controller drives notifier; notifier owns the canonical query string
-    _controller.addListener(() {
-      ref
-          .read(destinationSearchProvider.notifier)
-          .onQueryChanged(_controller.text);
-    });
+  debugPrint('🚀 DestinationSearchScreen OPENED');
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+  _controller.addListener(() {
+    ref
+        .read(destinationSearchProvider.notifier)
+        .onQueryChanged(_controller.text);
+  });
 
-      // ✅ Navigation driven by listener, NOT inside build()
-      ref.listenManual<DestinationSearchState>(
-        destinationSearchProvider,
-        (_, next) {
-          if (next.selectedPlace != null && mounted) {
-            Navigator.pop(context, next.selectedPlace!.toNavigationResult());
-          }
-        },
-      );
-    });
-  }
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _focusNode.requestFocus();
+
+    final currentState = ref.read(destinationSearchProvider);
+
+    debugPrint(
+      '🚀 Initial selectedPlace = ${currentState.selectedPlace?.name}',
+    );
+
+    ref.listenManual<DestinationSearchState>(
+      destinationSearchProvider,
+      (_, next) {
+        debugPrint(
+          '🎯 Listener fired: selectedPlace=${next.selectedPlace?.name}',
+        );
+
+        if (next.selectedPlace != null && mounted) {
+          Navigator.pop(
+            context,
+            next.selectedPlace!.toNavigationResult(),
+          );
+        }
+      },
+    );
+  });
+}
 
   @override
   void dispose() {
@@ -63,6 +75,11 @@ class _DestinationSearchScreenState
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(destinationSearchProvider);
+
+    debugPrint(
+      'Destination screen build: '
+      'selectedPlace=${state.selectedPlace?.name}',
+    );
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -83,8 +100,7 @@ class _DestinationSearchScreenState
           Expanded(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               child: state.hasQuery
                   ? SearchResultsList(
                       results: state.searchResults,

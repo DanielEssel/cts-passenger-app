@@ -82,16 +82,56 @@ service cloud.firestore {
       allow create: if isAdmin(); // Cloud Functions + admin panel
     }
 
-    // ── Wallets ───────────────────────────────────────────────────────────
+    // ── Wallets (legacy rule — superseded above) ─────────────────────────
+
+    // ── Ledger — immutable, append-only, no client writes ────────────────
+    match /ledger/{txId} {
+      allow read:  if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId   == request.auth.uid
+      ) || isAdmin();
+      allow write: if false; // Cloud Functions via Admin SDK only
+    }
+
+    // ── Escrows — read only for owner ─────────────────────────────────────
+    match /escrows/{escrowId} {
+      allow read:  if isAuth() && resource.data.userId == request.auth.uid
+                || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Webhook events — no client access ever ────────────────────────────
+    match /webhook_events/{ref} {
+      allow read, write: if false;
+    }
+
+    // ── Reconciliation — admin only ───────────────────────────────────────
+    match /reconciliation/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── Driver wallets — read only for owner ────────────────────────────
+    match /driver_wallets/{driverId} {
+      allow read:  if isAuth() && request.auth.uid == driverId || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Driver earnings summary — read only for owner ─────────────────────
+    match /drivers/{driverId}/earnings/{doc} {
+      allow read:  if isAuth() && request.auth.uid == driverId || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Admin alerts — admin only ─────────────────────────────────────────────
+    match /admin_alerts/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Wallets — admin can write for migration; clients cannot ──────────
     match /wallets/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow update: if (isOwner(userId)
-          && request.resource.data.balance <= resource.data.balance)
-        || isAdmin();
-      match /transactions/{txId} {
-        allow read, create: if isOwner(userId) || isAdmin();
-        allow update, delete: if isAdmin();
-      }
+      allow read:   if isOwner(userId) || isAdmin();
+      allow write:  if isAdmin(); // Admin panel migration only
     }
 
     // ── Transactions ──────────────────────────────────────────────────────

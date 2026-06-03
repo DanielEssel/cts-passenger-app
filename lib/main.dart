@@ -8,12 +8,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
+import 'features/wallet/presentation/screens/wallet_standalone_screen.dart';
 import 'core/services/pricing_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Add this
 import 'core/constants/app_colors.dart';
 import 'core/providers/navigation_providers.dart';
 import 'core/routes/app_routes.dart';
 import 'package:cts_transport_app/features/home/services/notification_service.dart';
+
+import 'features/delivery/presentation/delivery_tracking_screen.dart';
+import 'features/gas/presentation/screens/gas_order_tracking_screen.dart';
 
 // AUTH FLOW
 import 'features/splash/splash_screen.dart';
@@ -42,8 +46,6 @@ import 'features/profile/presentation/promotions_screen.dart';
 import 'features/profile/presentation/help_support_screen.dart';
 import 'features/profile/presentation/about_screen.dart';
 
-
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Pre-load pricing settings
@@ -51,7 +53,6 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await PricingService.instance.fetch();
-
 
   await FirebaseAppCheck.instance.activate(
     providerAndroid:
@@ -314,33 +315,36 @@ class RiderApp extends StatelessWidget {
         );
 
       case AppRoutes.deliveryVehicle:
-  final args = settings.arguments as Map<String, dynamic>? ?? {};
-  return MaterialPageRoute(
-    builder: (context) => DeliveryVehicleScreen(
-      pickup:           args['pickup']           ?? '',
-      pickupGeoPoint:   args['pickupGeoPoint']   ?? const GeoPoint(5.6037, -0.1870),
-      dropoff:          args['dropoff']          ?? '',
-      dropoffGeoPoint:  args['dropoffGeoPoint']  ?? const GeoPoint(5.6037, -0.1870),
-      weightTier:       args['weightTier']       ?? '',
-      weightRange:      args['weightRange']      ?? '',
-      eligibleVehicles: args['eligibleVehicles'] ?? [],
-      parcelType:       args['parcelType']       ?? '',
-      isFragile:        args['isFragile']        ?? false,
-      requiresHelpers:  args['requiresHelpers']  ?? false,
-      hasPhoto:         args['hasPhoto']         ?? false,
-      receiverPhone:    args['receiverPhone']    ?? '',
-      receiverName:     args['receiverName']     ?? '',
-      notes:            args['notes']            ?? '',
-    ),
-    settings: settings,
-  );
+        final args = settings.arguments as Map<String, dynamic>? ?? {};
+        return MaterialPageRoute(
+          builder: (context) => DeliveryVehicleScreen(
+            pickup: args['pickup'] ?? '',
+            pickupGeoPoint:
+                args['pickupGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
+            dropoff: args['dropoff'] ?? '',
+            dropoffGeoPoint:
+                args['dropoffGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
+            weightTier: args['weightTier'] ?? '',
+            weightRange: args['weightRange'] ?? '',
+            eligibleVehicles: args['eligibleVehicles'] ?? [],
+            parcelType: args['parcelType'] ?? '',
+            isFragile: args['isFragile'] ?? false,
+            requiresHelpers: args['requiresHelpers'] ?? false,
+            hasPhoto: args['hasPhoto'] ?? false,
+            receiverPhone: args['receiverPhone'] ?? '',
+            receiverName: args['receiverName'] ?? '',
+            notes: args['notes'] ?? '',
+          ),
+          settings: settings,
+        );
 
       case AppRoutes.rideTracking:
         final args = settings.arguments;
         final tripId = args is String
             ? args
-            : args is Map ? (args['tripId'] ?? args['rideId'] ?? '') as String
-            : '';
+            : args is Map
+                ? (args['tripId'] ?? args['rideId'] ?? '') as String
+                : '';
         return MaterialPageRoute(
           builder: (context) => RideTrackingScreen(tripId: tripId),
           settings: settings,
@@ -350,6 +354,34 @@ class RiderApp extends StatelessWidget {
         debugPrint('✅ Creating GasOrderScreen');
         return MaterialPageRoute(
           builder: (context) => const GasOrderScreen(),
+          settings: settings,
+        );
+
+        case AppRoutes.deliveryTracking:
+  final a = settings.arguments;
+  final deliveryId = a is String
+      ? a
+      : a is Map ? (a['deliveryId'] ?? '') as String : '';
+  return MaterialPageRoute(
+    builder: (_) => DeliveryTrackingScreen(deliveryId: deliveryId),
+    settings: settings,
+  );
+
+case AppRoutes.gasTracking:
+  final a = settings.arguments;
+  final orderId = a is String
+      ? a
+      : a is Map ? (a['orderId'] ?? '') as String : '';
+  return MaterialPageRoute(
+    builder: (_) => GasOrderTrackingScreen(orderId: orderId),
+    settings: settings,
+  );
+
+      case '/wallet':
+        // Wallet is a tab in the shell — pop back to shell and switch tab
+        // If we're already in the shell, this is handled by the shell itself
+        return MaterialPageRoute(
+          builder: (context) => const WalletStandaloneScreen(),
           settings: settings,
         );
 

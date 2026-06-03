@@ -1,3 +1,4 @@
+const { releaseEscrow, refundEscrow } = require("./escrow");
 // functions/trips.js
 const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
@@ -190,88 +191,50 @@ exports.onTripCompleted = onDocumentUpdated(
       const platformFee    = Math.round(actualFare * feePercent * 100) / 100;
       const driverEarnings = Math.round((actualFare - platformFee) * 100) / 100;
 
-      // Run as Firestore transaction for atomicity
-      await db().runTransaction(async (tx) => {
-        const walletRef  = db().collection("wallets").doc(passengerId);
-        const driverRef  = db().collection("drivers").doc(driverId);
-        const tripRef    = db().collection("trips").doc(tripId);
+      // Use escrow system for atomic wallet deduction + driver credit
+      const escrowId = after.escrowId;
 
-        const [walletDoc, driverDoc] = await Promise.all([
-          tx.get(walletRef),
-          tx.get(driverRef),
-        ]);
-
-        const walletBalance  = walletDoc.exists ? (walletDoc.data()?.balance ?? 0) : 0;
-        const currentEarnings = driverDoc.exists ? (driverDoc.data()?.totalEarnings ?? 0) : 0;
-        const todayEarnings   = driverDoc.exists ? (driverDoc.data()?.todayEarnings  ?? 0) : 0;
-        const completedTrips  = driverDoc.exists ? (driverDoc.data()?.completedTrips ?? 0) : 0;
-
-        // Deduct from passenger wallet
-        if (walletBalance >= actualFare) {
-          tx.update(walletRef, {
-            balance:   admin.firestore.FieldValue.increment(-actualFare),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      if (escrowId) {
+        // Release escrow — handles wallet deduction, driver credit, ledger
+        await releaseEscrow(escrowId, driverId, "trip_completed");
+      } else {
+        // Fallback: no escrow (legacy trip) — do direct deduction
+        console.warn(`Trip ${tripId}: no escrowId — using direct wallet deduction`);
+        const walletRef = db().collection("wallets").doc(passengerId);
+        await db().runTransaction(async (tx) => {
+          const walletDoc = await tx.get(walletRef);
+          const balance   = walletDoc.exists ? (walletDoc.data()?.balance ?? 0) : 0;
+          if (balance >= actualFare) {
+            tx.update(walletRef, {
+              balance:       admin.firestore.FieldValue.increment(-actualFare),
+              lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+          const driverRef = db().collection("drivers").doc(driverId);
+          tx.update(driverRef, {
+            totalEarnings:  admin.firestore.FieldValue.increment(driverEarnings),
+            todayEarnings:  admin.firestore.FieldValue.increment(driverEarnings),
+            completedTrips: admin.firestore.FieldValue.increment(1),
+            isAvailable:    true,
+            currentTripId:  admin.firestore.FieldValue.delete(),
           });
-        } else {
-          // Wallet insufficient — log but don't block trip completion
-          // In production you'd handle this with credit/debt system
-          console.warn(`Trip ${tripId}: insufficient wallet balance ${walletBalance} < ${actualFare}`);
-        }
-
-        // Credit driver earnings
-        tx.update(driverRef, {
-          totalEarnings:  admin.firestore.FieldValue.increment(driverEarnings),
-          todayEarnings:  admin.firestore.FieldValue.increment(driverEarnings),
-          completedTrips: admin.firestore.FieldValue.increment(1),
-          isAvailable:    true,
-          currentTripId:  admin.firestore.FieldValue.delete(),
+          const tripRef = db().collection("trips").doc(tripId);
+          tx.update(tripRef, {
+            actualFare, platformFee, driverEarnings,
+            walletProcessed: true,
+            completedAt:     admin.firestore.FieldValue.serverTimestamp(),
+          });
         });
+      }
 
-        // Update trip with final amounts
-        tx.update(tripRef, {
-          actualFare:      actualFare,
-          platformFee:     platformFee,
-          driverEarnings:  driverEarnings,
-          walletProcessed: true,
-          completedAt:     admin.firestore.FieldValue.serverTimestamp(),
-        });
+      // Mark trip as wallet processed
+      await db().collection("trips").doc(tripId).update({
+        actualFare, platformFee, driverEarnings,
+        walletProcessed: true,
+        completedAt:     admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // Log transaction records
-      const batch = db().batch();
-
-      // Passenger debit transaction
-      const passengerTxRef = db().collection("transactions").doc();
-      batch.set(passengerTxRef, {
-        userId:        passengerId,
-        type:          "debit",
-        amount:        actualFare,
-        currency:      "GHS",
-        description:   `${serviceType} ride to ${after.dropoffAddress ?? "destination"}`,
-        referenceId:   tripId,
-        referenceType: "trip",
-        status:        "completed",
-        createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // Driver earnings transaction
-      const driverTxRef = db().collection("transactions").doc();
-      batch.set(driverTxRef, {
-        userId:        driverId,
-        type:          "credit",
-        amount:        driverEarnings,
-        currency:      "GHS",
-        description:   `Earnings — ${serviceType} ride`,
-        referenceId:   tripId,
-        referenceType: "trip",
-        platformFee:   platformFee,
-        status:        "completed",
-        createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
-
-      console.log(`✅ Trip ${tripId} completed: fare=${actualFare} driver=${driverEarnings} fee=${platformFee}`);
+      console.log(`✅ Trip ${tripId} completed via ${escrowId ? 'escrow' : 'direct'}: fare=${actualFare} driver=${driverEarnings} fee=${platformFee}`)
 
     } catch (e) {
       console.error(`Trip ${tripId} completion error:`, e.message);
@@ -512,7 +475,7 @@ exports.onGasOrderCompleted = onDocumentUpdated(
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 exports.autoConfirmTrips = onSchedule(
-  { schedule: "every 1 minutes", region: "europe-west2" },
+  { schedule: "every 1 minutes", region: "europe-west2", minInstances: 0 },
   async () => {
     const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
 
@@ -542,5 +505,126 @@ exports.autoConfirmTrips = onSchedule(
 
     await Promise.allSettled(promises);
     console.log(`autoConfirmTrips: processed ${promises.length} trips`);
+  }
+);
+
+// ── onTripCancelled: refund escrow ───────────────────────────────────────────
+exports.onTripCancelled = onDocumentUpdated(
+  {region: "europe-west2", document: "trips/{tripId}"},
+  async (event) => {
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+    const tripId = event.params.tripId;
+
+    if (before.status === after.status) return;
+
+    const cancelledStatuses = ["cancelled", "cancelledByDriver", "cancelledByPassenger", "noDrivers"];
+    if (!cancelledStatuses.includes(after.status)) return;
+    if (after.escrowRefunded === true) return; // idempotency
+
+    const escrowId = after.escrowId;
+    if (!escrowId) {
+      console.log(`Trip ${tripId}: no escrowId — nothing to refund`);
+      return;
+    }
+
+    try {
+      const reason = after.status === "cancelledByDriver"
+        ? "driver_cancelled"
+        : after.status === "noDrivers"
+        ? "no_drivers_found"
+        : "passenger_cancelled";
+
+      await refundEscrow(escrowId, reason);
+
+      await db().collection("trips").doc(tripId).update({
+        escrowRefunded:   true,
+        escrowRefundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`✅ Escrow ${escrowId} refunded for cancelled trip ${tripId}`);
+
+      // Notify passenger
+      const passengerId = after.passengerId;
+      if (passengerId) {
+        const userDoc  = await db().collection("users").doc(passengerId).get();
+        const fcmToken = userDoc.data()?.fcmToken;
+        if (fcmToken) {
+          await admin.messaging().send({
+            token: fcmToken,
+            notification: {
+              title: "Trip Cancelled — Refund Processed",
+              body:  `Your GH₵${(after.estimatedFare || 0).toFixed(2)} has been returned to your wallet.`,
+            },
+            data: { type: "trip_cancelled", route: "/wallet" },
+          }).catch(console.error);
+        }
+      }
+    } catch (e) {
+      console.error(`Failed to refund escrow for trip ${tripId}:`, e.message);
+      await db().collection("admin_alerts").add({
+        type:      "escrow_refund_failed",
+        tripId,
+        escrowId,
+        error:     e.message,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+);
+
+// ── onDeliveryCancelled: refund escrow ────────────────────────────────────────
+exports.onDeliveryCancelled = onDocumentUpdated(
+  {region: "europe-west2", document: "deliveries/{deliveryId}"},
+  async (event) => {
+    const before     = event.data.before.data();
+    const after      = event.data.after.data();
+    const deliveryId = event.params.deliveryId;
+
+    if (before.status === after.status) return;
+    if (after.status  !== "cancelled")  return;
+    if (after.escrowRefunded === true)  return;
+
+    const escrowId = after.escrowId;
+    if (!escrowId) return;
+
+    try {
+      await refundEscrow(escrowId, "delivery_cancelled");
+      await db().collection("deliveries").doc(deliveryId).update({
+        escrowRefunded:   true,
+        escrowRefundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      console.log(`✅ Escrow refunded for cancelled delivery ${deliveryId}`);
+    } catch (e) {
+      console.error(`Escrow refund failed for delivery ${deliveryId}:`, e.message);
+    }
+  }
+);
+
+// ── onGasOrderCancelled: refund escrow ───────────────────────────────────────
+exports.onGasOrderCancelled = onDocumentUpdated(
+  {region: "europe-west2", document: "gas_orders/{orderId}"},
+  async (event) => {
+    const before  = event.data.before.data();
+    const after   = event.data.after.data();
+    const orderId = event.params.orderId;
+
+    if (before.status === after.status) return;
+    if (after.status  !== "cancelled")  return;
+    if (after.escrowRefunded === true)  return;
+
+    const escrowId = after.escrowId;
+    if (!escrowId) return;
+
+    try {
+      await refundEscrow(escrowId, "gas_order_cancelled");
+      await db().collection("gas_orders").doc(orderId).update({
+        escrowRefunded:   true,
+        escrowRefundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      console.log(`✅ Escrow refunded for cancelled gas order ${orderId}`);
+    } catch (e) {
+      console.error(`Escrow refund failed for gas order ${orderId}:`, e.message);
+    }
   }
 );

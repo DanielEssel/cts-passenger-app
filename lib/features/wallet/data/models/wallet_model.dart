@@ -12,6 +12,7 @@ class WalletModel extends Wallet {
     required super.createdAt,
     required super.lastUpdated,
     required super.status,
+    super.heldBalance = 0.0,
   });
 
   // ── Factories ──────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ class WalletModel extends Wallet {
       cardBalance:        (data['cardBalance']        as num?)?.toDouble() ?? 0.0,
       currency:           data['currency']            as String? ?? 'GHS',
       status:             data['status']              as String? ?? 'active',
+      heldBalance:        (data['heldBalance']        as num?)?.toDouble() ?? 0.0,
       createdAt:          _parseDate(data['createdAt']),
       lastUpdated:        _parseDate(data['lastUpdated'] ?? data['updatedAt']),
     );
@@ -40,6 +42,7 @@ class WalletModel extends Wallet {
       cardBalance:        (json['cardBalance']        as num?)?.toDouble() ?? 0.0,
       currency:           json['currency']            as String? ?? 'GHS',
       status:             json['status']              as String? ?? 'active',
+      heldBalance:        (json['heldBalance']        as num?)?.toDouble() ?? 0.0,
       createdAt:          _parseDate(json['createdAt']),
       lastUpdated:        _parseDate(json['lastUpdated'] ?? json['updatedAt']),
     );

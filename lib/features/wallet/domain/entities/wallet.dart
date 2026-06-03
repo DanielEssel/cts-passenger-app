@@ -8,6 +8,7 @@ class Wallet {
   final DateTime createdAt;
   final DateTime lastUpdated;
   final String status;
+  final double heldBalance;
 
   const Wallet({
     required this.userId,
@@ -19,9 +20,11 @@ class Wallet {
     required this.createdAt,
     required this.lastUpdated,
     required this.status,
+    this.heldBalance = 0.0,
   });
 
-  double get totalBalance => balance;
+  double get availableBalance => balance;
+  double get totalBalance => balance + heldBalance;
 
   Wallet copyWith({
     String? userId,
@@ -33,17 +36,19 @@ class Wallet {
     DateTime? createdAt,
     DateTime? lastUpdated,
     String? status,
+    double? heldBalance,
   }) {
     return Wallet(
-      userId: userId ?? this.userId,
-      balance: balance ?? this.balance,
-      cashBalance: cashBalance ?? this.cashBalance,
+      userId:             userId             ?? this.userId,
+      balance:            balance            ?? this.balance,
+      cashBalance:        cashBalance        ?? this.cashBalance,
       mobileMoneyBalance: mobileMoneyBalance ?? this.mobileMoneyBalance,
-      cardBalance: cardBalance ?? this.cardBalance,
-      currency: currency ?? this.currency,
-      createdAt: createdAt ?? this.createdAt,
-      lastUpdated: lastUpdated ?? this.lastUpdated,
-      status: status ?? this.status,
+      cardBalance:        cardBalance        ?? this.cardBalance,
+      currency:           currency           ?? this.currency,
+      createdAt:          createdAt          ?? this.createdAt,
+      lastUpdated:        lastUpdated        ?? this.lastUpdated,
+      status:             status             ?? this.status,
+      heldBalance:        heldBalance        ?? this.heldBalance,
     );
   }
 }

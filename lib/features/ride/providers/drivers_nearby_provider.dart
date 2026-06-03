@@ -20,7 +20,8 @@ class NearbyDriver {
   });
 }
 
-// Add serviceType filter — only taxi and okada for ride hailing
+// Streams ALL nearby ride-hailing drivers (okada + taxi) within 5km
+// Used for map markers — shows all available drivers
 final driversNearbyProvider =
     StreamProvider.autoDispose<List<NearbyDriver>>((ref) {
   final pickup = ref.watch(
@@ -33,13 +34,18 @@ final driversNearbyProvider =
       .collection('drivers')
       .where('isOnline',    isEqualTo: true)
       .where('isApproved',  isEqualTo: true)
+      .where('isAvailable', isEqualTo: true)
       .snapshots()
       .map((snap) {
         const radiusKm = 5.0;
         return snap.docs
             .where((doc) {
-              // Support both 'location' and 'currentLocation' field names
-              final loc = doc.data()['location'] ?? doc.data()['currentLocation'];
+              final data = doc.data();
+              // Only show ride-hailing drivers on map
+              final sType = data['serviceType'] as String? ?? '';
+              if (sType != 'okada' && sType != 'taxi') return false;
+              // Filter by location
+              final loc = data['location'] ?? data['currentLocation'];
               if (loc is! GeoPoint) return false;
               return _haversineKm(
                     pickup.latitude,
@@ -50,13 +56,59 @@ final driversNearbyProvider =
             })
             .map((doc) {
               final data = doc.data();
-              final loc  = data['location'] as GeoPoint;
+              final loc  = (data['location'] ?? data['currentLocation']) as GeoPoint;
               return NearbyDriver(
                 id:          doc.id,
                 name:        data['displayName'] as String? ??
                              data['name']        as String? ?? 'Driver',
                 location:    LatLng(loc.latitude, loc.longitude),
                 serviceType: data['serviceType'] as String? ?? 'taxi',
+              );
+            })
+            .toList();
+      });
+});
+
+// Streams drivers filtered by SELECTED service type
+// Used for matching — only shows drivers matching passenger selection
+final driversNearbyForTypeProvider =
+    StreamProvider.autoDispose.family<List<NearbyDriver>, String>((ref, serviceType) {
+  final pickup = ref.watch(
+    rideRequestProvider.select((s) => s.pickupLocation),
+  );
+
+  if (pickup == null) return Stream.value(const []);
+
+  return FirebaseFirestore.instance
+      .collection('drivers')
+      .where('isOnline',     isEqualTo: true)
+      .where('isApproved',   isEqualTo: true)
+      .where('isAvailable',  isEqualTo: true)
+      .where('serviceType',  isEqualTo: serviceType)
+      .snapshots()
+      .map((snap) {
+        const radiusKm = 5.0;
+        return snap.docs
+            .where((doc) {
+              final data = doc.data();
+              final loc = data['location'] ?? data['currentLocation'];
+              if (loc is! GeoPoint) return false;
+              return _haversineKm(
+                    pickup.latitude,
+                    pickup.longitude,
+                    loc.latitude,
+                    loc.longitude,
+                  ) <= radiusKm;
+            })
+            .map((doc) {
+              final data = doc.data();
+              final loc  = (data['location'] ?? data['currentLocation']) as GeoPoint;
+              return NearbyDriver(
+                id:          doc.id,
+                name:        data['displayName'] as String? ??
+                             data['name']        as String? ?? 'Driver',
+                location:    LatLng(loc.latitude, loc.longitude),
+                serviceType: data['serviceType'] as String? ?? serviceType,
               );
             })
             .toList();

@@ -52,8 +52,8 @@ class EmptyStateWidget extends StatelessWidget {
               const SizedBox(height: 24),
               PrimaryButton(
                 label: actionLabel!,
-                onPressed: onAction!,
-                width: 200,
+                onTap: onAction!,
+          
               ),
             ],
           ],

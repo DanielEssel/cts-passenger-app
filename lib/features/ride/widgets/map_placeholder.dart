@@ -163,13 +163,14 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
         position: driver.location,
         icon: _carIcon ??
             BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueAzure),
-        infoWindow: InfoWindow(title: driver.name),
+                driver.serviceType == 'okada'
+                    ? BitmapDescriptor.hueGreen
+                    : BitmapDescriptor.hueAzure),
+        infoWindow: InfoWindow(title: driver.name, snippet: driver.serviceType == 'okada' ? 'Okada' : 'Taxi'),
         anchor: const Offset(0.5, 0.5),
-        flat: true, // ✅ rotates with the map
+        flat: true,
       );
     }
-
     if (mounted) setState(() {});
   }
 

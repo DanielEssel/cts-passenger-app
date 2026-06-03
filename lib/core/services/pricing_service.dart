@@ -74,7 +74,9 @@ class PricingService {
     if (!force &&
         _lastFetched != null &&
         now.difference(_lastFetched!) < _cacheDuration &&
-        _settings.isNotEmpty) return;
+        _settings.isNotEmpty) {
+      return;
+    }
 
     try {
       final snap = await FirebaseFirestore.instance
@@ -106,8 +108,11 @@ class PricingService {
   dynamic _getDefault(List<String> path) {
     dynamic obj = _defaults;
     for (final key in path) {
-      if (obj is Map) obj = obj[key];
-      else return null;
+      if (obj is Map) {
+        obj = obj[key];
+      } else {
+        return null;
+      }
     }
     return obj;
   }

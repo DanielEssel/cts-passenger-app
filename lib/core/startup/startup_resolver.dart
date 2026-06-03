@@ -1,15 +1,5 @@
 // lib/core/startup/startup_resolver.dart
-//
-// The single entry point for startup routing decisions.
-// The splash screen calls resolve() and navigates to whatever
-// RouteDestination is returned — no routing logic lives in the
-// splash screen itself.
-//
-// Adding a new startup step:
-//   1. Add the check to PassengerFlowResolver.resolve()
-//   2. Add the route constant to AppRoutes
-//   3. Register the screen in main.dart routes / onGenerateRoute
-//   Nothing else needs to change.
+
 
 import 'package:firebase_auth/firebase_auth.dart';
 

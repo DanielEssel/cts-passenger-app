@@ -41,7 +41,9 @@ function validateAmount(amount, min = 1) {
 // ── createWallet ──────────────────────────────────────────────────────────────
 // Passengers only — drivers earn through trip completions
 
-exports.createWallet = onCall(async (request) => {
+exports.createWallet = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid       = requireAuth(request);
   const walletRef = getDb().collection("wallets").doc(uid);
 
@@ -66,7 +68,9 @@ exports.createWallet = onCall(async (request) => {
 
 // ── getWalletBalance ──────────────────────────────────────────────────────────
 
-exports.getWalletBalance = onCall(async (request) => {
+exports.getWalletBalance = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid = requireAuth(request);
   const { role, data } = await getRole(uid);
 
@@ -91,7 +95,7 @@ exports.getWalletBalance = onCall(async (request) => {
 // Passengers only
 
 exports.initializePaystackPayment = onCall(
-  { secrets: [paystackSecret] },
+  { region: "europe-west2", minInstances: 0, secrets: [paystackSecret] },
   async (request) => {
     const uid    = requireAuth(request);
     const secret = paystackSecret.value();
@@ -149,6 +153,7 @@ exports.initializePaystackPayment = onCall(
           amount:       Math.round(amount * 100),
           currency:     "GHS",
           callback_url: "https://ctstransportapp.web.app/payment/callback",
+          channels: ["mobile_money", "card", "bank", "ussd"],
           channels:     paymentMethod === "mobile_money"
               ? ["mobile_money"] : ["card"],
           metadata: {
@@ -181,8 +186,12 @@ exports.initializePaystackPayment = onCall(
 // ── verifyPaystackPayment ─────────────────────────────────────────────────────
 
 exports.verifyPaystackPayment = onCall(
-  { secrets: [paystackSecret] },
+  { region: "europe-west2", minInstances: 0, secrets: [paystackSecret] },
   async (request) => {
+    // ⚠️  Deprecated: wallet credits are now handled exclusively by
+    // the paystackWebhook Cloud Function (HMAC-verified).
+    // This callable is kept for backwards compatibility but does
+    // NOT credit the wallet — it only returns the payment status.
     const uid       = requireAuth(request);
     const secret    = paystackSecret.value();
     const { reference } = request.data;
@@ -230,44 +239,27 @@ exports.verifyPaystackPayment = onCall(
       return { success: true, alreadyProcessed: true };
     }
 
-    await getDb().runTransaction(async (t) => {
-      const walletDoc      = await t.get(walletRef);
-      const currentBalance = walletDoc.exists
-          ? (walletDoc.data()?.balance ?? 0)
-          : 0;
-
-      if (!walletDoc.exists) {
-        t.set(walletRef, {
-          userId:    uid,
-          balance:   amountPaid,
-          currency:  "GHS",
-          isActive:  true,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      } else {
-        t.update(walletRef, {
-          balance:   currentBalance + amountPaid,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      t.update(txRef, {
-        status:            "completed",
-        amount:            amountPaid,
-        paystackReference: reference,
-        completedAt:       admin.firestore.FieldValue.serverTimestamp(),
-      });
-    });
-
-    return { success: true, amountCredited: amountPaid };
+    // Wallet credit is handled by paystackWebhook — not here
+    // Just return payment status for UI confirmation
+    return {
+      success:        true,
+      alreadyProcessed: txData.status === "completed",
+      amount:         amountPaid,
+      message:        "Payment verified. Wallet will be credited via webhook.",
+    };
   }
 );
 
 // ── deductWalletBalance ───────────────────────────────────────────────────────
 // Passengers only — deducts from wallets/{uid}
 
-exports.deductWalletBalance = onCall(async (request) => {
+exports.deductWalletBalance = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
+  // ⚠️  Deprecated: wallet deductions now happen via escrow release in trips.js
+  // This CF is disabled to prevent client-side wallet manipulation
+  throw new HttpsError("permission-denied", "Direct wallet deduction is disabled. Payments are processed automatically on trip completion.");
+  // eslint-disable-next-line no-unreachable
   const uid = requireAuth(request);
   const { amount, description, category } = request.data;
 
@@ -315,7 +307,9 @@ exports.deductWalletBalance = onCall(async (request) => {
 
 // ── getTransactionHistory ─────────────────────────────────────────────────────
 
-exports.getTransactionHistory = onCall(async (request) => {
+exports.getTransactionHistory = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid   = requireAuth(request);
   const limit = Math.min(request.data.limit ?? 50, 100); // cap at 100
 
@@ -339,7 +333,9 @@ exports.getTransactionHistory = onCall(async (request) => {
 //   - Both: creates transaction record + withdrawal record for admin processing
 //   - Idempotent: prevents duplicate submissions
 
-exports.requestWithdrawal = onCall(async (request) => {
+exports.requestWithdrawal = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid = requireAuth(request);
   const { amount, method, phoneNumber, accountName } = request.data;
 
@@ -519,7 +515,9 @@ async function _processPassengerWithdrawal(db, uid, amount, method, phoneNumber,
 
 // ── approveDriver ─────────────────────────────────────────────────────────────
 
-exports.approveDriver = onCall(async (request) => {
+exports.approveDriver = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid = requireAuth(request);
 
   const adminDoc = await getDb().collection("admins").doc(uid).get();
@@ -627,7 +625,9 @@ exports.approveDriver = onCall(async (request) => {
 
 // ── getPendingDrivers ─────────────────────────────────────────────────────────
 
-exports.getPendingDrivers = onCall(async (request) => {
+exports.getPendingDrivers = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
   const uid = requireAuth(request);
 
   const adminDoc = await getDb().collection("admins").doc(uid).get();
@@ -646,4 +646,284 @@ exports.getPendingDrivers = onCall(async (request) => {
   return {
     drivers: snap.docs.map((doc) => ({ uid: doc.id, ...doc.data() })),
   };
+});
+
+// ── Driver Wallet ─────────────────────────────────────────────────────────────
+// Drivers have earnings tracked in drivers/{uid} AND a proper wallet
+
+exports.getDriverWallet = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
+  const uid = requireAuth(request);
+
+  const [driverDoc, walletDoc] = await Promise.all([
+    getDb().collection("drivers").doc(uid).get(),
+    getDb().collection("driver_wallets").doc(uid).get(),
+  ]);
+
+  if (!driverDoc.exists) throw new HttpsError("not-found", "Driver not found");
+
+  const driver = driverDoc.data();
+
+  // Create driver wallet if it doesn't exist
+  if (!walletDoc.exists) {
+    await getDb().collection("driver_wallets").doc(uid).set({
+      driverId:        uid,
+      balance:         driver.totalEarnings    ?? 0,
+      pendingBalance:  driver.pendingEarnings  ?? 0,
+      totalEarned:     driver.totalEarnings    ?? 0,
+      totalWithdrawn:  0,
+      currency:        "GHS",
+      createdAt:       admin.firestore.FieldValue.serverTimestamp(),
+      lastUpdatedAt:   admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  const wallet = walletDoc.exists ? walletDoc.data() : {};
+
+  return {
+    balance:        driver.totalEarnings    ?? wallet.balance ?? 0,
+    todayEarnings:  driver.todayEarnings    ?? 0,
+    completedTrips: driver.completedTrips   ?? 0,
+    totalWithdrawn: wallet.totalWithdrawn   ?? 0,
+    currency:       "GHS",
+  };
+});
+
+// ── Driver withdrawal request ─────────────────────────────────────────────────
+// Keeps existing requestWithdrawal but adds proper validation
+
+exports.requestDriverWithdrawal = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
+  const uid = requireAuth(request);
+  const { amount, phoneNumber, network, accountName } = request.data;
+
+  if (!amount || amount <= 0)     throw new HttpsError("invalid-argument", "Invalid amount");
+  if (!phoneNumber)               throw new HttpsError("invalid-argument", "Phone number required");
+  if (!network)                   throw new HttpsError("invalid-argument", "Mobile money network required");
+
+  const settings = await getDb().collection("settings").doc("platform").get();
+  const minWithdrawal = settings.data()?.minWithdrawalAmount ?? 10;
+  const maxWithdrawal = settings.data()?.maxWithdrawalAmount ?? 5000;
+
+  if (amount < minWithdrawal) throw new HttpsError("invalid-argument", `Minimum withdrawal is GH₵${minWithdrawal}`);
+  if (amount > maxWithdrawal) throw new HttpsError("invalid-argument", `Maximum withdrawal is GH₵${maxWithdrawal}`);
+
+  // Check driver balance
+  const driverDoc = await getDb().collection("drivers").doc(uid).get();
+  if (!driverDoc.exists) throw new HttpsError("not-found", "Driver not found");
+
+  const balance = driverDoc.data()?.totalEarnings ?? 0;
+  if (balance < amount) {
+    throw new HttpsError("failed-precondition",
+      `Insufficient earnings. Available: GH₵${balance.toFixed(2)}`,
+      { available: balance, requested: amount }
+    );
+  }
+
+  // Check no pending withdrawal
+  const pending = await getDb().collection("withdrawals")
+    .where("driverId", "==", uid)
+    .where("status", "==", "pending")
+    .limit(1).get();
+
+  if (!pending.empty) {
+    throw new HttpsError("failed-precondition", "You already have a pending withdrawal request");
+  }
+
+  // Deduct from driver earnings atomically
+  await getDb().runTransaction(async (tx) => {
+    const driverRef = getDb().collection("drivers").doc(uid);
+    const driver    = await tx.get(driverRef);
+    const current   = driver.data()?.totalEarnings ?? 0;
+
+    if (current < amount) throw new HttpsError("failed-precondition", "Insufficient balance");
+
+    tx.update(driverRef, {
+      totalEarnings:   admin.firestore.FieldValue.increment(-amount),
+      pendingWithdrawal: admin.firestore.FieldValue.increment(amount),
+    });
+
+    // Create withdrawal record
+    const withdrawalRef = getDb().collection("withdrawals").doc();
+    tx.set(withdrawalRef, {
+      driverId:    uid,
+      driverName:  driver.data()?.displayName ?? "",
+      amount,
+      currency:    "GHS",
+      phoneNumber,
+      network,
+      accountName: accountName ?? driver.data()?.displayName ?? "",
+      status:      "pending",
+      role:        "driver",
+      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Immutable ledger entry
+    const ledgerRef = getDb().collection("ledger").doc();
+    tx.set(ledgerRef, {
+      type:          "WITHDRAWAL_REQUEST",
+      status:        "PENDING",
+      fromUserId:    uid,
+      fromType:      "driver",
+      toType:        "mobile_money",
+      amount,
+      currency:      "GHS",
+      platformFee:   0,
+      driverNet:     amount,
+      referenceType: "withdrawal",
+      referenceId:   withdrawalRef.id,
+      idempotencyKey: `withdrawal_${uid}_${Date.now()}`,
+      createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+
+  // Write in-app notification
+  await getDb().collection("drivers").doc(uid)
+    .collection("notifications").add({
+      type:      "withdrawal_requested",
+      title:     "Withdrawal Requested",
+      body:      `Your withdrawal of GH₵${amount.toFixed(2)} is being processed.`,
+      isRead:    false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  return { success: true, message: `Withdrawal of GH₵${amount.toFixed(2)} submitted successfully` };
+});
+
+// ── Reset todayEarnings at midnight Ghana time ────────────────────────────────
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+
+exports.resetDailyEarnings = onSchedule(
+  { schedule: "0 0 * * *", timeZone: "Africa/Accra", region: "europe-west2", minInstances: 0 },
+  async () => {
+    const today   = new Date();
+    const isSunday = today.getDay() === 0;
+
+    const driversSnap = await getDb().collection("drivers")
+      .where("isApproved", "==", true).get();
+
+    // Reset in batches
+    const BATCH_SIZE = 500;
+    let batch = getDb().batch();
+    let count = 0;
+
+    for (const doc of driversSnap.docs) {
+      // Reset drivers/{uid} fields
+      const driverUpdates = {
+        todayEarnings: 0,
+        lastResetAt:   admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (isSunday) driverUpdates.weekEarnings = 0;
+      batch.update(doc.ref, driverUpdates);
+
+      // Reset earnings/summary subcollection
+      const summaryRef = getDb().collection("drivers").doc(doc.id)
+                          .collection("earnings").doc("summary");
+      const summaryUpdates = {
+        todayEarnings: 0,
+        lastResetAt:   admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (isSunday) summaryUpdates.weekEarnings = 0;
+      batch.set(summaryRef, summaryUpdates, { merge: true });
+
+      count++;
+      if (count >= BATCH_SIZE) {
+        await batch.commit();
+        batch = getDb().batch();
+        count = 0;
+      }
+    }
+
+    if (count > 0) await batch.commit();
+    console.log(`✅ Reset todayEarnings for ${driversSnap.size} drivers. Week reset: ${isSunday}`);
+  }
+);
+
+// ── One-time migration: add heldBalance to existing wallets ───────────────────
+// Call once from admin panel, then remove
+exports.migrateWallets = onCall(
+  { region: "europe-west2", minInstances: 0 },
+  async (request) => {
+  const uid = requireAuth(request);
+  const adminDoc = await getDb().collection("admins").doc(uid).get();
+  if (!adminDoc.exists) throw new HttpsError("permission-denied", "Admin only");
+
+  const walletsSnap  = await getDb().collection("wallets").get();
+  const driversSnap  = await getDb().collection("drivers")
+    .where("isApproved", "==", true).get();
+
+  let walletsMigrated = 0;
+  let driverWallets   = 0;
+
+  // Migrate in batches of 500
+  const BATCH_SIZE = 500;
+  let batch = getDb().batch();
+  let batchCount = 0;
+
+  for (const doc of walletsSnap.docs) {
+    const data    = doc.data();
+    const updates = {};
+    if (data.heldBalance  === undefined) updates.heldBalance  = 0;
+    if (data.currency     === undefined) updates.currency     = "GHS";
+    if (data.lastUpdatedAt === undefined) updates.lastUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+
+    if (Object.keys(updates).length > 0) {
+      batch.update(doc.ref, updates);
+      walletsMigrated++;
+      batchCount++;
+
+      if (batchCount >= BATCH_SIZE) {
+        await batch.commit();
+        batch = getDb().batch();
+        batchCount = 0;
+      }
+    }
+  }
+  if (batchCount > 0) await batch.commit();
+
+  // Create driver_wallets for approved drivers
+  let batch2 = getDb().batch();
+  let batchCount2 = 0;
+
+  for (const doc of driversSnap.docs) {
+    const data      = doc.data();
+    const walletRef = getDb().collection("driver_wallets").doc(doc.id);
+    const existing  = await walletRef.get();
+
+    if (!existing.exists) {
+      batch2.set(walletRef, {
+        driverId:       doc.id,
+        driverName:     data.displayName    ?? "",
+        balance:        data.totalEarnings  ?? 0,
+        pendingBalance: 0,
+        totalEarned:    data.totalEarnings  ?? 0,
+        totalWithdrawn: 0,
+        currency:       "GHS",
+        createdAt:      admin.firestore.FieldValue.serverTimestamp(),
+        lastUpdatedAt:  admin.firestore.FieldValue.serverTimestamp(),
+      });
+      driverWallets++;
+      batchCount2++;
+
+      if (batchCount2 >= BATCH_SIZE) {
+        await batch2.commit();
+        batch2 = getDb().batch();
+        batchCount2 = 0;
+      }
+    }
+  }
+  if (batchCount2 > 0) await batch2.commit();
+
+  // Log migration in audit log
+  await getDb().collection("audit_log").add({
+    adminUid:  uid,
+    action:    "migrate_wallets",
+    details:   `Migrated ${walletsMigrated} wallets, created ${driverWallets} driver wallets`,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`✅ Migration: ${walletsMigrated} wallets, ${driverWallets} driver wallets`);
+  return { success: true, walletsMigrated, driverWallets };
 });

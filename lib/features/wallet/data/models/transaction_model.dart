@@ -37,6 +37,43 @@ class TransactionModel {
     });
   }
 
+  /// Ledger → Model (maps our immutable ledger schema to Transaction entity)
+  factory TransactionModel.fromLedger(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    // Map ledger type to transaction type
+    final ledgerType = data['type'] as String? ?? '';
+    final txType = (ledgerType == 'TOPUP' || ledgerType == 'REFUND')
+        ? 'credit'
+        : 'debit';
+
+    // Map ledger status
+    final ledgerStatus = data['status'] as String? ?? 'COMPLETED';
+    final txStatus = ledgerStatus == 'COMPLETED' ? 'completed'
+        : ledgerStatus == 'FAILED' ? 'failed'
+        : 'pending';
+
+    // Build description from ledger data
+    String description = data['referenceType'] as String? ?? 'Transaction';
+    if (ledgerType == 'TOPUP')   description = 'Wallet top-up';
+    if (ledgerType == 'HOLD')    description = 'Payment held for service';
+    if (ledgerType == 'CAPTURE') description = 'Service payment';
+    if (ledgerType == 'REFUND')  description = 'Refund to wallet';
+    if (ledgerType == 'FEE')     description = 'Platform fee';
+
+    return TransactionModel.fromJson({
+      'id':          doc.id,
+      'userId':      data['fromUserId'] ?? data['toUserId'] ?? '',
+      'amount':      data['amount'],
+      'type':        txType,
+      'status':      txStatus,
+      'description': description,
+      'paymentMethod': 'system',
+      'reference':   data['referenceId'] ?? doc.id,
+      'createdAt':   data['createdAt'],
+      'metadata':    {'ledgerType': ledgerType, 'referenceType': data['referenceType']},
+    });
+  }
+
   /// JSON → Model (Cloud Functions / REST / Firestore map)
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
     return TransactionModel(
