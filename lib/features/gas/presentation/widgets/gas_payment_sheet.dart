@@ -55,20 +55,16 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
     HapticFeedback.mediumImpact();
 
     try {
-      final controller = ref.read(walletControllerProvider);
-      final success = await controller.deductForGasOrder(
-        amount: widget.total,
-        description:
-            'Gas order — ${widget.cylinderSize.displayName} × ${widget.quantity}',
-      );
-
-      if (!mounted) return;
-
-      if (success) {
-        Navigator.pop(context, true); // ← signals caller to proceed
-      } else {
-        _showError('Payment failed. Please try again.');
+      // Do NOT deduct here. The order screen holds funds in escrow via
+      // EscrowService.holdBalance, and the Cloud Function releases them on
+      // delivery. The client never moves money directly. We only confirm the
+      // wallet can cover the total, then signal the caller to proceed.
+      if (balance < widget.total) {
+        _showError('Insufficient wallet balance. Please top up.');
+        return;
       }
+      if (!mounted) return;
+      Navigator.pop(context, true); // ← signals _placeOrder to run holdBalance
     } catch (e) {
       if (mounted) _showError(e.toString().replaceFirst('Exception: ', ''));
     } finally {

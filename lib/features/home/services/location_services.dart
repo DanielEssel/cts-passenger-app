@@ -83,10 +83,20 @@ class LocationService {
   Future<Position> getCurrentLocation() async {
     await ensureLocationReady();
 
+    // 1) Instant: last known fix — avoids the cold-start wait, prevents
+    //    falling back to Accra while a fresh fix is still acquiring.
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) return last;
+    } catch (_) {/* fall through to a fresh fix */}
+
+    // 2) Fresh fix — `high` (not bestForNavigation) locks faster on a cold start.
     try {
       return await Geolocator.getCurrentPosition(
-        locationSettings: _settings,
-      ).timeout(const Duration(seconds: 15));
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      ).timeout(const Duration(seconds: 25));
     } on TimeoutException {
       throw Exception('Failed to get current location (timeout)');
     }

@@ -5,6 +5,7 @@ import 'firebase_options.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/cupertino.dart';
 
 import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
@@ -357,25 +358,29 @@ class RiderApp extends StatelessWidget {
           settings: settings,
         );
 
-        case AppRoutes.deliveryTracking:
-  final a = settings.arguments;
-  final deliveryId = a is String
-      ? a
-      : a is Map ? (a['deliveryId'] ?? '') as String : '';
-  return MaterialPageRoute(
-    builder: (_) => DeliveryTrackingScreen(deliveryId: deliveryId),
-    settings: settings,
-  );
+      case AppRoutes.deliveryTracking:
+        final a = settings.arguments;
+        final deliveryId = a is String
+            ? a
+            : a is Map
+                ? (a['deliveryId'] ?? '') as String
+                : '';
+        return MaterialPageRoute(
+          builder: (_) => DeliveryTrackingScreen(deliveryId: deliveryId),
+          settings: settings,
+        );
 
-case AppRoutes.gasTracking:
-  final a = settings.arguments;
-  final orderId = a is String
-      ? a
-      : a is Map ? (a['orderId'] ?? '') as String : '';
-  return MaterialPageRoute(
-    builder: (_) => GasOrderTrackingScreen(orderId: orderId),
-    settings: settings,
-  );
+      case AppRoutes.gasTracking:
+        final a = settings.arguments;
+        final orderId = a is String
+            ? a
+            : a is Map
+                ? (a['orderId'] ?? '') as String
+                : '';
+        return MaterialPageRoute(
+          builder: (_) => GasOrderTrackingScreen(orderId: orderId),
+          settings: settings,
+        );
 
       case '/wallet':
         // Wallet is a tab in the shell — pop back to shell and switch tab

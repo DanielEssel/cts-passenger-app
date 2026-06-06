@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
+import '../../ride/providers/ride_request_provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
@@ -183,9 +184,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         return;
       }
 
-      final pos = await LocationService.instance
-          .getCurrentLocation()
-          .timeout(const Duration(seconds: 10));
+      final pos = await LocationService.instance.getCurrentLocation();
 
       if (!mounted) return;
 
@@ -196,6 +195,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _locationInitialized   = true;
         _usingFallbackLocation = false; // ✅ real fix obtained
       });
+
+
 
       if (_isMapReady) {
         _mapController?.animateCamera(
@@ -212,9 +213,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _isLocating            = false;
         _locationLabel         = 'Location unavailable';
         _userLocation          = _accra;
-        _usingFallbackLocation = true; // ✅ mark fallback so resume retries
+        _usingFallbackLocation = true;
       });
+      ref.read(rideRequestProvider.notifier).setOrigin(
+            'Current location',
+            GeoPoint(_accra.latitude, _accra.longitude),
+          );
       debugPrint('Location error: $e');
+      
     }
   }
 
@@ -236,6 +242,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           _usingFallbackLocation = false;
         });
         _updateUserMarker(ll);
+        ref.read(rideRequestProvider.notifier).setOrigin(
+              _locationLabel,
+              GeoPoint(ll.latitude, ll.longitude),
+            );
       });
     });
   }
@@ -1155,7 +1165,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 class _PulsingDot extends StatefulWidget {  // or StatelessWidget
   final Color color;
   final double size;
-  const _PulsingDot({required this.color, this.size = 8});
+  const _PulsingDot({required this.color}) : size = 8;
   @override
   State<_PulsingDot> createState() => _PulsingDotState();
 }

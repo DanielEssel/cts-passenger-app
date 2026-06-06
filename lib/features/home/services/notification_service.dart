@@ -148,7 +148,25 @@ class NotificationService {
 
   void _navigate(GlobalKey<NavigatorState> nav, String? route) {
     if (route == null || route.isEmpty) return;
-    nav.currentState?.pushNamed(route);
+
+    // Notification payloads carry deep links like "/delivery-tracking?deliveryId=abc".
+    // The route generator matches on PATH only and reads ids from `arguments`, so
+    // split the query off and pass its params as arguments.
+    final uri  = Uri.parse(route);
+    final path = uri.path.isEmpty ? route : uri.path;
+    final qp   = uri.queryParameters;
+
+    final args = <String, dynamic>{
+      if (qp['deliveryId'] != null) 'deliveryId': qp['deliveryId'],
+      if (qp['rideId']     != null) 'rideId':     qp['rideId'],
+      if (qp['orderId']    != null) 'orderId':    qp['orderId'],
+      if (qp['tripId']     != null) 'tripId':     qp['tripId'],
+    };
+
+    nav.currentState?.pushNamed(
+      path,
+      arguments: args.isEmpty ? null : args,
+    );
   }
 
   Future<void> _saveToken() async {

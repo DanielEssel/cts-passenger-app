@@ -324,7 +324,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
                   FilledButton(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      Navigator.pushNamed(context, '/wallet');
+                      Navigator.of(context, rootNavigator: true).pushNamed('/wallet');
                     },
                     style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF16A34A)),

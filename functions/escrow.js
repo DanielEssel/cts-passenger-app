@@ -6,11 +6,24 @@ const crypto           = require("crypto");
 
 const getDb          = () => admin.firestore();
 const FieldValue     = admin.firestore.FieldValue;
+const { defineSecret } = require("firebase-functions/params");
+const paystackSecret = defineSecret("PAYSTACK_SECRET_KEY");
 
 function requireAuth(request) {
   if (!request.auth?.uid) throw new HttpsError("unauthenticated", "Sign in required");
   return request.auth.uid;
 }
+
+async function getPlatformFeePercent() {
+  try {
+    const snap = await getDb().collection("settings").doc("platform").get();
+    const pct = snap.exists ? snap.data()?.platformFeePercent : null;
+    return (typeof pct === "number" ? pct : 15) / 100;
+  } catch (_) {
+    return 0.15; // safe default
+  }
+}
+
 
 async function writeLedger(tx, entry) {
   const ref = getDb().collection("ledger").doc();
@@ -26,9 +39,9 @@ exports.holdBalance = onCall(
   if (!amount || amount <= 0) throw new HttpsError("invalid-argument", "Invalid amount");
 
   const walletRef = getDb().collection("wallets").doc(uid);
-  const escrowRef = getDb().collection("escrows").doc();
-  let escrowId    = escrowRef.id;
-
+  const escrowRef  = getDb().collection("escrows").doc();
+  let escrowId     = escrowRef.id;
+  const feePercent = await getPlatformFeePercent();
   await getDb().runTransaction(async (tx) => {
     const wallet = await tx.get(walletRef);
     if (!wallet.exists) throw new HttpsError("failed-precondition", "Wallet not found. Please top up first.");
@@ -46,8 +59,8 @@ exports.holdBalance = onCall(
     tx.set(escrowRef, {
       id: escrowId, userId: uid, serviceType, referenceType,
       referenceId: null, amount,
-      platformFee: Math.round(amount * 0.15 * 100) / 100,
-      driverNet:   Math.round(amount * 0.85 * 100) / 100,
+      platformFee: Math.round(amount * feePercent * 100) / 100,
+      driverNet:   Math.round(amount * (1 - feePercent) * 100) / 100,
       status: "HELD", heldAt: FieldValue.serverTimestamp(),
       releasedAt: null,
       expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -171,7 +184,7 @@ exports.paystackWebhook = onRequest(
     if (req.method !== "POST") return res.status(405).send("Method not allowed");
 
     const signature = req.headers["x-paystack-signature"];
-        const paystackSecret = defineSecret("PAYSTACK_SECRET_KEY");
+        
     const secret = paystackSecret.value();
 
     if (!signature) return res.status(401).send("Unauthorized");
