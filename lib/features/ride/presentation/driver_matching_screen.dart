@@ -35,11 +35,11 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
   StreamSubscription<DocumentSnapshot>? _tripSub;
 
   int    _dotsCount    = 1;
-  int    _secondsLeft  = 120; // 2 min timeout
   bool   _isCancelling = false;
   bool   _isNavigating = false;
 
-  static const _timeoutSeconds = 300;
+  static const _timeoutSeconds = 60;   
+  int    _secondsLeft  = _timeoutSeconds;
 
   @override
   void initState() {

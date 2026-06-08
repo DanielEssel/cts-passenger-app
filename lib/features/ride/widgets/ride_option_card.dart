@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../models/ride_option.dart';
+import '../../../core/services/pricing_service.dart';
+
 
 class RideOptionCard extends StatelessWidget {
   final RideOption    option;
@@ -26,8 +28,8 @@ class RideOptionCard extends StatelessWidget {
   });
 
   double get calculatedPrice {
-    const pricePerKm = 2.5;
-    return option.basePrice + (pricePerKm * distance);
+    final pricing = PricingService.instance;
+    return pricing.calculateRideFare(option.serviceType.name, distance);
   }
 
   @override

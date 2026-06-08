@@ -26,30 +26,29 @@ class GasOrderScreen extends ConsumerStatefulWidget {
 
 class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     with SingleTickerProviderStateMixin {
-
-  GasRefillType  _selectedType  = GasRefillType.exchangeEmpty;
-  CylinderSize   _selectedSize  = CylinderSize.kg12_5;
-  GasBrand?      _selectedBrand;
-  int            _quantity      = 1;
-  bool           _safetyAccepted = false;
-  bool           _isSubmitting  = false;
-  String?        _deliveryAddress;
-  GeoPoint?      _deliveryGeoPoint;
+  GasRefillType _selectedType = GasRefillType.exchangeEmpty;
+  CylinderSize _selectedSize = CylinderSize.kg12_5;
+  GasBrand? _selectedBrand;
+  int _quantity = 1;
+  bool _safetyAccepted = false;
+  bool _isSubmitting = false;
+  String? _deliveryAddress;
+  GeoPoint? _deliveryGeoPoint;
 
   late final AnimationController _animController;
-  late final Animation<double>   _fadeAnim;
+  late final Animation<double> _fadeAnim;
 
   double get _deliveryFee => PricingService.instance.gasDeliveryFee;
 
-  double get _basePrice    => _selectedSize.refillPrice * _quantity;
-  double get _brandPremium => _selectedBrand != null &&
-      _selectedBrand!.priceMultiplier != 1.0
-      ? _basePrice * (_selectedBrand!.priceMultiplier - 1)
-      : 0;
+  double get _basePrice => _selectedSize.refillPrice * _quantity;
+  double get _brandPremium =>
+      _selectedBrand != null && _selectedBrand!.priceMultiplier != 1.0
+          ? _basePrice * (_selectedBrand!.priceMultiplier - 1)
+          : 0;
   double get _total => _basePrice + _brandPremium + _deliveryFee;
 
   int get _currentStep {
-    if (_safetyAccepted)      return 2;
+    if (_safetyAccepted) return 2;
     if (_deliveryAddress != null) return 1;
     return 0;
   }
@@ -61,8 +60,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    _fadeAnim = CurvedAnimation(
-        parent: _animController, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
   }
 
@@ -129,125 +127,126 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // ─────────────────────────────────────────────
 
   Widget _buildSliverHeader() => SliverAppBar(
-      expandedHeight: 200,
-      pinned: true,
-      stretch: true,
-      backgroundColor: GasTheme.primaryDark,
-      leading: GestureDetector(
-        onTap: () => Navigator.pop(context),
-        child: Container(
-          margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: Colors.white, size: 16),
-        ),
-      ),
-      actions: [
-        GestureDetector(
-          onTap: _showHelp,
+        expandedHeight: 200,
+        pinned: true,
+        stretch: true,
+        backgroundColor: GasTheme.primaryDark,
+        leading: GestureDetector(
+          onTap: () => Navigator.pop(context),
           child: Container(
             margin: const EdgeInsets.all(8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.headset_mic_rounded, color: Colors.white, size: 16),
-                SizedBox(width: 4),
-                Text('Help',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-              ],
-            ),
+            child: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: Colors.white, size: 16),
           ),
         ),
-      ],
-      flexibleSpace: FlexibleSpaceBar(
-        stretchModes: const [StretchMode.zoomBackground],
-        background: Container(
-          decoration: const BoxDecoration(gradient: GasTheme.heroGradient),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                // ── FIX: mainAxisSize.min stops overflow ──
+        actions: [
+          GestureDetector(
+            onTap: _showHelp,
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.local_fire_department_rounded,
+                  Icon(Icons.headset_mic_rounded,
+                      color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text('Help',
+                      style: TextStyle(
                           color: Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      // ── ETA pill moved to same row as icon ──
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.access_time_rounded,
-                                color: Colors.white, size: 12),
-                            SizedBox(width: 4),
-                            Text('~35 mins',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Order Cooking Gas',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  const Text(
-                    'Fast · Safe · Doorstep Delivery',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                    ),
-                  ),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
           ),
+        ],
+        flexibleSpace: FlexibleSpaceBar(
+          stretchModes: const [StretchMode.zoomBackground],
+          background: Container(
+            decoration: const BoxDecoration(gradient: GasTheme.heroGradient),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  // ── FIX: mainAxisSize.min stops overflow ──
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.local_fire_department_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // ── ETA pill moved to same row as icon ──
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.access_time_rounded,
+                                  color: Colors.white, size: 12),
+                              SizedBox(width: 4),
+                              Text('~35 mins',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Order Cooking Gas',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Text(
+                      'Fast · Safe · Doorstep Delivery',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-      ),
-    );
+      );
 
   // ─────────────────────────────────────────────
   // STEP INDICATOR
@@ -290,7 +289,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: GasRefillType.values.length,
               itemBuilder: (_, i) {
-                final type    = GasRefillType.values[i];
+                final type = GasRefillType.values[i];
                 final selected = type == _selectedType;
                 return GestureDetector(
                   onTap: () {
@@ -307,11 +306,10 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                       color: selected ? null : GasTheme.surface,
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: selected
-                            ? Colors.transparent
-                            : GasTheme.border,
+                        color: selected ? Colors.transparent : GasTheme.border,
                       ),
-                      boxShadow: selected ? GasTheme.emberGlow : GasTheme.cardShadow,
+                      boxShadow:
+                          selected ? GasTheme.emberGlow : GasTheme.cardShadow,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,9 +325,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                           ),
                           child: Icon(type.icon,
                               size: 18,
-                              color: selected
-                                  ? Colors.white
-                                  : GasTheme.primary),
+                              color:
+                                  selected ? Colors.white : GasTheme.primary),
                         ),
                         const Spacer(),
                         Text(
@@ -338,9 +335,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                             fontFamily: 'Inter',
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: selected
-                                ? Colors.white
-                                : GasTheme.textPrimary,
+                            color:
+                                selected ? Colors.white : GasTheme.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -377,8 +373,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
             child: GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
@@ -386,7 +381,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               ),
               itemCount: CylinderSize.values.length,
               itemBuilder: (_, i) {
-                final size     = CylinderSize.values[i];
+                final size = CylinderSize.values[i];
                 final selected = size == _selectedSize;
                 return GestureDetector(
                   onTap: () {
@@ -396,14 +391,10 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? GasTheme.primaryDim
-                          : GasTheme.surface,
+                      color: selected ? GasTheme.primaryDim : GasTheme.surface,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: selected
-                            ? GasTheme.primary
-                            : GasTheme.border,
+                        color: selected ? GasTheme.primary : GasTheme.border,
                         width: selected ? 1.5 : 0.5,
                       ),
                       boxShadow: selected ? [] : GasTheme.cardShadow,
@@ -460,14 +451,12 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: GasBrand.values.length,
               itemBuilder: (_, i) {
-                final brand    = GasBrand.values[i];
+                final brand = GasBrand.values[i];
                 final selected = brand == _selectedBrand;
                 return GestureDetector(
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    setState(() =>
-                        _selectedBrand =
-                            selected ? null : brand);
+                    setState(() => _selectedBrand = selected ? null : brand);
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
@@ -475,17 +464,12 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? GasTheme.primary
-                          : GasTheme.surface,
+                      color: selected ? GasTheme.primary : GasTheme.surface,
                       borderRadius: BorderRadius.circular(22),
                       border: Border.all(
-                        color: selected
-                            ? GasTheme.primary
-                            : GasTheme.border,
+                        color: selected ? GasTheme.primary : GasTheme.border,
                       ),
-                      boxShadow:
-                          selected ? GasTheme.emberGlow : [],
+                      boxShadow: selected ? GasTheme.emberGlow : [],
                     ),
                     child: Text(
                       brand.displayName,
@@ -493,9 +477,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                         fontFamily: 'Inter',
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: selected
-                            ? Colors.white
-                            : GasTheme.textSecondary,
+                        color: selected ? Colors.white : GasTheme.textSecondary,
                       ),
                     ),
                   ),
@@ -718,20 +700,15 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                 ],
               ),
               const SizedBox(height: 16),
-              _SafetyItem(
-                  'Valid empty cylinder ready for exchange',
+              _SafetyItem('Valid empty cylinder ready for exchange',
                   'Ensure cylinder is not expired and has valid certification'),
               const SizedBox(height: 10),
-              _SafetyItem(
-                  'Cylinder in good condition — no leaks or damage',
+              _SafetyItem('Cylinder in good condition — no leaks or damage',
                   'Check for rust, dents, or damaged valves'),
               const SizedBox(height: 10),
-              _SafetyItem(
-                  'I understand gas safety guidelines',
+              _SafetyItem('I understand gas safety guidelines',
                   'Keep upright, away from heat, in ventilated area'),
-              Divider(
-                  height: 24,
-                  color: GasTheme.border),
+              Divider(height: 24, color: GasTheme.border),
               GestureDetector(
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -791,8 +768,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
           decoration: BoxDecoration(
             gradient: GasTheme.cardGradient,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: GasTheme.primary.withValues(alpha: 0.15)),
+            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.15)),
             boxShadow: GasTheme.cardShadow,
           ),
           child: Column(
@@ -816,22 +792,18 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               ),
               const SizedBox(height: 16),
               _PriceLine(
-                label:
-                    '${_selectedSize.displayName} × $_quantity',
+                label: '${_selectedSize.displayName} × $_quantity',
                 value: '₵${_basePrice.toStringAsFixed(2)}',
               ),
               const SizedBox(height: 8),
               _PriceLine(
                   label: 'Delivery fee',
-                  value:
-                      '₵${_deliveryFee.toStringAsFixed(2)}'),
+                  value: '₵${_deliveryFee.toStringAsFixed(2)}'),
               if (_brandPremium > 0) ...[
                 const SizedBox(height: 8),
                 _PriceLine(
-                  label:
-                      '${_selectedBrand!.displayName} premium',
-                  value:
-                      '₵${_brandPremium.toStringAsFixed(2)}',
+                  label: '${_selectedBrand!.displayName} premium',
+                  value: '₵${_brandPremium.toStringAsFixed(2)}',
                 ),
               ],
               Divider(height: 24, color: GasTheme.border),
@@ -866,7 +838,9 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // ─────────────────────────────────────────────
 
   Widget _buildBottomCTA() => Positioned(
-        bottom: 0, left: 0, right: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
         child: Container(
           padding: EdgeInsets.fromLTRB(
               20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
@@ -886,9 +860,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               if (!_isOrderValid()) _buildValidationHint(),
               if (!_isOrderValid()) const SizedBox(height: 10),
               GestureDetector(
-                onTap: _isSubmitting || !_isOrderValid()
-                    ? null
-                    : _placeOrder,
+                onTap: _isSubmitting || !_isOrderValid() ? null : _placeOrder,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: double.infinity,
@@ -911,16 +883,13 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: Colors.white),
+                                strokeWidth: 2.5, color: Colors.white),
                           )
                         : Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(
-                                  Icons.local_fire_department_rounded,
-                                  color: Colors.white,
-                                  size: 18),
+                              const Icon(Icons.local_fire_department_rounded,
+                                  color: Colors.white, size: 18),
                               const SizedBox(width: 8),
                               Text(
                                 'Place Order  ₵${_total.toStringAsFixed(2)}',
@@ -953,13 +922,11 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       decoration: BoxDecoration(
         color: GasTheme.warning.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: GasTheme.warning.withValues(alpha: 0.3)),
+        border: Border.all(color: GasTheme.warning.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline_rounded,
-              color: GasTheme.warning, size: 16),
+          Icon(Icons.info_outline_rounded, color: GasTheme.warning, size: 16),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -980,8 +947,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // HELPERS
   // ─────────────────────────────────────────────
 
-  Widget _sectionTitle(String title, IconData icon,
-      {String? subtitle}) =>
+  Widget _sectionTitle(String title, IconData icon, {String? subtitle}) =>
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Row(
@@ -1008,8 +974,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
             if (subtitle != null) ...[
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: GasTheme.surfaceAlt,
                   borderRadius: BorderRadius.circular(20),
@@ -1026,9 +991,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       );
 
   bool _isOrderValid() =>
-      _deliveryAddress != null &&
-      _deliveryGeoPoint != null &&
-      _safetyAccepted;
+      _deliveryAddress != null && _deliveryGeoPoint != null && _safetyAccepted;
 
   Future<void> _selectAddress() async {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
@@ -1039,14 +1002,15 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     );
     if (result != null && mounted) {
       setState(() {
-        _deliveryAddress  = result['address'] as String;
+        _deliveryAddress = result['address'] as String;
         _deliveryGeoPoint = result['location'] as GeoPoint;
       });
     }
   }
 
   Future<void> _placeOrder() async {
-    if (!_isOrderValid()) return;
+    if (!_isOrderValid() || _isSubmitting) return; // ← add _isSubmitting check
+    setState(() => _isSubmitting = true);
 
     final paymentConfirmed = await showModalBottomSheet<bool>(
       context: context,
@@ -1055,34 +1019,40 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       isDismissible: !_isSubmitting,
       useSafeArea: true,
       builder: (ctx) => GasPaymentSheet(
-        refillType:   _selectedType,
+        refillType: _selectedType,
         cylinderSize: _selectedSize,
-        brand:        _selectedBrand,
-        quantity:     _quantity,
-        gasPrice:     _selectedSize.refillPrice,
-        deliveryFee:  _deliveryFee,
-        total:        _total,
+        brand: _selectedBrand,
+        quantity: _quantity,
+        gasPrice: _selectedSize.refillPrice,
+        deliveryFee: _deliveryFee,
+        total: _total,
       ),
     );
 
-    if (paymentConfirmed != true || !mounted) return;
+    if (paymentConfirmed != true || !mounted) {
+      if (mounted) setState(() => _isSubmitting = false);
+      return;
+    }
 
     // ── Hold funds before placing gas order ──────────────────────────────
     final escrowResult = await EscrowService.instance.holdBalance(
-      amount:        _total,
-      serviceType:   'gas',
+      amount: _total,
+      serviceType: 'gas',
       referenceType: 'gas_order',
     );
     if (!escrowResult.success) {
       if (mounted) {
+        setState(() => _isSubmitting = false); // ← add this
+
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(escrowResult.shortfall != null
-            ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
-            : escrowResult.error ?? 'Payment hold failed.'),
+              ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
+              : escrowResult.error ?? 'Payment hold failed.'),
           backgroundColor: const Color(0xFFDC2626),
           action: SnackBarAction(
             label: 'Top Up',
-            onPressed: () => Navigator.pushNamed(context, '/wallet'),
+            onPressed: () =>
+                Navigator.of(context, rootNavigator: true).pushNamed('/wallet'),
           ),
         ));
       }
@@ -1090,63 +1060,61 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     }
     final escrowId = escrowResult.escrowId!;
 
-    setState(() => _isSubmitting = true);
-
     try {
-      final user = FirebaseAuth.instance.currentUser
-          ?? ref.read(authStateProvider).value;
+      final user = FirebaseAuth.instance.currentUser ??
+          ref.read(authStateProvider).value;
       if (user == null) throw Exception('Please log in to place an order.');
 
       final order = GasRefillRequest(
-        id:                      '',
-        passengerId:             user.uid,
-        driverId:                null,
-        refillType:              _selectedType,
-        cylinderSize:            _selectedSize,
-        preferredBrand:          _selectedBrand,
-        quantity:                _quantity,
-        status:                  GasOrderStatus.pendingApproval,
-        pickupLocation:          _deliveryGeoPoint!,
-        deliveryLocation:        _deliveryGeoPoint!,
-        preferredStation:        null,
-        pickupAddress:           _deliveryAddress!,
-        deliveryAddress:         _deliveryAddress!,
+        id: '',
+        passengerId: user.uid,
+        driverId: null,
+        refillType: _selectedType,
+        cylinderSize: _selectedSize,
+        preferredBrand: _selectedBrand,
+        quantity: _quantity,
+        status: GasOrderStatus.pendingApproval,
+        pickupLocation: _deliveryGeoPoint!,
+        deliveryLocation: _deliveryGeoPoint!,
+        preferredStation: null,
+        pickupAddress: _deliveryAddress!,
+        deliveryAddress: _deliveryAddress!,
         preferredStationAddress: null,
-        pickupInstructions:      null,
-        deliveryInstructions:    null,
-        cylinderIsAvailable:     true,
+        pickupInstructions: null,
+        deliveryInstructions: null,
+        cylinderIsAvailable: true,
         cylinderInGoodCondition: true,
-        cylinderConditionNotes:  null,
+        cylinderConditionNotes: null,
         safetyChecklistCompleted: _safetyAccepted,
-        gasAmount:      _selectedSize.weight * _quantity,
-        gasPrice:       _selectedSize.refillPrice,
-        serviceFee:     0,
-        deliveryFee:    _deliveryFee,
-        totalPrice:     _total,
-        createdAt:      DateTime.now(),
-        scheduledPickupAt:   null,
+        gasAmount: _selectedSize.weight * _quantity,
+        gasPrice: _selectedSize.refillPrice,
+        serviceFee: 0,
+        deliveryFee: _deliveryFee,
+        totalPrice: _total,
+        createdAt: DateTime.now(),
+        scheduledPickupAt: null,
         scheduledDeliveryBy: null,
-        pickupCompletedAt:   null,
-        refillCompletedAt:   null,
-        deliveredAt:         null,
-        cancelledAt:         null,
-        paymentMethod:   'wallet',
+        pickupCompletedAt: null,
+        refillCompletedAt: null,
+        deliveredAt: null,
+        cancelledAt: null,
+        paymentMethod: 'wallet',
         requiresReceipt: false,
-        receiptEmail:    null,
+        receiptEmail: null,
         passengerRating: null,
-        driverRating:    null,
+        driverRating: null,
         metadata: {
           'appVersion': '1.0.0',
-          'platform':   'flutter',
+          'platform': 'flutter',
         },
       );
 
-      final repo    = ref.read(gasOrderRepositoryProvider);
+      final repo = ref.read(gasOrderRepositoryProvider);
       final orderId = await repo.createGasOrder(order);
 
       await EscrowService.instance.attachToOrder(
-        escrowId:      escrowId,
-        referenceId:   orderId,
+        escrowId: escrowId,
+        referenceId: orderId,
         referenceType: 'gas_order',
       );
 
@@ -1169,9 +1137,9 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');
         await fns.httpsCallable('refundEscrowOnError').call({
           'escrowId': escrowId,
-          'reason':   'order_creation_failed',
+          'reason': 'order_creation_failed',
         });
-      } catch (_) { /* Stuck escrow auto-releases after 2hrs */ }
+      } catch (_) {/* Stuck escrow auto-releases after 2hrs */}
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1198,7 +1166,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
           children: [
             Center(
               child: Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
                   color: GasTheme.border,
                   borderRadius: BorderRadius.circular(2),
@@ -1214,9 +1183,9 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                   color: GasTheme.textPrimary,
                 )),
             const SizedBox(height: 16),
-            _HelpRow(Icons.phone_rounded,       '+233 XX XXX XXXX'),
+            _HelpRow(Icons.phone_rounded, '+233 XX XXX XXXX'),
             const SizedBox(height: 12),
-            _HelpRow(Icons.email_rounded,       'support@ctstransport.com'),
+            _HelpRow(Icons.email_rounded, 'support@ctstransport.com'),
             const SizedBox(height: 12),
             _HelpRow(Icons.access_time_rounded, '24/7 Support'),
             const SizedBox(height: 24),
@@ -1241,17 +1210,19 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
 class _Step extends StatelessWidget {
   final int index, current;
   final String label;
-  const _Step({required this.index, required this.current, required this.label});
+  const _Step(
+      {required this.index, required this.current, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    final done   = current > index;
+    final done = current > index;
     final active = current >= index;
     return Column(
       children: [
         AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          width: 32, height: 32,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
             color: active ? GasTheme.primary : GasTheme.surfaceAlt,
             shape: BoxShape.circle,
@@ -1261,17 +1232,14 @@ class _Step extends StatelessWidget {
           ),
           child: Center(
             child: done
-                ? const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 16)
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
                 : Text(
                     '${index + 1}',
                     style: TextStyle(
                       fontFamily: 'Inter',
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: active
-                          ? Colors.white
-                          : GasTheme.textTertiary,
+                      color: active ? Colors.white : GasTheme.textTertiary,
                     ),
                   ),
           ),
@@ -1280,11 +1248,8 @@ class _Step extends StatelessWidget {
         Text(label,
             style: TextStyle(
               fontSize: 11,
-              fontWeight:
-                  active ? FontWeight.w600 : FontWeight.w400,
-              color: active
-                  ? GasTheme.primary
-                  : GasTheme.textTertiary,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              color: active ? GasTheme.primary : GasTheme.textTertiary,
             )),
       ],
     );
@@ -1298,8 +1263,7 @@ class _StepConnector extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Expanded(
         child: Padding(
-          padding:
-              const EdgeInsets.only(bottom: 18, left: 4, right: 4),
+          padding: const EdgeInsets.only(bottom: 18, left: 4, right: 4),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 250),
             height: 2,
@@ -1310,7 +1274,7 @@ class _StepConnector extends StatelessWidget {
 }
 
 class _QtyBtn extends StatelessWidget {
-  final IconData     icon;
+  final IconData icon;
   final VoidCallback onTap;
   const _QtyBtn({required this.icon, required this.onTap});
 
@@ -1318,12 +1282,12 @@ class _QtyBtn extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 36, height: 36,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
             color: GasTheme.primaryDim,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: GasTheme.primary.withValues(alpha: 0.3)),
+            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.3)),
           ),
           child: Icon(icon, color: GasTheme.primary, size: 18),
         ),
@@ -1339,14 +1303,14 @@ class _SafetyItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 20, height: 20,
+            width: 20,
+            height: 20,
             margin: const EdgeInsets.only(top: 1),
             decoration: BoxDecoration(
               color: GasTheme.success.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.check_rounded,
-                color: GasTheme.success, size: 12),
+            child: Icon(Icons.check_rounded, color: GasTheme.success, size: 12),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1361,9 +1325,8 @@ class _SafetyItem extends StatelessWidget {
                     )),
                 const SizedBox(height: 1),
                 Text(subtitle,
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: GasTheme.textTertiary)),
+                    style:
+                        TextStyle(fontSize: 11, color: GasTheme.textTertiary)),
               ],
             ),
           ),
@@ -1380,8 +1343,7 @@ class _PriceLine extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
-              style: TextStyle(
-                  fontSize: 13, color: GasTheme.textSecondary)),
+              style: TextStyle(fontSize: 13, color: GasTheme.textSecondary)),
           Text(value,
               style: TextStyle(
                 fontSize: 13,
@@ -1394,14 +1356,15 @@ class _PriceLine extends StatelessWidget {
 
 class _HelpRow extends StatelessWidget {
   final IconData icon;
-  final String   text;
+  final String text;
   const _HelpRow(this.icon, this.text);
 
   @override
   Widget build(BuildContext context) => Row(
         children: [
           Container(
-            width: 36, height: 36,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: GasTheme.primaryDim,
               borderRadius: BorderRadius.circular(10),

@@ -25,43 +25,39 @@ class _DestinationSearchScreenState
   final FocusNode _focusNode = FocusNode();
 
   @override
-void initState() {
-  super.initState();
+  void initState() {
+    super.initState();
 
-  debugPrint('🚀 DestinationSearchScreen OPENED');
+    debugPrint('🚀 DestinationSearchScreen OPENED');
 
-  _controller.addListener(() {
-    ref
-        .read(destinationSearchProvider.notifier)
-        .onQueryChanged(_controller.text);
-  });
+    _controller.addListener(() {
+      ref
+          .read(destinationSearchProvider.notifier)
+          .onQueryChanged(_controller.text);
+    });
 
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    _focusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
 
-    final currentState = ref.read(destinationSearchProvider);
+      // Clear stale selection from a previous open, so the listener doesn't
+      // immediately pop on an old place (was causing auto-close + crash).
+      ref.read(destinationSearchProvider.notifier).clearQuery();
 
-    debugPrint(
-      '🚀 Initial selectedPlace = ${currentState.selectedPlace?.name}',
-    );
+      _focusNode.requestFocus();
 
-    ref.listenManual<DestinationSearchState>(
-      destinationSearchProvider,
-      (_, next) {
-        debugPrint(
-          '🎯 Listener fired: selectedPlace=${next.selectedPlace?.name}',
-        );
-
-        if (next.selectedPlace != null && mounted) {
-          Navigator.pop(
-            context,
-            next.selectedPlace!.toNavigationResult(),
-          );
-        }
-      },
-    );
-  });
-}
+      ref.listenManual<DestinationSearchState>(
+        destinationSearchProvider,
+        (prev, next) {
+          // Only pop when the selection CHANGES to a real place during this session.
+          if (next.selectedPlace != null &&
+              next.selectedPlace != prev?.selectedPlace &&
+              mounted) {
+            Navigator.pop(context, next.selectedPlace!.toNavigationResult());
+          }
+        },
+      );
+    });
+  }
 
   @override
   void dispose() {

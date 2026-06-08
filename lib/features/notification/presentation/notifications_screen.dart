@@ -284,7 +284,7 @@ class _NotifTile extends ConsumerWidget {
     if (route.contains('gas-tracking')) {
       final orderId = item.metadata['orderId'] as String?;
       if (orderId != null) {
-        Navigator.pushNamed(context, '/gas-tracking',
+        Navigator.of(context, rootNavigator: true).pushNamed('/gas-tracking',
             arguments: {'orderId': orderId});
       }
       return;

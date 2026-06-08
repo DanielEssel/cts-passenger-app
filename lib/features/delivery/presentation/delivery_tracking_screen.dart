@@ -125,8 +125,8 @@ class _TrackingBody extends ConsumerWidget {
                   const SizedBox(height: 12),
                   PrimaryButton(
                     label: 'Back to home',
-                    onTap: () => Navigator.pushNamedAndRemoveUntil(
-                        context, AppRoutes.shell, (_) => false),
+                    onTap: () => Navigator.of(context, rootNavigator: true)
+                        .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false),
                   ),
                 ],
                 const SizedBox(height: 16),

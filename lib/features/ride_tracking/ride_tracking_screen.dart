@@ -353,8 +353,8 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
           // Navigate home after dispute
           Future.delayed(const Duration(seconds: 2), () {
             if (mounted) {
-              Navigator.of(context, rootNavigator: true)
-                  .pushNamedAndRemoveUntil('/shell', (_) => false);
+              Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/shell', (_) => false);
+
             }
           });
         }
@@ -407,7 +407,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         'status':      'cancelledByPassenger',
         'cancelledAt': FieldValue.serverTimestamp(),
       });
-      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/shell', (_) => false);
+      if (mounted) Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/shell', (_) => false);
     } catch (_) {
       if (mounted) {
         setState(() => _isCancelling = false);
@@ -454,7 +454,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
               child: FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  if (context.mounted) Navigator.pushNamedAndRemoveUntil(context, '/shell', (_) => false);
+                  if (context.mounted) Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/shell', (_) => false);
                 },
                 style: FilledButton.styleFrom(backgroundColor: _kPrimary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 child: const Text('Book Again'),

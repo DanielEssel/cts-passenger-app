@@ -88,7 +88,10 @@ class RideRequestState {
     // Ensure PricingService has data — uses cached values if available
     final pricing = PricingService.instance;
     final serviceType = selectedRide!.serviceType.name; // 'okada' or 'taxi'
-    final fare = pricing.calculateRideFare(serviceType, estimatedDistance!);
+    final fare = pricing.calculateRideFare(
+  serviceType, estimatedDistance!,
+  waitingMinutes: (estimatedDuration ?? 0).toDouble(),
+);
 
     // Never return 0 for a valid ride — use minimum fare as floor
     final minFare = serviceType == 'okada'

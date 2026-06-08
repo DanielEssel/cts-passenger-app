@@ -62,7 +62,7 @@ function calculateRideFare(serviceType, distanceKm, durationMin, settings) {
   const surgeMul = p.surgeMultiplier ?? p.surgeMutiplier ?? 1.0;
   const surge = surgeOn && surgeMul > 1 ? surgeMul : 1.0;
 
-  let fare = (base + perKm * km + perMin * min) * surge;
+  let fare = (base + perKm * km) * surge;   // distance-only; perMin reserved for future
   fare = Math.max(fare, minFare);
 
   return round2(fare);
@@ -849,6 +849,7 @@ exports.onTripCancelled = onDocumentUpdated(
       "cancelledByDriver",
       "cancelledByPassenger",
       "noDrivers",
+      "noDriversAvailable",
     ];
     if (!cancelledStatuses.includes(after.status)) return;
     if (after.escrowRefunded === true) return; // idempotency
@@ -863,7 +864,7 @@ exports.onTripCancelled = onDocumentUpdated(
       const reason =
         after.status === "cancelledByDriver"
           ? "driver_cancelled"
-          : after.status === "noDrivers"
+          : (after.status === "noDrivers" || after.status === "noDriversAvailable")
             ? "no_drivers_found"
             : "passenger_cancelled";
 

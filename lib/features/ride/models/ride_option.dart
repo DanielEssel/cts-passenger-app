@@ -7,6 +7,7 @@ import '../models/service_type.dart';
 
 
 
+
 extension ServiceTypeExtension on ServiceType {
   String get displayName {
     switch (this) {
