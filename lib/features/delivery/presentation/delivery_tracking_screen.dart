@@ -11,6 +11,8 @@ import '../../../core/routes/app_routes.dart';
 import '../../../widgets/common/shared_widgets.dart';
 import '../models/delivery_request.dart';
 import '../../delivery/providers/delivery_provider.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../ride/services/route_service.dart';
 
 class DeliveryTrackingScreen extends ConsumerWidget {
   final String deliveryId;
@@ -85,7 +87,7 @@ class _TrackingBody extends ConsumerWidget {
         // ── Map area ──
         Stack(
           children: [
-            const MapPlaceholder(height: 260, showRoute: true),
+            _DeliveryMap(delivery: delivery, height: 260),
             Positioned(
               top:   MediaQuery.of(context).padding.top + 12,
               left:  16,
@@ -607,6 +609,8 @@ class _TrackingBody extends ConsumerWidget {
         ],
       );
 
+
+
   void _showReportSheet(BuildContext context, WidgetRef ref) {
     showModalBottomSheet(
       context:          context,
@@ -727,6 +731,8 @@ class _ActionBtn extends StatelessWidget {
     this.iconColor,
   });
 
+  
+
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
@@ -749,4 +755,124 @@ class _ActionBtn extends StatelessWidget {
           ),
         ),
       );
+
+      
+}
+
+// ── Real map with route polyline ───────────────────────────────────────────
+class _DeliveryMap extends StatefulWidget {
+  final DeliveryRequest delivery;
+  final double height;
+  const _DeliveryMap({required this.delivery, required this.height});
+
+  @override
+  State<_DeliveryMap> createState() => _DeliveryMapState();
+}
+
+class _DeliveryMapState extends State<_DeliveryMap> {
+  GoogleMapController? _controller;
+  final _routeService = RouteService();
+  Set<Polyline> _polyline = {};
+  bool _routeFetched = false;
+  bool _mapReady = false;
+
+  static const _mapStyle = '''
+[
+  {"elementType":"geometry","stylers":[{"color":"#f5f5f5"}]},
+  {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#e8f5e9"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#b3d9f2"}]}
+]
+''';
+
+  LatLng get _pickup => LatLng(
+      widget.delivery.pickupLocation.latitude,
+      widget.delivery.pickupLocation.longitude);
+  LatLng get _dropoff => LatLng(
+      widget.delivery.dropoffLocation.latitude,
+      widget.delivery.dropoffLocation.longitude);
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRoute();
+  }
+
+  Future<void> _fetchRoute() async {
+    if (_routeFetched) return;
+    _routeFetched = true;
+    final result = await _routeService.getRoute(_pickup, _dropoff);
+    if (result != null && result.points.isNotEmpty && mounted) {
+      setState(() {
+        _polyline = {
+          Polyline(
+            polylineId: const PolylineId('route'),
+            points: result.points,
+            color: AppColors.primary,
+            width: 4,
+          ),
+        };
+      });
+    }
+  }
+
+  void _fit() {
+    if (!_mapReady) return;
+    final sw = LatLng(
+      _pickup.latitude < _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+      _pickup.longitude < _dropoff.longitude ? _pickup.longitude : _dropoff.longitude,
+    );
+    final ne = LatLng(
+      _pickup.latitude > _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+      _pickup.longitude > _dropoff.longitude ? _pickup.longitude : _dropoff.longitude,
+    );
+    _controller?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+          LatLngBounds(southwest: sw, northeast: ne), 60),
+    );
+  }
+
+  Set<Marker> _markers() => {
+        Marker(
+          markerId: const MarkerId('pickup'),
+          position: _pickup,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: const InfoWindow(title: 'Pickup'),
+        ),
+        Marker(
+          markerId: const MarkerId('dropoff'),
+          position: _dropoff,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: const InfoWindow(title: 'Drop-off'),
+        ),
+      };
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: widget.height,
+      child: GoogleMap(
+        style: _mapStyle,
+        onMapCreated: (c) {
+          _controller = c;
+          setState(() => _mapReady = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+        },
+        initialCameraPosition: CameraPosition(target: _pickup, zoom: 13),
+        markers: _markers(),
+        polylines: _polyline,
+        myLocationButtonEnabled: false,
+        zoomControlsEnabled: false,
+        mapToolbarEnabled: false,
+        compassEnabled: false,
+      ),
+    );
+  }
 }
