@@ -36,6 +36,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cts_transport_app/core/theme/app_theme.dart';
 import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
 import 'package:cts_transport_app/features/gas/providers/gas_order_providers.dart';
+import 'package:cts_transport_app/features/ride/services/route_service.dart';
 
 class GasOrderTrackingScreen extends ConsumerStatefulWidget {
   final String orderId;
@@ -52,6 +53,9 @@ class _GasOrderTrackingScreenState extends ConsumerState<GasOrderTrackingScreen>
   // ── Map ──────────────────────────────────────────────────────────────────
   GoogleMapController? _mapController;
   GasRefillRequest? _previousOrder;
+
+  Set<Polyline> _routePolyline = {};
+  bool _routeFetched = false;
 
   // ── Pulse animation for active-status dot ────────────────────────────────
   late final AnimationController _pulseController;
@@ -106,6 +110,27 @@ class _GasOrderTrackingScreenState extends ConsumerState<GasOrderTrackingScreen>
         96, // padding
       ),
     );
+  }
+
+  Future<void> _fetchRoute(GasRefillRequest order) async {
+    if (_routeFetched) return;
+    _routeFetched = true;
+    final result = await ref.read(routeServiceProvider).getRoute(
+      LatLng(order.pickupLocation.latitude, order.pickupLocation.longitude),
+      LatLng(order.deliveryLocation.latitude, order.deliveryLocation.longitude),
+    );
+    if (result != null && result.points.isNotEmpty && mounted) {
+      setState(() {
+        _routePolyline = {
+          Polyline(
+            polylineId: const PolylineId('route'),
+            points: result.points,
+            color: AppTheme.primaryColor,
+            width: 4,
+          ),
+        };
+      });
+    }
   }
 
   Set<Marker> _buildMarkers(GasRefillRequest order) {
@@ -243,6 +268,7 @@ class _GasOrderTrackingScreenState extends ConsumerState<GasOrderTrackingScreen>
               WidgetsBinding.instance
                   .addPostFrameCallback((_) => _fitCamera(order));
             }
+            _fetchRoute(order);  // draws route polyline once (guarded)
             _previousOrder = order;
             return _buildBody(order);
           },
@@ -319,6 +345,7 @@ class _GasOrderTrackingScreenState extends ConsumerState<GasOrderTrackingScreen>
             zoom: 14,
           ),
           markers: _buildMarkers(order),
+          polylines: _routePolyline,
           myLocationButtonEnabled: false,
           zoomControlsEnabled: false,
           mapToolbarEnabled: false,

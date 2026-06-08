@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../ride/presentation/trip_complete_screen.dart';
+import '../ride/services/route_service.dart';
 
 const _kPrimary = Color(0xFF16A34A);
 const _kAccra   = LatLng(5.6037, -0.1870);
@@ -70,6 +71,11 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   LatLng?   _driverLatLng;
   LatLng?   _pickupLatLng;
   LatLng?   _dropoffLatLng;
+
+  final _routeService = RouteService();
+  Set<Polyline> _routePolyline = {};
+  bool _routeFetched = false;
+
   bool      _mapReady = false;
   BitmapDescriptor? _driverIcon;
 
@@ -145,6 +151,8 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         if (dropoff != null) _dropoffLatLng = LatLng(dropoff.latitude, dropoff.longitude);
       });
 
+      _fetchRoute();
+
       if (_driverLatLng != null && _mapReady) {
         _mapController?.animateCamera(
             CameraUpdate.newLatLng(_driverLatLng!));
@@ -168,6 +176,24 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     _mapController?.animateCamera(
         CameraUpdate.newLatLngBounds(
             LatLngBounds(southwest: sw, northeast: ne), 80));
+  }
+
+  Future<void> _fetchRoute() async {
+    if (_routeFetched || _pickupLatLng == null || _dropoffLatLng == null) return;
+    _routeFetched = true;
+    final result = await _routeService.getRoute(_pickupLatLng!, _dropoffLatLng!);
+    if (result != null && result.points.isNotEmpty && mounted) {
+      setState(() {
+        _routePolyline = {
+          Polyline(
+            polylineId: const PolylineId('route'),
+            points: result.points,
+            color: _kPrimary,
+            width: 4,
+          ),
+        };
+      });
+    }
   }
 
   Set<Marker> _buildMarkers() {
@@ -507,6 +533,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
                     },
                     initialCameraPosition: CameraPosition(target: _pickupLatLng ?? _kAccra, zoom: 14),
                     markers:              _buildMarkers(),
+                    polylines:            _routePolyline,
                     myLocationEnabled:    true,
                     myLocationButtonEnabled: false,
                     zoomControlsEnabled:  false,
