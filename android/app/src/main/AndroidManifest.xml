@@ -10,12 +10,13 @@
     <application
         android:label="CTS Transport"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
         android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher">
+        
         
         <meta-data 
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyAFqi7QoQAL5oOPlV6P4ZTNQT4IeRKCbeU"/>
+            android:value="AIzaSyCgkvDFZo4-bKH7bp1Gp3kH1VcN3Mzuvo0"/>
 
         <activity
             android:name=".MainActivity"

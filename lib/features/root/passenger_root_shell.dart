@@ -67,6 +67,8 @@ class _PassengerRootShellState extends ConsumerState<PassengerRootShell> {
     HomeScreen(
       onWalletTap: () =>
           setState(() => _currentIndex = 2), // ← switch to wallet tab
+      onHistoryTap: () =>
+          setState(() => _currentIndex = 1), // ← switch to history tab
     ),
     HistoryScreen(scrollController: _historyScrollController),
     WalletScreen(scrollController: _walletScrollController),

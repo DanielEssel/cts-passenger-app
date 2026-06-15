@@ -49,6 +49,8 @@ class DeliveryRequest {
   final String?        driverPhone;
   final double?        driverRating;
   final DeliveryStatus status;
+  final GeoPoint?      driverLocation;   // ← add: live position
+  final double?        driverHeading;
 
   // Locations
   final GeoPoint pickupLocation;
@@ -99,6 +101,8 @@ class DeliveryRequest {
     this.driverName,
     this.driverPhone,
     this.driverRating,
+    this.driverLocation,
+    this.driverHeading,
     required this.status,
     required this.pickupLocation,
     required this.dropoffLocation,
@@ -161,7 +165,9 @@ class DeliveryRequest {
       paymentMethod:   d['paymentMethod']   as String? ?? 'wallet',
       passengerRating: (d['passengerRating'] as num?)?.toDouble(),
       deliveryOtp:     d['deliveryOtp']     as String?,
-    );
+      driverLocation:  d['driverLocation']  as GeoPoint?,
+      driverHeading:   (d['driverHeading']   as num?)?.toDouble()   
+    );  
   }
 
   Map<String, dynamic> toFirestore() => {

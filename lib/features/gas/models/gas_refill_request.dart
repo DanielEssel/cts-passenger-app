@@ -43,6 +43,26 @@ enum GasRefillType {
         (e) => e.name == value,
         orElse: () => GasRefillType.exchangeEmpty,
       );
+
+  /// The ordered tracking steps for this type. Two flows:
+  ///  • Pickup & Return → full round trip (collect → station → refill → return)
+  ///  • Everything else → simple drop-off
+  List<GasOrderStatus> get steps => switch (this) {
+        GasRefillType.pickupAndReturn => const [
+            GasOrderStatus.driverEnRoute,
+            GasOrderStatus.driverArrived,
+            GasOrderStatus.pickedUp,
+            GasOrderStatus.atStation,
+            GasOrderStatus.refilling,
+            GasOrderStatus.returning,
+            GasOrderStatus.delivered,
+          ],
+        _ => const [
+            GasOrderStatus.driverEnRoute,
+            GasOrderStatus.driverArrived,
+            GasOrderStatus.delivered,
+          ],
+      };
 }
 
 // ─────────────────────────────────────────────
@@ -73,16 +93,31 @@ enum CylinderSize {
         CylinderSize.kg45 => 45.0,
       };
 
-  // Prices in GHS — fetched from Firestore settings/platform via PricingService
+  // Prices in GHS — fetched from Firestore settings/platform via PricingService.
+
+  /// Gas-only refill price. Used by Exchange Empty and Pickup & Return.
   double get refillPrice {
     final p = PricingService.instance;
     return switch (this) {
-      CylinderSize.kg3    => p.gasCylinder3kg,
-      CylinderSize.kg6    => p.gasCylinder6kg,
-      CylinderSize.kg12_5 => p.gasCylinder12kg,
-      CylinderSize.kg14_5 => p.gasCylinder14kg,
-      CylinderSize.kg19   => p.gasCylinder19kg,
-      CylinderSize.kg45   => p.gasCylinder45kg,
+      CylinderSize.kg3    => p.gasRefill3kg,
+      CylinderSize.kg6    => p.gasRefill6kg,
+      CylinderSize.kg12_5 => p.gasRefill12kg,
+      CylinderSize.kg14_5 => p.gasRefill14kg,
+      CylinderSize.kg19   => p.gasRefill19kg,
+      CylinderSize.kg45   => p.gasRefill45kg,
+    };
+  }
+
+  /// Full cylinder price (hardware + first fill). Used by New Cylinder.
+  double get fullCylinderPrice {
+    final p = PricingService.instance;
+    return switch (this) {
+      CylinderSize.kg3    => p.gasFull3kg,
+      CylinderSize.kg6    => p.gasFull6kg,
+      CylinderSize.kg12_5 => p.gasFull12kg,
+      CylinderSize.kg14_5 => p.gasFull14kg,
+      CylinderSize.kg19   => p.gasFull19kg,
+      CylinderSize.kg45   => p.gasFull45kg,
     };
   }
 
@@ -141,7 +176,9 @@ enum GasOrderStatus {
   driverEnRoute,
   driverArrived,
   pickedUp,
+  atStation,
   refilling,
+  returning,
   outForDelivery,
   delivered,
   cancelled,
@@ -154,7 +191,9 @@ enum GasOrderStatus {
         GasOrderStatus.driverEnRoute => 'Driver En Route',
         GasOrderStatus.driverArrived => 'Driver Arrived',
         GasOrderStatus.pickedUp => 'Picked Up',
+        GasOrderStatus.atStation => 'At Station',
         GasOrderStatus.refilling => 'Refilling',
+        GasOrderStatus.returning => 'Returning',
         GasOrderStatus.outForDelivery => 'Out for Delivery',
         GasOrderStatus.delivered => 'Delivered',
         GasOrderStatus.cancelled => 'Cancelled',
@@ -169,7 +208,9 @@ enum GasOrderStatus {
         GasOrderStatus.driverEnRoute => 'Driver is coming',
         GasOrderStatus.driverArrived => 'Driver has arrived',
         GasOrderStatus.pickedUp => 'Cylinder picked up',
+        GasOrderStatus.atStation => 'At the refill station',
         GasOrderStatus.refilling => 'Refilling your cylinder',
+        GasOrderStatus.returning => 'Returning with your cylinder',
         GasOrderStatus.outForDelivery => 'On the way to you',
         GasOrderStatus.delivered => 'Delivered!',
         GasOrderStatus.cancelled => 'Order Cancelled',
@@ -183,11 +224,37 @@ enum GasOrderStatus {
         GasOrderStatus.driverEnRoute => Colors.blue,
         GasOrderStatus.driverArrived => Colors.cyan,
         GasOrderStatus.pickedUp => Colors.purple,
+        GasOrderStatus.atStation => Colors.deepPurple,
         GasOrderStatus.refilling => Colors.teal,
+        GasOrderStatus.returning => Colors.cyan,
         GasOrderStatus.outForDelivery => Colors.cyan,
         GasOrderStatus.delivered => Colors.green,
         GasOrderStatus.cancelled => Colors.red,
         GasOrderStatus.failed => Colors.red,
+      };
+
+  /// Short label for the stepper chips (driver + passenger).
+  String get stepLabel => switch (this) {
+        GasOrderStatus.driverEnRoute => 'En Route',
+        GasOrderStatus.driverArrived => 'Arrived',
+        GasOrderStatus.pickedUp => 'Collected',
+        GasOrderStatus.atStation => 'At Station',
+        GasOrderStatus.refilling => 'Refilling',
+        GasOrderStatus.returning => 'Returning',
+        GasOrderStatus.delivered => 'Delivered',
+        _ => displayName,
+      };
+
+  /// The button label shown to the driver to ADVANCE INTO this status.
+  String get driverActionLabel => switch (this) {
+        GasOrderStatus.driverEnRoute => 'Start — En Route to Customer',
+        GasOrderStatus.driverArrived => 'I Have Arrived',
+        GasOrderStatus.pickedUp => 'Cylinder Collected',
+        GasOrderStatus.atStation => 'Arrived at Station',
+        GasOrderStatus.refilling => 'Start Refilling',
+        GasOrderStatus.returning => 'Refill Done — Returning',
+        GasOrderStatus.delivered => 'Complete Delivery',
+        _ => 'Continue',
       };
 
   String get firestoreValue => name;
@@ -204,8 +271,10 @@ enum GasOrderStatus {
   GasOrderStatus.driverAssigned   => 0.35,
   GasOrderStatus.driverEnRoute    => 0.45,
   GasOrderStatus.driverArrived    => 0.55,
-  GasOrderStatus.pickedUp         => 0.55,
-  GasOrderStatus.refilling        => 0.7,
+  GasOrderStatus.pickedUp         => 0.6,
+  GasOrderStatus.atStation        => 0.68,
+  GasOrderStatus.refilling        => 0.76,
+  GasOrderStatus.returning        => 0.88,
   GasOrderStatus.outForDelivery   => 0.85,
   GasOrderStatus.delivered        => 1.0,
   GasOrderStatus.cancelled        => 0.0,
@@ -224,7 +293,8 @@ class GasRefillRequest {
   final String?   driverName;
   final String?   driverPhone;
   final String?   driverVehicle;    // e.g. "Motorcycle · GR-1234-22"
-  final GeoPoint? driverLocation;   // live location, nullable
+  final GeoPoint? driverLocation;
+  final double?   driverHeading;   // live location, nullable
   final GasRefillType refillType;
   final CylinderSize cylinderSize;
   final GasBrand? preferredBrand;
@@ -294,6 +364,7 @@ class GasRefillRequest {
     required this.status,
     required this.pickupLocation,
     required this.deliveryLocation,
+    this.driverHeading,
     this.preferredStation,
     required this.pickupAddress,
     required this.deliveryAddress,
@@ -335,6 +406,7 @@ class GasRefillRequest {
     'driverPhone':    driverPhone,
     'driverVehicle':  driverVehicle,
     'driverLocation': driverLocation,
+    'driverHeading':  driverHeading,
       'refillType': refillType.firestoreValue,
       'cylinderSize': cylinderSize.firestoreValue,
       'preferredBrand': preferredBrand?.firestoreValue,

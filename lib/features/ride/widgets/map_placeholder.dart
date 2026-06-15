@@ -15,6 +15,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../core/constants/app_colors.dart';
 import '../providers/drivers_nearby_provider.dart';
 import '../services/route_service.dart';
+  import 'package:cts_transport_app/core/services/marker_service.dart';
+
 
 class MapPlaceholder extends ConsumerStatefulWidget {
   final double height;
@@ -43,8 +45,6 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
   final Map<MarkerId, Marker> _markers = {};
   final Set<Polyline> _polylines = {};
 
-  // Driver car icon (loaded once asynchronously)
-  BitmapDescriptor? _carIcon;
 
   bool _isFetchingRoute = false;
 
@@ -57,11 +57,8 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
   }
 
   Future<void> _loadCarIcon() async {
-    final icon = await BitmapDescriptor.asset(
-      const ImageConfiguration(size: Size(36, 36)),
-      'assets/icons/car_marker.png', // add this asset or swap for defaultMarker
-    );
-    if (mounted) setState(() => _carIcon = icon);
+    await MarkerService.instance.warmUp(context);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -89,6 +86,7 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
   // ---------------------------------------------------------------------------
 
   void _rebuildStaticMarkers() {
+    final ms = MarkerService.instance;
     _markers.remove(const MarkerId('origin'));
     _markers.remove(const MarkerId('destination'));
 
@@ -97,8 +95,8 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
         markerId: const MarkerId('origin'),
         position: widget.origin!,
         infoWindow: const InfoWindow(title: 'Pickup'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueGreen),
+        icon: ms.pickup(),
+        anchor: const Offset(0.5, 1.0),
       );
     }
 
@@ -107,8 +105,8 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
         markerId: const MarkerId('destination'),
         position: widget.destination!,
         infoWindow: const InfoWindow(title: 'Dropoff'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueRed),
+        icon: ms.dropoff(),
+        anchor: const Offset(0.5, 1.0),
       );
     }
 
@@ -153,20 +151,18 @@ class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
   // ---------------------------------------------------------------------------
 
   void _rebuildDriverMarkers(List<NearbyDriver> drivers) {
+    final ms = MarkerService.instance;
     // Remove stale driver markers
     _markers.removeWhere((id, _) => id.value.startsWith('driver_'));
-
     for (final driver in drivers) {
       final markerId = MarkerId('driver_${driver.id}');
       _markers[markerId] = Marker(
         markerId: markerId,
         position: driver.location,
-        icon: _carIcon ??
-            BitmapDescriptor.defaultMarkerWithHue(
-                driver.serviceType == 'okada'
-                    ? BitmapDescriptor.hueGreen
-                    : BitmapDescriptor.hueAzure),
-        infoWindow: InfoWindow(title: driver.name, snippet: driver.serviceType == 'okada' ? 'Okada' : 'Taxi'),
+        icon: ms.vehicle(driver.serviceType),
+        infoWindow: InfoWindow(
+            title: driver.name,
+            snippet: driver.serviceType == 'okada' ? 'Okada' : 'Taxi'),
         anchor: const Offset(0.5, 0.5),
         flat: true,
       );

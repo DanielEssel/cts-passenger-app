@@ -37,27 +37,45 @@ class PricingService {
       'surgeEnabled': false,
     },
     'delivery': {
-      'okada':     {'baseFare': 5.0,  'perKmRate': 2.5, 'minimumFare': 10.0},
-      'aboboya':   {'baseFare': 15.0, 'perKmRate': 4.0, 'minimumFare': 20.0},
+      'okada': {'baseFare': 5.0, 'perKmRate': 2.5, 'minimumFare': 10.0},
+      'aboboya': {'baseFare': 15.0, 'perKmRate': 4.0, 'minimumFare': 20.0},
       'miniTruck': {'baseFare': 40.0, 'perKmRate': 7.0, 'minimumFare': 50.0},
-      'baseFare':               8.0,
-      'perKmRate':              2.0,
-      'minimumFare':            10.0,
-      'cancellationFee':        3.0,
-      'weightSurchargeSmall':   0.0,
-      'weightSurchargeMedium':  5.0,
-      'weightSurchargeLarge':   15.0,
-      'fragileItemSurcharge':   5.0,
-      'helperSurcharge':        10.0,
+      'weightSurchargeSmall': 0.0,
+      'weightSurchargeMedium': 5.0,
+      'weightSurchargeLarge': 15.0,
+      'fragileItemSurcharge': 5.0,
+      'helperSurcharge': 10.0,
+      'cancellationFee': 3.0,
     },
     'gas': {
+      // ── Legacy keys (kept for back-compat; not read by the new calculator) ──
       'cylinder3kg': 48.0,
       'cylinder6kg': 96.0,
       'cylinder12kg': 195.0,
       'cylinder14kg': 228.0,
       'cylinder19kg': 300.0,
       'cylinder45kg': 710.0,
-      'deliveryFee': 10.0,
+      // ── Refill prices (gas only) — Exchange, Pickup & Return ──
+      'refill3kg': 40.0,
+      'refill6kg': 75.0,
+      'refill12kg': 150.0,
+      'refill14kg': 177.0,
+      'refill19kg': 230.0,
+      'refill45kg': 540.0,
+      // ── Full cylinder (hardware + first fill) — New Cylinder ──
+      'full3kg': 180.0,
+      'full6kg': 280.0,
+      'full12kg': 480.0,
+      'full14kg': 520.0,
+      'full19kg': 620.0,
+      'full45kg': 1150.0,
+      // ── Fees ──
+      'deliveryFee': 15.0,
+      'roundTripFee': 30.0,
+      'commercialRate': 1.0,
+      'baseFare': 8.0,
+      'perKm': 2.0,
+      'minDeliveryFee': 12.0,
       'minimumOrder': 1,
     },
     'rideEnabled': true,
@@ -151,9 +169,9 @@ class PricingService {
   bool get taxiSurgeEnabled => _getBool(['taxi', 'surgeEnabled']);
 
   // ── Delivery ───────────────────────────────────────────────────────────────
-  double get deliveryBaseFare => _getDouble(['delivery', 'baseFare']);
-  double get deliveryPerKmRate => _getDouble(['delivery', 'perKmRate']);
-  double get deliveryMinFare => _getDouble(['delivery', 'minimumFare']);
+  double get deliveryBaseFare => _getDouble(['delivery', 'okada', 'baseFare']);
+  double get deliveryPerKmRate => _getDouble(['delivery', 'okada', 'perKmRate']);
+  double get deliveryMinFare => _getDouble(['delivery', 'okada', 'minimumFare']);
   double get deliveryCancelFee => _getDouble(['delivery', 'cancellationFee']);
   double get deliveryWeightSmall =>
       _getDouble(['delivery', 'weightSurchargeSmall']);
@@ -163,8 +181,25 @@ class PricingService {
       _getDouble(['delivery', 'weightSurchargeLarge']);
   double get deliveryFragileSurcharge =>
       _getDouble(['delivery', 'fragileItemSurcharge']);
-  double get deliveryHelperSurcharge =>
-      _getDouble(['delivery', 'helperSurcharge']);
+
+  double get deliveryHelperSurcharge => _getDouble(['delivery', 'helperSurcharge']);
+
+  // Per-vehicle delivery rates ('Okada' / 'Aboboya' / 'Mini Truck')
+  double _deliveryVehicleBase(String v) => switch (v.toLowerCase().replaceAll(' ', '')) {
+        'aboboya' => _getDouble(['delivery', 'aboboya', 'baseFare']),
+        'minitruck' => _getDouble(['delivery', 'miniTruck', 'baseFare']),
+        _ => _getDouble(['delivery', 'okada', 'baseFare']),
+      };
+  double _deliveryVehiclePerKm(String v) => switch (v.toLowerCase().replaceAll(' ', '')) {
+        'aboboya' => _getDouble(['delivery', 'aboboya', 'perKmRate']),
+        'minitruck' => _getDouble(['delivery', 'miniTruck', 'perKmRate']),
+        _ => _getDouble(['delivery', 'okada', 'perKmRate']),
+      };
+  double _deliveryVehicleMinFare(String v) => switch (v.toLowerCase().replaceAll(' ', '')) {
+        'aboboya' => _getDouble(['delivery', 'aboboya', 'minimumFare']),
+        'minitruck' => _getDouble(['delivery', 'miniTruck', 'minimumFare']),
+        _ => _getDouble(['delivery', 'okada', 'minimumFare']),
+      };
 
   // ── Gas ────────────────────────────────────────────────────────────────────
   double get gasCylinder3kg => _getDouble(['gas', 'cylinder3kg']);
@@ -174,6 +209,33 @@ class PricingService {
   double get gasCylinder19kg => _getDouble(['gas', 'cylinder19kg']);
   double get gasCylinder45kg => _getDouble(['gas', 'cylinder45kg']);
   double get gasDeliveryFee => _getDouble(['gas', 'deliveryFee']);
+
+  // ── Refill prices (gas only) — Exchange, Pickup & Return ──
+  double get gasRefill3kg => _getDouble(['gas', 'refill3kg']);
+  double get gasRefill6kg => _getDouble(['gas', 'refill6kg']);
+  double get gasRefill12kg => _getDouble(['gas', 'refill12kg']);
+  double get gasRefill14kg => _getDouble(['gas', 'refill14kg']);
+  double get gasRefill19kg => _getDouble(['gas', 'refill19kg']);
+  double get gasRefill45kg => _getDouble(['gas', 'refill45kg']);
+
+  // ── Full cylinder prices (hardware + first fill) — New Cylinder ──
+  double get gasFull3kg => _getDouble(['gas', 'full3kg']);
+  double get gasFull6kg => _getDouble(['gas', 'full6kg']);
+  double get gasFull12kg => _getDouble(['gas', 'full12kg']);
+  double get gasFull14kg => _getDouble(['gas', 'full14kg']);
+  double get gasFull19kg => _getDouble(['gas', 'full19kg']);
+  double get gasFull45kg => _getDouble(['gas', 'full45kg']);
+
+  // ── Gas fees ──
+  double get gasRoundTripFee => _getDouble(['gas', 'roundTripFee']);
+  double get gasBaseFare       => _getDouble(['gas', 'baseFare']);
+  double get gasPerKm          => _getDouble(['gas', 'perKm']);
+  double get gasMinDeliveryFee => _getDouble(['gas', 'minDeliveryFee']);
+
+  double get gasCommercialRate {
+    final r = _getDouble(['gas', 'commercialRate']);
+    return r > 0 ? r : 1.0; // never zero-out bulk pricing
+  }
 
   // ── Fare calculators ───────────────────────────────────────────────────────
   double calculateRideFare(String serviceType, double distanceKm,
@@ -192,49 +254,16 @@ class PricingService {
     return fare < minFare ? minFare : double.parse(fare.toStringAsFixed(2));
   }
 
-  // Per-vehicle delivery fare. Mirrors the CF calculateDeliveryFare exactly:
-  // reads delivery.{okada|aboboya|miniTruck} rates, falls back to legacy flat
-  // delivery.* then to hard defaults. Shared surcharges (weight/fragile/helper)
-  // apply regardless of vehicle.
   double calculateDeliveryFare(
     double distanceKm, {
-    String vehicleType = 'Okada',
+    required String vehicleType,
     String weightTier = 'small',
     bool isFragile = false,
     bool requiresHelpers = false,
   }) {
-    // Normalise vehicle key: "Mini Truck" -> miniTruck, "Aboboya" -> aboboya, else okada
-    final vk = vehicleType.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
-    final vkey = (vk.contains('mini') || vk.contains('truck'))
-        ? 'miniTruck'
-        : vk.contains('aboboya')
-            ? 'aboboya'
-            : 'okada';
-
-    const vehDefaults = {
-      'okada': {'baseFare': 5.0, 'perKmRate': 2.5, 'minimumFare': 10.0},
-      'aboboya': {'baseFare': 15.0, 'perKmRate': 4.0, 'minimumFare': 20.0},
-      'miniTruck': {'baseFare': 40.0, 'perKmRate': 7.0, 'minimumFare': 50.0},
-    };
-    final def = vehDefaults[vkey]!;
-
-    // Per-vehicle block first, then legacy flat delivery.*, then hard default.
-    final base = _getDouble(['delivery', vkey, 'baseFare']) != 0.0
-        ? _getDouble(['delivery', vkey, 'baseFare'])
-        : (_getDouble(['delivery', 'baseFare']) != 0.0
-            ? _getDouble(['delivery', 'baseFare'])
-            : def['baseFare']!);
-    final perKm = _getDouble(['delivery', vkey, 'perKmRate']) != 0.0
-        ? _getDouble(['delivery', vkey, 'perKmRate'])
-        : (_getDouble(['delivery', 'perKmRate']) != 0.0
-            ? _getDouble(['delivery', 'perKmRate'])
-            : def['perKmRate']!);
-    final minFare = _getDouble(['delivery', vkey, 'minimumFare']) != 0.0
-        ? _getDouble(['delivery', vkey, 'minimumFare'])
-        : (_getDouble(['delivery', 'minimumFare']) != 0.0
-            ? _getDouble(['delivery', 'minimumFare'])
-            : def['minimumFare']!);
-
+    final base = _deliveryVehicleBase(vehicleType);
+    final perKm = _deliveryVehiclePerKm(vehicleType);
+    final minFare = _deliveryVehicleMinFare(vehicleType);
     final weightSurcharge = switch (weightTier.toLowerCase()) {
       'medium' => deliveryWeightMedium,
       'large' => deliveryWeightLarge,
@@ -242,9 +271,7 @@ class PricingService {
     };
     final fragile = isFragile ? deliveryFragileSurcharge : 0.0;
     final helpers = requiresHelpers ? deliveryHelperSurcharge : 0.0;
-
-    final fare =
-        base + (perKm * distanceKm) + weightSurcharge + fragile + helpers;
+    final fare = base + (perKm * distanceKm) + weightSurcharge + fragile + helpers;
     return fare < minFare ? minFare : double.parse(fare.toStringAsFixed(2));
   }
 

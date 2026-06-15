@@ -472,11 +472,34 @@ exports.onGasOrderStatusChanged = onDocumentUpdated(
         break;
 
       case "pickedUp":
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "Cylinder collected 📦",
+          body:  `${driverName} has collected your ${cylinderSize}.`,
+          route: passengerRoute, metadata: meta,
+        });
+        break;
+      case "atStation":
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "At the refill station ⛽",
+          body:  `Your ${cylinderSize} has reached the station for refilling.`,
+          route: passengerRoute, metadata: meta,
+        });
+        break;
       case "refilling":
         await notifyPassenger(passengerId, {
           type:  "gas",
-          title: "Cylinder picked up ✓",
-          body:  `Your ${cylinderSize} has been collected for refilling.`,
+          title: "Refilling your cylinder 🔥",
+          body:  `Your ${cylinderSize} is being refilled now.`,
+          route: passengerRoute, metadata: meta,
+        });
+        break;
+      case "returning":
+        await notifyPassenger(passengerId, {
+          type:  "gas",
+          title: "On the way back 🔄",
+          body:  `${driverName} is returning with your refilled ${cylinderSize}.`,
           route: passengerRoute, metadata: meta,
         });
         break;

@@ -5,6 +5,37 @@ const admin                 = require("firebase-admin");
 admin.initializeApp();
 const trips = require("./trips");
 
+
+exports.createPassengerWallet = onDocumentCreated(
+  { region: "europe-west2" },
+  "users/{userId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = snap.data();
+    if (data?.role !== 'passenger') return;
+
+    const walletRef = admin.firestore()
+      .collection('wallets')
+      .doc(event.params.userId);
+
+    const existing = await walletRef.get();
+    if (existing.exists) return;
+
+    await walletRef.set({
+      userId:    event.params.userId,
+      balance:   0.0,
+      currency:  'GHS',
+      isActive:  true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+);
+
+
+
 // ── onDriverAlertCreated ──────────────────────────────────────────────────────
 
 exports.onDriverAlertCreated = onDocumentCreated(

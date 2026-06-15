@@ -81,9 +81,9 @@ class AuthState {
     String? verificationId,
   }) =>
       AuthState(
-        isLoading:      isLoading      ?? this.isLoading,
-        error:          error,         // null clears intentionally
-        user:           user           ?? this.user,
+        isLoading: isLoading ?? this.isLoading,
+        error: error, // null clears intentionally
+        user: user ?? this.user,
         verificationId: verificationId ?? this.verificationId,
       );
 }
@@ -94,7 +94,7 @@ class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() => const AuthState();
 
-  FirebaseAuth      get _auth      => ref.read(firebaseAuthProvider);
+  FirebaseAuth get _auth => ref.read(firebaseAuthProvider);
   FirebaseFirestore get _firestore => ref.read(firestoreProvider);
 
   // ── Send OTP (login flow) ─────────────────────────────────────────────────
@@ -129,7 +129,7 @@ class AuthNotifier extends Notifier<AuthState> {
       // ── Code sent — navigate to OTP screen ────────────────────────────
       codeSent: (String verificationId, int? resendToken) {
         state = state.copyWith(
-          isLoading:      false,
+          isLoading: false,
           verificationId: verificationId,
         );
         onCodeSent();
@@ -156,7 +156,6 @@ class AuthNotifier extends Notifier<AuthState> {
     await _auth.verifyPhoneNumber(
       phoneNumber: phone,
       timeout: const Duration(seconds: 60),
-
       verificationCompleted: (PhoneAuthCredential credential) async {
         final user = await _signInWithCredential(
           credential,
@@ -164,15 +163,14 @@ class AuthNotifier extends Notifier<AuthState> {
         );
         if (user != null) {
           await _createPassengerProfile(
-            user:      user,
+            user: user,
             firstName: firstName,
-            lastName:  lastName,
-            phone:     phone,
-            email:     email,
+            lastName: lastName,
+            phone: phone,
+            email: email,
           );
         }
       },
-
       verificationFailed: (FirebaseAuthException e) {
         state = state.copyWith(
           isLoading: false,
@@ -180,17 +178,15 @@ class AuthNotifier extends Notifier<AuthState> {
         );
         onError(_phoneErrorMessage(e.code, e.message));
       },
-
       codeSent: (String verificationId, int? resendToken) {
         // Store profile data in state so verifyOtp can persist it after OTP
         state = state.copyWith(
-          isLoading:      false,
+          isLoading: false,
           verificationId: verificationId,
         );
         // Pass pending profile via the callback so OTP screen can forward it
         onCodeSent();
       },
-
       codeAutoRetrievalTimeout: (_) {},
     );
   }
@@ -214,7 +210,7 @@ class AuthNotifier extends Notifier<AuthState> {
 
     final credential = PhoneAuthProvider.credential(
       verificationId: verificationId,
-      smsCode:        smsCode,
+      smsCode: smsCode,
     );
 
     final user = await _signInWithCredential(credential, onError: onError);
@@ -222,16 +218,13 @@ class AuthNotifier extends Notifier<AuthState> {
 
     // For sign-up: create Firestore profile if it doesn't exist yet
     if (pendingProfile != null) {
-      final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (!doc.exists) {
-        await _createPassengerProfile(
-          user:      user,
-          firstName: pendingProfile['firstName'] as String,
-          lastName:  pendingProfile['lastName']  as String,
-          phone:     pendingProfile['phone']     as String,
-          email:     pendingProfile['email']     as String? ?? '',
-        );
-      }
+      await _createPassengerProfile(
+        user: user,
+        firstName: pendingProfile['firstName'] as String? ?? '',
+        lastName: pendingProfile['lastName'] as String? ?? '',
+        phone: pendingProfile['phone'] as String? ?? user.phoneNumber ?? '',
+        email: pendingProfile['email'] as String? ?? '',
+      );
     }
 
     return true;
@@ -259,8 +252,8 @@ class AuthNotifier extends Notifier<AuthState> {
       await user.updatePhotoURL(photoURL);
       await _firestore.collection('users').doc(user.uid).update({
         'displayName': displayName,
-        'photoURL':    photoURL,
-        'updatedAt':   FieldValue.serverTimestamp(),
+        'photoURL': photoURL,
+        'updatedAt': FieldValue.serverTimestamp(),
       });
       return true;
     } catch (e) {
@@ -294,27 +287,20 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
- Future<void> _createPassengerProfile({
+  Future<void> _createPassengerProfile({
   required User user,
   required String firstName,
   required String lastName,
   required String phone,
   required String email,
 }) async {
-  final userRef    = _firestore.collection('users').doc(user.uid);
-  final walletRef  = _firestore.collection('wallets').doc(user.uid);
+  // Reload to ensure the auth token is fully settled after OTP sign-in
+  await user.reload();
+  final freshUser = _auth.currentUser;
+  if (freshUser == null) return;
 
-  // ── Guard: never overwrite existing user doc ──
-  final existing = await userRef.get();
-  if (existing.exists) {
-    debugPrint('⚠️ User doc already exists — skipping creation');
-    return;
-  }
-
-  final batch = _firestore.batch();
-
-  batch.set(userRef, {
-    'uid':         user.uid,
+  await _firestore.collection('users').doc(freshUser.uid).set({
+    'uid':         freshUser.uid,
     'firstName':   firstName,
     'lastName':    lastName,
     'displayName': '$firstName $lastName',
@@ -323,36 +309,29 @@ class AuthNotifier extends Notifier<AuthState> {
     'role':        'passenger',
     'createdAt':   FieldValue.serverTimestamp(),
     'lastLoginAt': FieldValue.serverTimestamp(),
-  });
+  }, SetOptions(merge: true));
 
-  // Only create wallet if it doesn't exist either
-  final existingWallet = await walletRef.get();
-  if (!existingWallet.exists) {
-    batch.set(walletRef, {
-      'userId':    user.uid,
-      'balance':   0.0,
-      'currency':  'GHS',
-      'isActive':  true,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+  // Wallet is created by a Cloud Function triggered on users/{uid} onCreate.
+  // Do NOT write to /wallets from the client — rules block it.
+
+
+    }
+
   }
-
-  await batch.commit();
-}
 
   String _phoneErrorMessage(String code, String? message) {
     return switch (code) {
-      'invalid-phone-number'   => 'Invalid phone number. Include country code (e.g. +233).',
-      'too-many-requests'      => 'Too many attempts. Please try again later.',
-      'session-expired'        => 'Code expired. Please request a new one.',
+      'invalid-phone-number' =>
+        'Invalid phone number. Include country code (e.g. +233).',
+      'too-many-requests' => 'Too many attempts. Please try again later.',
+      'session-expired' => 'Code expired. Please request a new one.',
       'invalid-verification-code' => 'Incorrect code. Please try again.',
-      'quota-exceeded'         => 'SMS quota exceeded. Please try again later.',
-      'missing-phone-number'   => 'Please enter a phone number.',
-      _                        => 'Verification failed: ${message ?? code}',
+      'quota-exceeded' => 'SMS quota exceeded. Please try again later.',
+      'missing-phone-number' => 'Please enter a phone number.',
+      _ => 'Verification failed: ${message ?? code}',
     };
   }
-}
+
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -394,35 +373,34 @@ class UserData {
   factory UserData.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return UserData(
-      uid:         doc.id,
-      email:       data['email']       as String?,
-      firstName:   data['firstName']   as String?,
-      lastName:    data['lastName']    as String?,
+      uid: doc.id,
+      email: data['email'] as String?,
+      firstName: data['firstName'] as String?,
+      lastName: data['lastName'] as String?,
       displayName: data['displayName'] as String?,
       phoneNumber: data['phoneNumber'] as String?,
-      photoURL:    data['photoURL']    as String?,
-      role:        data['role']        as String?,
-      createdAt:   (data['createdAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
+      photoURL: data['photoURL'] as String?,
+      role: data['role'] as String?,
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       lastLoginAt: (data['lastLoginAt'] as Timestamp?)?.toDate(),
-      metadata:    data['metadata'] != null
-                     ? Map<String, dynamic>.from(data['metadata'] as Map)
-                     : null,
+      metadata: data['metadata'] != null
+          ? Map<String, dynamic>.from(data['metadata'] as Map)
+          : null,
     );
   }
 
   Map<String, dynamic> toFirestore() => {
-        'uid':         uid,
-        'firstName':   firstName,
-        'lastName':    lastName,
+        'uid': uid,
+        'firstName': firstName,
+        'lastName': lastName,
         'displayName': displayName,
-        'email':       email,
+        'email': email,
         'phoneNumber': phoneNumber,
-        'photoURL':    photoURL,
-        'role':        role,
-        'createdAt':   Timestamp.fromDate(createdAt),
-        'lastLoginAt': lastLoginAt != null
-                         ? Timestamp.fromDate(lastLoginAt!)
-                         : null,
-        'metadata':    metadata,
+        'photoURL': photoURL,
+        'role': role,
+        'createdAt': Timestamp.fromDate(createdAt),
+        'lastLoginAt':
+            lastLoginAt != null ? Timestamp.fromDate(lastLoginAt!) : null,
+        'metadata': metadata,
       };
 }

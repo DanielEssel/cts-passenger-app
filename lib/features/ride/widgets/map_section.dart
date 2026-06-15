@@ -24,7 +24,7 @@ class MapSection extends ConsumerWidget {
     return Stack(
       children: [
         MapPlaceholder(
-          height: RideConstants.mapHeight,
+          height: MediaQuery.of(context).size.height,
           showRoute: state.isDestinationSet,
           origin: state.pickupLocation != null
               ? LatLng(

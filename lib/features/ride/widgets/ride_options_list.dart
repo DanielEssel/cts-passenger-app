@@ -25,13 +25,11 @@ class RideOptionsList extends ConsumerWidget {
     required this.onShowPaymentSheet,
   });
 
-  @override
+   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Watch all nearby drivers once
     final nearbyAsync = ref.watch(driversNearbyProvider);
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

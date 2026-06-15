@@ -102,6 +102,7 @@ flutter:
     - assets/icons/
     - assets/logos/
     - assets/animations/
+    - assets/markers/
 
   # ============================================
   # FONTS (Optional - For Custom Fonts)

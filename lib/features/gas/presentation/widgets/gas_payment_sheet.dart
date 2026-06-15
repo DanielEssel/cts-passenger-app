@@ -3,11 +3,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cts_transport_app/core/theme/app_theme.dart';
+import '../../../../core/constants/app_colors.dart';
 import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
 import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_providers.dart';
 import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_controller.dart';
-import 'package:cts_transport_app/widgets/common/glass_card.dart';
 
 /// Slides up before placing a gas order.
 /// Returns `true`  when payment succeeds (caller should proceed to create order).
@@ -41,7 +40,9 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
 
   double get _brandPremium {
     if (widget.brand == null || widget.brand!.priceMultiplier == 1.0) return 0;
-    return widget.gasPrice * widget.quantity * (widget.brand!.priceMultiplier - 1);
+    return widget.gasPrice *
+        widget.quantity *
+        (widget.brand!.priceMultiplier - 1);
   }
 
   // ─────────────────────────────────────────────
@@ -96,8 +97,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
         // Refresh wallet then re-check balance automatically
         await ref.read(walletProvider.notifier).refresh();
         // Balance should now be sufficient — proceed
-        final newBalance =
-            ref.read(walletStreamProvider).value?.balance ?? 0.0;
+        final newBalance = ref.read(walletStreamProvider).value?.balance ?? 0.0;
         await _payWithWallet(newBalance);
       }
     } catch (e) {
@@ -123,118 +123,122 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
     final walletAsync = ref.watch(walletStreamProvider);
 
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.background,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      // AFTER:
-child: SafeArea(
-  top: false,
-  child: SingleChildScrollView(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-            // ── Handle ──
-            Center(
-              child: Container(
-                width: 38, height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: Colors.grey[700],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Title ──
-                  Text('Confirm Payment',
-                      style: AppTheme.titleLarge
-                          .copyWith(fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 4),
-                  Text('Review your order and pay from wallet',
-                      style:
-                          AppTheme.bodyMedium.copyWith(color: Colors.grey)),
-
-                  const SizedBox(height: 20),
-
-                  // ── Order summary ──
-                  GlassCard(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        _SummaryRow(
-                          label:
-                              '${widget.cylinderSize.displayName} × ${widget.quantity}',
-                          amount: widget.gasPrice * widget.quantity,
-                        ),
-                        if (_brandPremium > 0) ...[
-                          const SizedBox(height: 10),
-                          _SummaryRow(
-                            label:
-                                'Brand premium (${widget.brand!.displayName})',
-                            amount: _brandPremium,
-                          ),
-                        ],
-                        const SizedBox(height: 10),
-                        _SummaryRow(
-                            label: 'Delivery fee',
-                            amount: widget.deliveryFee),
-                        Divider(
-                            height: 24,
-                            color: Colors.grey[800]),
-                        _SummaryRow(
-                          label: 'Total',
-                          amount: widget.total,
-                          isTotal: true,
-                        ),
-                      ],
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        // AFTER:
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── Handle ──
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[700],
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
+                ),
 
-                  const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── Title ──
+                      Text('Confirm Payment',
+                          style: AppColors.titleMedium
+                              .copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 4),
+                      Text('Review your order and pay from wallet',
+                          style: AppColors.bodyMedium
+                              .copyWith(color: Colors.grey)),
 
-                  // ── Wallet balance ──
-                  walletAsync.when(
-                    loading: () => _buildBalanceSkeleton(),
-                    error: (_, __) => _buildBalanceError(),
-                    data: (wallet) {
-                      final balance = wallet.balance;
-                      final hasFunds = balance >= widget.total;
-                      return _buildBalanceCard(balance, hasFunds);
-                    },
+                      const SizedBox(height: 20),
+
+                      // ── Order summary ──
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppColors.borderLight,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            _SummaryRow(
+                              label:
+                                  '${widget.cylinderSize.displayName} × ${widget.quantity}',
+                              amount: widget.gasPrice * widget.quantity,
+                            ),
+                            if (_brandPremium > 0) ...[
+                              const SizedBox(height: 10),
+                              _SummaryRow(
+                                label:
+                                    'Brand premium (${widget.brand!.displayName})',
+                                amount: _brandPremium,
+                              ),
+                            ],
+                            const SizedBox(height: 10),
+                            _SummaryRow(
+                                label: 'Delivery fee',
+                                amount: widget.deliveryFee),
+                            Divider(height: 24, color: Colors.grey[800]),
+                            _SummaryRow(
+                              label: 'Total',
+                              amount: widget.total,
+                              isTotal: true,
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // ── Wallet balance ──
+                      walletAsync.when(
+                        loading: () => _buildBalanceSkeleton(),
+                        error: (_, __) => _buildBalanceError(),
+                        data: (wallet) {
+                          final balance = wallet.balance;
+                          final hasFunds = balance >= widget.total;
+                          return _buildBalanceCard(balance, hasFunds);
+                        },
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // ── CTA ──
+                      walletAsync.when(
+                        loading: () => _buildLoadingButton(),
+                        error: (_, __) => _buildErrorButton(),
+                        data: (wallet) {
+                          final balance = wallet.balance;
+                          final hasFunds = balance >= widget.total;
+                          return hasFunds
+                              ? _buildPayButton(balance)
+                              : _buildTopUpButton(balance);
+                        },
+                      ),
+                    ],
                   ),
-
-                  const SizedBox(height: 20),
-
-                  // ── CTA ──
-                  walletAsync.when(
-                    loading: () => _buildLoadingButton(),
-                    error: (_, __) => _buildErrorButton(),
-                    data: (wallet) {
-                      final balance = wallet.balance;
-                      final hasFunds = balance >= widget.total;
-                      return hasFunds
-                          ? _buildPayButton(balance)
-                          : _buildTopUpButton(balance);
-                    },
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-)
-    );
-
+          ),
+        ));
   }
 
   // ─────────────────────────────────────────────
@@ -277,12 +281,11 @@ child: SafeArea(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Wallet Balance',
-                    style:
-                        AppTheme.labelSmall.copyWith(color: Colors.grey)),
+                    style: AppColors.labelSmall.copyWith(color: Colors.grey)),
                 const SizedBox(height: 3),
                 Text(
                   '₵${balance.toStringAsFixed(2)}',
-                  style: AppTheme.titleMedium.copyWith(
+                  style: AppColors.titleMedium.copyWith(
                     fontWeight: FontWeight.w800,
                     color: hasFunds ? Colors.green : Colors.orange,
                   ),
@@ -295,10 +298,10 @@ child: SafeArea(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('Short by',
-                    style: AppTheme.labelSmall.copyWith(color: Colors.grey)),
+                    style: AppColors.labelSmall.copyWith(color: Colors.grey)),
                 Text(
                   '₵${(widget.total - balance).toStringAsFixed(2)}',
-                  style: AppTheme.bodyMedium.copyWith(
+                  style: AppColors.bodyMedium.copyWith(
                     color: Colors.orange,
                     fontWeight: FontWeight.w700,
                   ),
@@ -313,7 +316,7 @@ child: SafeArea(
   Widget _buildBalanceSkeleton() => Container(
         height: 72,
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
         ),
       );
@@ -342,16 +345,15 @@ child: SafeArea(
   Widget _buildPayButton(double balance) => SizedBox(
         width: double.infinity,
         child: ElevatedButton(
-          onPressed:
-              _isProcessing ? null : () => _payWithWallet(balance),
+          onPressed: _isProcessing ? null : () => _payWithWallet(balance),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primaryColor,
+            backgroundColor: AppColors.primaryColor,
             foregroundColor: Colors.white,
             disabledBackgroundColor:
-                AppTheme.primaryColor.withValues(alpha: 0.5),
+                AppColors.primaryColor.withValues(alpha: 0.5),
             padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
           child: _isProcessing
               ? const SizedBox(
@@ -371,8 +373,7 @@ child: SafeArea(
   Widget _buildTopUpButton(double balance) => SizedBox(
         width: double.infinity,
         child: ElevatedButton.icon(
-          onPressed:
-              _isProcessing ? null : () => _topUpAndPay(balance),
+          onPressed: _isProcessing ? null : () => _topUpAndPay(balance),
           icon: const Icon(Icons.add_rounded),
           label: _isProcessing
               ? const SizedBox(
@@ -390,8 +391,8 @@ child: SafeArea(
             backgroundColor: Colors.orange,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
       );
@@ -400,7 +401,7 @@ child: SafeArea(
         width: double.infinity,
         height: 54,
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
         ),
       );
@@ -412,8 +413,8 @@ child: SafeArea(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.grey[800],
             padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
           child: const Text('Retry'),
         ),
@@ -443,18 +444,17 @@ class _SummaryRow extends StatelessWidget {
         Expanded(
           child: Text(label,
               style: isTotal
-                  ? AppTheme.titleMedium
-                      .copyWith(fontWeight: FontWeight.bold)
-                  : AppTheme.bodyMedium),
+                  ? AppColors.titleMedium.copyWith(fontWeight: FontWeight.bold)
+                  : AppColors.bodyMedium),
         ),
         Text(
           '₵${amount.toStringAsFixed(2)}',
           style: isTotal
-              ? AppTheme.titleLarge.copyWith(
-                  color: AppTheme.primaryColor,
+              ? AppColors.titleLarge.copyWith(
+                  color: AppColors.primaryColor,
                   fontWeight: FontWeight.bold,
                 )
-              : AppTheme.bodyMedium,
+              : AppColors.bodyMedium,
         ),
       ],
     );

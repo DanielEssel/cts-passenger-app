@@ -270,7 +270,7 @@ class RideOptionsService {
     return switch (option.serviceType) {
       ServiceType.taxi     => pricing.calculateRideFare('taxi',     distanceKm),
       ServiceType.okada    => pricing.calculateRideFare('okada',    distanceKm),
-      ServiceType.delivery => pricing.calculateDeliveryFare(distanceKm),
+      ServiceType.delivery => pricing.calculateDeliveryFare(distanceKm, vehicleType: 'okada'),
       ServiceType.gas      => pricing.gasDeliveryFee,
     };
   }

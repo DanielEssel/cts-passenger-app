@@ -131,4 +131,38 @@ class AppColors {
   static const Color textDisabledColor  = textDisabled;
   static const Color backgroundColor    = background;
   static const Color backgroundLightColor = backgroundAlt;
+
+
+  // ──────────────────────────────────────────────────────────
+// TYPOGRAPHY TOKENS
+// Premium Transport App Typography
+// ──────────────────────────────────────────────────────────
+
+static const TextStyle titleLarge = TextStyle(
+  fontSize: 24,
+  fontWeight: FontWeight.w700,
+  color: textPrimary,
+  letterSpacing: -0.5,
+);
+
+static const TextStyle titleMedium = TextStyle(
+  fontSize: 18,
+  fontWeight: FontWeight.w600,
+  color: textPrimary,
+);
+
+static const TextStyle bodyMedium = TextStyle(
+  fontSize: 14,
+  fontWeight: FontWeight.w400,
+  color: textSecondary,
+  height: 1.5,
+);
+
+static const TextStyle labelSmall = TextStyle(
+  fontSize: 12,
+  fontWeight: FontWeight.w500,
+  color: textTertiary,
+  letterSpacing: 0.2,
+);
 }
+

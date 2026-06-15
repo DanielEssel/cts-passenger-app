@@ -545,14 +545,25 @@ exports.approveDriver = onCall(
   const fcmToken = driverDoc.data()?.fcmToken;
 
   if (action === "approve") {
-    await driverRef.update({
+    // Cascade: approving the driver also approves all their uploaded documents.
+    const driverData = driverDoc.data() || {};
+    const documents  = driverData.documents || {};
+
+    const update = {
       isApproved:        true,
       isRejected:        false,
       documentsRejected: false,
       approvedAt:        admin.firestore.FieldValue.serverTimestamp(),
       approvedBy:        uid,
       signupStep:        "approved",
-    });
+    };
+
+    // Flip every uploaded document's status to "approved".
+    for (const key of Object.keys(documents)) {
+      update[`documents.${key}.status`] = "approved";
+    }
+
+    await driverRef.update(update);
 
     if (fcmToken) {
       await admin.messaging().send({

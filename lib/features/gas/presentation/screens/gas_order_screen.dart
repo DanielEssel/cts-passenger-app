@@ -8,14 +8,16 @@ import '../../../../core/services/pricing_service.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../domain/gas_pricing.dart';
 
 import '../../theme/gas_theme.dart';
 import '../../models/gas_refill_request.dart';
 import '../../providers/gas_order_providers.dart' hide authStateProvider;
 import '../../presentation/widgets/address_picker_sheet.dart';
-import '../../presentation/widgets/order_success_screen.dart';
+import 'gas_order_tracking_screen.dart';
 import '../../presentation/widgets/gas_payment_sheet.dart';
 import '../../../../features/auth/providers/auth_providers.dart';
+import 'dart:math' as math;
 
 class GasOrderScreen extends ConsumerStatefulWidget {
   const GasOrderScreen({super.key});
@@ -34,18 +36,54 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   bool _isSubmitting = false;
   String? _deliveryAddress;
   GeoPoint? _deliveryGeoPoint;
+  double _distanceKm = 5.0; // one-way estimate; defaults to 5km fallback
+  bool _calculatingDistance = false;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
 
-  double get _deliveryFee => PricingService.instance.gasDeliveryFee;
+  /// Single source of truth for this order's pricing (type-aware).
+  GasPriceBreakdown get _pricing {
+    final p = PricingService.instance;
+    return GasPricing.compute(
+      type: _selectedType,
+      size: _selectedSize,
+      quantity: _quantity,
+      brand: _selectedBrand,
+      distanceKm: _distanceKm,
+      inputs: GasPricingInputs(
+        refillPriceOf: (s) => s.refillPrice,
+        fullCylinderPriceOf: (s) => s.fullCylinderPrice,
+        baseFare: p.gasBaseFare,
+        perKm: p.gasPerKm,
+        minDeliveryFee: p.gasMinDeliveryFee,
+        roundTripFee: p.gasRoundTripFee,
+        commercialRate: p.gasCommercialRate,
+      ),
+    );
+  }
 
-  double get _basePrice => _selectedSize.refillPrice * _quantity;
-  double get _brandPremium =>
-      _selectedBrand != null && _selectedBrand!.priceMultiplier != 1.0
-          ? _basePrice * (_selectedBrand!.priceMultiplier - 1)
-          : 0;
-  double get _total => _basePrice + _brandPremium + _deliveryFee;
+  /// Rough ETA from distance: ~3 min/km travel + ~15 min handling.
+  /// Pickup & Return is a round trip, so roughly doubles travel + station time.
+  String get _etaText {
+    if (_calculatingDistance) return 'Calculating…';
+    final isRoundTrip = _selectedType == GasRefillType.pickupAndReturn;
+    final legs = isRoundTrip ? 2 : 1;
+    final travel = _distanceKm * 3 * legs; // ~3 min/km
+    final handling = isRoundTrip ? 90 : 15; // station time for P&R
+    final mins = (travel + handling).round();
+    if (mins >= 60) {
+      final h = mins ~/ 60;
+      final m = mins % 60;
+      return m == 0 ? '~${h}h' : '~${h}h ${m}m';
+    }
+    return '~$mins mins';
+  }
+
+  double get _deliveryFee => _pricing.deliveryFee;
+  double get _basePrice => _pricing.base;
+  double get _brandPremium => _pricing.brandPremium;
+  double get _total => _pricing.total;
 
   int get _currentStep {
     if (_safetyAccepted) return 2;
@@ -91,6 +129,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                     child: Column(
                       children: [
                         _buildStepIndicator(),
+                        const SizedBox(height: 16),
+                        _buildTrustCard(),
                         const SizedBox(height: 24),
                         _buildServiceTypeSection(),
                         const SizedBox(height: 24),
@@ -263,11 +303,11 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
           ),
           child: Row(
             children: [
-              _Step(index: 0, current: _currentStep, label: 'Service'),
+              _Step(index: 0, current: _currentStep, label: 'Order'),
               _StepConnector(active: _currentStep >= 1),
-              _Step(index: 1, current: _currentStep, label: 'Address'),
+              _Step(index: 1, current: _currentStep, label: 'Delivery'),
               _StepConnector(active: _currentStep >= 2),
-              _Step(index: 2, current: _currentStep, label: 'Confirm'),
+              _Step(index: 2, current: _currentStep, label: 'Review'),
             ],
           ),
         ),
@@ -282,14 +322,10 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         children: [
           _sectionTitle('Service Type', Icons.category_rounded),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 120,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: GasRefillType.values.length,
-              itemBuilder: (_, i) {
-                final type = GasRefillType.values[i];
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              children: GasRefillType.values.map((type) {
                 final selected = type == _selectedType;
                 return GestureDetector(
                   onTap: () {
@@ -297,63 +333,90 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                     setState(() => _selectedType = type);
                   },
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    width: 130,
-                    margin: const EdgeInsets.only(right: 12),
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       gradient: selected ? GasTheme.heroGradient : null,
                       color: selected ? null : GasTheme.surface,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: selected ? Colors.transparent : GasTheme.border,
+                        width: selected ? 0 : 0.5,
                       ),
                       boxShadow:
                           selected ? GasTheme.emberGlow : GasTheme.cardShadow,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
                         Container(
-                          width: 36,
-                          height: 36,
+                          width: 44,
+                          height: 44,
                           decoration: BoxDecoration(
                             color: selected
                                 ? Colors.white.withValues(alpha: 0.2)
                                 : GasTheme.primaryDim,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: Icon(type.icon,
-                              size: 18,
+                              size: 22,
                               color:
                                   selected ? Colors.white : GasTheme.primary),
                         ),
-                        const Spacer(),
-                        Text(
-                          type.displayName,
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color:
-                                selected ? Colors.white : GasTheme.textPrimary,
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                type.displayName,
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: selected
+                                      ? Colors.white
+                                      : GasTheme.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatDuration(type.estimatedDuration),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: selected
+                                      ? Colors.white70
+                                      : GasTheme.textTertiary,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatDuration(type.estimatedDuration),
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: selected
-                                ? Colors.white70
-                                : GasTheme.textTertiary,
+                        // Selection indicator
+                        Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: selected ? Colors.white : Colors.transparent,
+                            border: Border.all(
+                              color: selected
+                                  ? Colors.white
+                                  : GasTheme.textTertiary
+                                      .withValues(alpha: 0.4),
+                              width: 1.5,
+                            ),
                           ),
+                          child: selected
+                              ? Icon(Icons.check_rounded,
+                                  size: 14, color: GasTheme.primary)
+                              : null,
                         ),
                       ],
                     ),
                   ),
                 );
-              },
+              }).toList(),
             ),
           ),
         ],
@@ -377,12 +440,15 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                 crossAxisCount: 3,
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
-                childAspectRatio: 1.5,
+                childAspectRatio: 0.92,
               ),
               itemCount: CylinderSize.values.length,
               itemBuilder: (_, i) {
                 final size = CylinderSize.values[i];
                 final selected = size == _selectedSize;
+                final isPopular =
+                    size == CylinderSize.kg14_5; // common household
+
                 return GestureDetector(
                   onTap: () {
                     HapticFeedback.selectionClick();
@@ -390,40 +456,96 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: selected ? GasTheme.primaryDim : GasTheme.surface,
-                      borderRadius: BorderRadius.circular(14),
+                      gradient: selected ? GasTheme.heroGradient : null,
+                      color: selected ? null : GasTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: selected ? GasTheme.primary : GasTheme.border,
-                        width: selected ? 1.5 : 0.5,
+                        color: selected ? Colors.transparent : GasTheme.border,
+                        width: selected ? 0 : 0.5,
                       ),
-                      boxShadow: selected ? [] : GasTheme.cardShadow,
+                      boxShadow:
+                          selected ? GasTheme.emberGlow : GasTheme.cardShadow,
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Stack(
                       children: [
-                        Text(
-                          size.displayName,
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: selected
-                                ? GasTheme.primary
-                                : GasTheme.textPrimary,
-                          ),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Colors.white.withValues(alpha: 0.2)
+                                    : GasTheme.primaryDim,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                Icons.propane_tank_rounded,
+                                size: 17,
+                                color:
+                                    selected ? Colors.white : GasTheme.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              size.displayName,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                                color: selected
+                                    ? Colors.white
+                                    : GasTheme.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '₵${size.refillPrice.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: selected
+                                    ? Colors.white70
+                                    : GasTheme.primary,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '₵${size.refillPrice.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: selected
-                                ? GasTheme.primaryDark
-                                : GasTheme.textTertiary,
+                        // Check when selected (top-right)
+                        if (selected)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
+                              child: Icon(Icons.check_rounded,
+                                  size: 12, color: GasTheme.primary),
+                            ),
                           ),
-                        ),
+                        // "Popular" dot when not selected (small, top-right)
+                        if (isPopular && !selected)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: GasTheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -438,54 +560,92 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // BRAND
   // ─────────────────────────────────────────────
 
-  Widget _buildBrandSection() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _sectionTitle('Preferred Brand', Icons.business_rounded,
-              subtitle: 'Optional'),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 44,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: GasBrand.values.length,
-              itemBuilder: (_, i) {
-                final brand = GasBrand.values[i];
-                final selected = brand == _selectedBrand;
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _selectedBrand = selected ? null : brand);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: selected ? GasTheme.primary : GasTheme.surface,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                        color: selected ? GasTheme.primary : GasTheme.border,
-                      ),
-                      boxShadow: selected ? GasTheme.emberGlow : [],
-                    ),
-                    child: Text(
-                      brand.displayName,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: selected ? Colors.white : GasTheme.textSecondary,
-                      ),
-                    ),
+  Widget _buildBrandSection() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: GasTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: GasTheme.border),
+            boxShadow: GasTheme.cardShadow,
+          ),
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              leading: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: GasTheme.primaryDim,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.business_rounded,
+                    color: GasTheme.primary, size: 16),
+              ),
+              title: Text('Preferred Brand',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: GasTheme.textPrimary,
+                  )),
+              subtitle: Text(
+                _selectedBrand?.displayName ?? 'Optional · tap to choose',
+                style: TextStyle(fontSize: 12, color: GasTheme.textTertiary),
+              ),
+              children: [
+                SizedBox(
+                  height: 44,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: GasBrand.values.length,
+                    itemBuilder: (_, i) {
+                      final brand = GasBrand.values[i];
+                      final selected = brand == _selectedBrand;
+                      return GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(
+                              () => _selectedBrand = selected ? null : brand);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? GasTheme.primary
+                                : GasTheme.surfaceAlt,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color:
+                                  selected ? GasTheme.primary : GasTheme.border,
+                            ),
+                          ),
+                          child: Text(
+                            brand.displayName,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: selected
+                                  ? Colors.white
+                                  : GasTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       );
 
   // ─────────────────────────────────────────────
@@ -546,6 +706,66 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                   HapticFeedback.selectionClick();
                   setState(() => _quantity++);
                 },
+              ),
+            ],
+          ),
+        ),
+      );
+
+  // ─────────────────────────────────────────────
+  // TRUST CARD
+  // ─────────────────────────────────────────────
+
+  Widget _buildTrustCard() => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: GasTheme.cardGradient,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.15)),
+            boxShadow: GasTheme.cardShadow,
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.verified_user_rounded,
+                      color: GasTheme.primary, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Why CTS Gas',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: GasTheme.textPrimary,
+                      )),
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: GasTheme.primaryDim,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text('~35 min avg',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: GasTheme.primary,
+                        )),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: const [
+                  _TrustChip(
+                      Icons.local_shipping_rounded, 'Licensed\npartners'),
+                  _TrustChip(Icons.verified_rounded, 'Verified\nsuppliers'),
+                  _TrustChip(Icons.shield_rounded, 'Inspected\ncylinders'),
+                  _TrustChip(Icons.my_location_rounded, 'Live\ntracking'),
+                ],
               ),
             ],
           ),
@@ -648,6 +868,75 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                     ),
                   ],
                 ),
+              ),
+            ),
+          ),
+          // ── Delivery expectations (ETA + fee) ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: GasTheme.surfaceAlt,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time_rounded,
+                            color: GasTheme.primary, size: 16),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Est. delivery',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: GasTheme.textTertiary)),
+                            Text(_etaText,
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: GasTheme.textPrimary,
+                                )),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 28, color: GasTheme.border),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.local_shipping_rounded,
+                              color: GasTheme.primary, size: 16),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(_pricing.deliveryLabel,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: GasTheme.textTertiary)),
+                              Text('₵${_deliveryFee.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    fontFamily: 'Inter',
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: GasTheme.textPrimary,
+                                  )),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -792,12 +1081,13 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               ),
               const SizedBox(height: 16),
               _PriceLine(
-                label: '${_selectedSize.displayName} × $_quantity',
+                label:
+                    '${_pricing.unitLabel} · ${_selectedSize.displayName} × $_quantity',
                 value: '₵${_basePrice.toStringAsFixed(2)}',
               ),
               const SizedBox(height: 8),
               _PriceLine(
-                  label: 'Delivery fee',
+                  label: _pricing.deliveryLabel,
                   value: '₵${_deliveryFee.toStringAsFixed(2)}'),
               if (_brandPremium > 0) ...[
                 const SizedBox(height: 8),
@@ -892,7 +1182,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                                   color: Colors.white, size: 18),
                               const SizedBox(width: 8),
                               Text(
-                                'Place Order  ₵${_total.toStringAsFixed(2)}',
+                                'Confirm Gas Order  •  ₵${_total.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontFamily: 'Inter',
                                   fontSize: 16,
@@ -1005,7 +1295,77 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         _deliveryAddress = result['address'] as String;
         _deliveryGeoPoint = result['location'] as GeoPoint;
       });
+      _updateDistance(); // recompute pricing distance for the new location
     }
+  }
+
+  /// Estimates the one-way distance from the customer to the nearest available
+  /// gas driver (haversine × road factor). Falls back to 5km if none online.
+  /// Charged at order time; the assigned driver ≈ nearest, so estimate ≈ actual.
+
+  Future<void> _updateDistance() async {
+    final dest = _deliveryGeoPoint;
+    if (dest == null) return;
+    setState(() => _calculatingDistance = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('drivers')
+          .where('isOnline', isEqualTo: true)
+          .where('isApproved', isEqualTo: true)
+          .where('isAvailable', isEqualTo: true)
+          .get();
+
+      double? nearest;
+      var matched = 0;
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final sType = (data['serviceType'] as String?) ?? '';
+        final services =
+            (data['services'] as List?)?.cast<String>() ?? const [];
+        final canDoGas = sType == 'delivery' ||
+            sType == 'gas' ||
+            services.contains('gas') ||
+            services.contains('delivery');
+        if (!canDoGas) continue;
+        final loc = data['location'] ?? data['currentLocation'];
+        if (loc is! GeoPoint) continue;
+        matched++;
+        final km = _haversineKm(
+            dest.latitude, dest.longitude, loc.latitude, loc.longitude);
+        if (nearest == null || km < nearest) nearest = km;
+      }
+      debugPrint('GAS distance: ${snap.docs.length} online, '
+          '$matched delivery-with-location, nearest=${nearest?.toStringAsFixed(2)}km');
+
+      final oneWay = nearest != null ? (nearest * 1.3).clamp(1.0, 30.0) : 5.0;
+      if (mounted) {
+        setState(() {
+          _distanceKm = oneWay.toDouble();
+          _calculatingDistance = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('gas distance calc failed: $e');
+      if (mounted) {
+        setState(() {
+          _distanceKm = 5.0;
+          _calculatingDistance = false;
+        });
+      }
+    }
+  }
+
+  static double _haversineKm(
+      double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371.0;
+    final dLat = (lat2 - lat1) * (math.pi / 180);
+    final dLon = (lon2 - lon1) * (math.pi / 180);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) *
+            math.cos(lat2 * math.pi / 180) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
   Future<void> _placeOrder() async {
@@ -1037,7 +1397,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     // ── Hold funds before placing gas order ──────────────────────────────
     final escrowResult = await EscrowService.instance.holdBalance(
       amount: _total,
-      serviceType: 'gas',
+      serviceType: 'delivery',
       referenceType: 'gas_order',
     );
     if (!escrowResult.success) {
@@ -1128,7 +1488,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-              builder: (_) => OrderSuccessScreen(orderId: orderId)),
+              builder: (_) => GasOrderTrackingScreen(orderId: orderId)),
         );
       }
     } catch (e) {
@@ -1379,5 +1739,38 @@ class _HelpRow extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               )),
         ],
+      );
+}
+
+class _TrustChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _TrustChip(this.icon, this.label);
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Column(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: GasTheme.surface,
+                borderRadius: BorderRadius.circular(11),
+                boxShadow: GasTheme.cardShadow,
+              ),
+              child: Icon(icon, color: GasTheme.primary, size: 18),
+            ),
+            const SizedBox(height: 6),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                  color: GasTheme.textSecondary,
+                )),
+          ],
+        ),
       );
 }

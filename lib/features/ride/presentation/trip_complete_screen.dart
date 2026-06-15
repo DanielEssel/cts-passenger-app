@@ -10,15 +10,20 @@ import '../../../widgets/common/shared_widgets.dart';
 class TripCompleteScreen extends StatefulWidget {
   final String tripId; // ✅ required to save rating against the trip
   final String driverId; // ✅ required to update driver's rating aggregate
+  final String collection; // ← NEW: 'trips' | 'gas_orders' | 'deliveries'
+  final String tipReferenceType; // ← NEW: 'trip' | 'gas' | 'delivery'
   final String driverName;
   final String destination;
   final String fare;
   final String rideType;
-  final double driverRating;   // was Stringptional, for display only. Not used in calculations.
+  final double
+      driverRating; // was Stringptional, for display only. Not used in calculations.
 
   const TripCompleteScreen({
     super.key,
     required this.tripId,
+    this.collection = 'trips', // ← NEW (default = ride)
+    this.tipReferenceType = 'trip',
     required this.driverId,
     required this.driverName,
     required this.destination,
@@ -60,6 +65,25 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
+  // Service-aware copy, derived from tipReferenceType ('trip'|'gas'|'delivery').
+  String get _completionTitle => switch (widget.tipReferenceType) {
+        'gas' => 'Order delivered!',
+        'delivery' => 'Delivery complete!',
+        _ => 'Trip completed!',
+      };
+
+  String get _completionSubtitle => switch (widget.tipReferenceType) {
+        'gas' => 'Your gas was delivered safely',
+        'delivery' => 'Your parcel was delivered',
+        _ => 'Hope you had a great ride',
+      };
+
+  String get _ratingQuestion => switch (widget.tipReferenceType) {
+        'gas' => 'How was your gas delivery?',
+        'delivery' => 'How was your delivery?',
+        _ => 'How was your ride with ${widget.driverName}?',
+      };
+
   @override
   void initState() {
     super.initState();
@@ -97,7 +121,8 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
       final hasTip = _selectedTip >= 0;
 
       if (hasRating) {
-        batch.update(db.collection('trips').doc(widget.tripId), {
+        batch.update(db.collection(widget.collection).doc(widget.tripId), {
+          // ← was 'trips'
           'passengerRating': _selectedStars,
           'passengerTip': hasTip ? _tipOptions[_selectedTip] : 0,
           'passengerTags': _selectedTags,
@@ -113,7 +138,8 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
 
       if (hasTip) {
         batch.set(db.collection('tip_transactions').doc(), {
-          'tripId': widget.tripId,
+          'referenceId': widget.tripId, // ← was 'tripId'
+          'referenceType': widget.tipReferenceType, // ← NEW
           'driverId': widget.driverId,
           'amount': _tipOptions[_selectedTip],
           'currency': 'GHS',
@@ -141,11 +167,11 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
   }
 
   void _goHome() {
-  Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
-    AppRoutes.shell,
-    (route) => false,
-  );
-}
+    Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
+      AppRoutes.shell,
+      (route) => false,
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Build
@@ -164,10 +190,9 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
               const SizedBox(height: 16),
               _AnimatedCheckmark(animation: _checkScale),
               const SizedBox(height: 16),
-              const Text('Trip completed!', style: AppTextStyles.heading2),
+              Text(_completionTitle, style: AppTextStyles.heading2),
               const SizedBox(height: 4),
-              const Text('Hope you had a great ride',
-                  style: AppTextStyles.bodySmall),
+              Text(_completionSubtitle, style: AppTextStyles.bodySmall),
               const SizedBox(height: 24),
               _FareCard(
                 initials: _initials,
@@ -179,6 +204,7 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
               const SizedBox(height: 20),
               _RatingSection(
                 driverName: widget.driverName,
+                question: _ratingQuestion,
                 selectedStars: _selectedStars,
                 onStarTap: (stars) => setState(() => _selectedStars = stars),
               ),
@@ -385,11 +411,13 @@ class _FareCard extends StatelessWidget {
 
 class _RatingSection extends StatelessWidget {
   final String driverName;
+  final String question;
   final int selectedStars;
   final ValueChanged<int> onStarTap;
 
   const _RatingSection({
     required this.driverName,
+    required this.question,
     required this.selectedStars,
     required this.onStarTap,
   });
@@ -415,7 +443,7 @@ class _RatingSection extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            'How was your ride with $driverName?',
+            question,
             style: AppTextStyles.heading4,
             textAlign: TextAlign.center,
           ),
