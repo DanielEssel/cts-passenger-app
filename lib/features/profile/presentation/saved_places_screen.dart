@@ -1,11 +1,11 @@
 // lib/features/profile/presentation/screens/saved_places_screen.dart
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_places_flutter/google_places_flutter.dart';
-import 'package:google_places_flutter/model/prediction.dart';
+import '../../ride/models/place_result.dart';
+import '../../ride/repositories/place_repository.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../widgets/common/shared_widgets.dart';
@@ -128,7 +128,7 @@ class SavedPlacesScreen extends ConsumerWidget {
 
     return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: CTSRideAppBar(
+        appBar: CTSTransportAppBar(
           title: 'Saved Places',
           actions: [
             TextButton.icon(
@@ -248,7 +248,7 @@ class SavedPlacesScreen extends ConsumerWidget {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Remove place?', style: AppTextStyles.heading3),
@@ -258,13 +258,13 @@ class SavedPlacesScreen extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: Text('Cancel',
                 style: AppTextStyles.bodySmall
                     .copyWith(color: AppColors.textSecondary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             child: Text('Remove',
                 style:
                     AppTextStyles.bodySmall.copyWith(color: AppColors.error)),
@@ -313,7 +313,7 @@ class SavedPlacesScreen extends ConsumerWidget {
 // Add / Edit sheet — StatefulWidget manages Places autocomplete
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _AddEditSheet extends StatefulWidget {
+class _AddEditSheet extends ConsumerStatefulWidget {
   final SavedPlace? existing;
   final void Function(SavedPlace) onSaved;
 
@@ -323,18 +323,24 @@ class _AddEditSheet extends StatefulWidget {
   });
 
   @override
-  State<_AddEditSheet> createState() => _AddEditSheetState();
+  ConsumerState<_AddEditSheet> createState() => _AddEditSheetState();
 }
 
-class _AddEditSheetState extends State<_AddEditSheet> {
+class _AddEditSheetState extends ConsumerState<_AddEditSheet> {
   final _labelCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _addressFocus = FocusNode();
 
   String _selectedIconKey = 'place';
   String? _selectedPlaceId;
   double? _selectedLat;
   double? _selectedLng;
   bool _isSaving = false;
+
+  // Places search state
+  List<PlaceResult> _suggestions = [];
+  bool _searching = false;
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -352,9 +358,46 @@ class _AddEditSheetState extends State<_AddEditSheet> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _labelCtrl.dispose();
     _addressCtrl.dispose();
+    _addressFocus.dispose();
     super.dispose();
+  }
+
+  void _onAddressChanged(String value) {
+    // Typing invalidates a previously-selected place until they pick again.
+    _selectedPlaceId = null;
+    _selectedLat = null;
+    _selectedLng = null;
+
+    _debounce?.cancel();
+    if (value.trim().length < 3) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      setState(() => _searching = true);
+      final repo = ref.read(placeRepositoryProvider);
+      final results = await repo.search(value.trim());
+      if (!mounted) return;
+      setState(() {
+        _suggestions = results;
+        _searching = false;
+      });
+    });
+  }
+
+  void _selectSuggestion(PlaceResult place) {
+    _addressCtrl.text = place.address.isNotEmpty
+        ? '${place.name}, ${place.address}'
+        : place.name;
+    _selectedPlaceId =
+        null; // New API doesn't round-trip placeId here; coords are what matter
+    _selectedLat = place.location.latitude;
+    _selectedLng = place.location.longitude;
+    setState(() => _suggestions = []);
+    _addressFocus.unfocus();
   }
 
   void _submit() {
@@ -478,78 +521,71 @@ class _AddEditSheetState extends State<_AddEditSheet> {
             const SizedBox(height: 16),
 
             // ── Address with Google Places autocomplete ──
+            // ── Address with Places search (same repo as the rest of the app) ──
             const Text('Address', style: AppTextStyles.labelLarge),
             const SizedBox(height: 8),
-            GooglePlaceAutoCompleteTextField(
-              textEditingController: _addressCtrl,
-              googleAPIKey: 'AIzaSyAXlNfiCFOgNy9gwjj7_vrvU5Hzs4j9wUI',
-              inputDecoration: InputDecoration(
-                hintText: 'Search for an address',
-                hintStyle: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.textTertiary),
-                prefixIcon: const Icon(Icons.search_rounded,
-                    size: 18, color: AppColors.textSecondary),
-                filled: true,
-                fillColor: AppColors.surfaceAlt,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: AppColors.primary, width: 1.5),
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              ),
-              debounceTime: 400,
-              countries: const ['gh'], // restrict to Ghana
-              isLatLngRequired: true,
-              getPlaceDetailWithLatLng: (Prediction prediction) {
-                setState(() {
-                  _selectedPlaceId = prediction.placeId;
-                  _selectedLat = double.tryParse(prediction.lat ?? '');
-                  _selectedLng = double.tryParse(prediction.lng ?? '');
-                  _addressCtrl.text = prediction.description ?? '';
-                });
-              },
-              itemClick: (Prediction prediction) {
-                _addressCtrl.text = prediction.description ?? '';
-                _addressCtrl.selection = TextSelection.fromPosition(
-                  TextPosition(offset: _addressCtrl.text.length),
-                );
-              },
-              seperatedBuilder: Divider(
-                height: 0.5,
-                thickness: 0.5,
-                color: AppColors.borderLight,
-              ),
-              containerHorizontalPadding: 0,
-              itemBuilder: (context, index, prediction) => Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.location_on_rounded,
-                        size: 16, color: AppColors.textSecondary),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        prediction.description ?? '',
-                        style: AppTextStyles.bodyMedium,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            _Field(
+              controller: _addressCtrl,
+              hint: 'Search for an address',
+              icon: Icons.search_rounded,
+              focusNode: _addressFocus,
+              onChanged: _onAddressChanged,
             ),
+            if (_searching) ...[
+              const SizedBox(height: 8),
+              const Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ],
+            if (_suggestions.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  children: _suggestions.take(5).map((p) {
+                    return InkWell(
+                      onTap: () => _selectSuggestion(p),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.location_on_rounded,
+                                size: 16, color: AppColors.textSecondary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(p.name,
+                                      style: AppTextStyles.bodyMedium,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                  if (p.address.isNotEmpty)
+                                    Text(p.address,
+                                        style: AppTextStyles.caption.copyWith(
+                                            color: AppColors.textTertiary),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
 
             const SizedBox(height: 24),
 
@@ -758,33 +794,39 @@ class _Field extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
   final IconData? icon;
+  final FocusNode? focusNode;
+  final ValueChanged<String>? onChanged;
 
   const _Field({
     required this.controller,
     required this.hint,
     this.icon,
+    this.focusNode,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color:        AppColors.surfaceAlt,
+          color: AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(10),
-          border:       Border.all(color: AppColors.border),
+          border: Border.all(color: AppColors.border),
         ),
         child: TextField(
           controller: controller,
-          style:      AppTextStyles.bodyMedium,
+          focusNode: focusNode,
+          onChanged: onChanged,
+          style: AppTextStyles.bodyMedium,
           decoration: InputDecoration(
-            hintText:  hint,
-            hintStyle: AppTextStyles.bodySmall
-                .copyWith(color: AppColors.textTertiary),
+            hintText: hint,
+            hintStyle:
+                AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
             prefixIcon: icon != null
                 ? Icon(icon, size: 18, color: AppColors.textSecondary)
                 : null,
-            border:         InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 12),
+            border: InputBorder.none,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
         ),
       );

@@ -17,8 +17,8 @@ class AboutScreen extends StatefulWidget {
 }
 
 class _AboutScreenState extends State<AboutScreen> {
-  String _version   = '—';
-  String _buildNum  = '—';
+  String _version = '—';
+  String _buildNum = '—';
 
   @override
   void initState() {
@@ -30,7 +30,7 @@ class _AboutScreenState extends State<AboutScreen> {
     final info = await PackageInfo.fromPlatform();
     if (!mounted) return;
     setState(() {
-      _version  = info.version;
+      _version = info.version;
       _buildNum = info.buildNumber;
     });
   }
@@ -49,28 +49,41 @@ class _AboutScreenState extends State<AboutScreen> {
   }
 
   Future<void> _rateApp() async {
-    // Replace with your Play Store / App Store ID
-    const androidUrl =
-        'https://play.google.com/store/apps/details?id=com.cts.passenger';
-    await _launch(androidUrl);
+    const id = 'com.cts.passenger';
+    // Prefer the Play Store app (market://) and fall back to the web URL.
+    final market = Uri.parse('market://details?id=$id');
+    final web = Uri.parse('https://play.google.com/store/apps/details?id=$id');
+    try {
+      if (await canLaunchUrl(market)) {
+        await launchUrl(market, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(web, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the store')),
+        );
+      }
+    }
   }
 
   void _shareApp() {
-    Share.share(
-      'Try CTSRide — fast, safe rides and deliveries in Ghana! '
-      'Download: https://play.google.com/store/apps/details?id=com.cts.passenger',
-      subject: 'CTSRide App',
-    );
+    const text =
+        'Try CTS Transport — fast, safe rides and deliveries in Ghana! '
+        'Download: https://play.google.com/store/apps/details?id=com.cts.passenger';
+    // Use share_plus API
+    Share.share(text, subject: 'CTS Transport');
   }
 
   void _showLicenses() {
     showLicensePage(
       context: context,
-      applicationName: 'CTSRide',
+      applicationName: 'CTSTransport',
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(12),
-        child: Image.asset('assests/logos/logo.png', width: 56, height: 56),
+        child: Image.asset('assets/logos/logo.png', width: 56, height: 56),
       ),
     );
   }
@@ -81,7 +94,7 @@ class _AboutScreenState extends State<AboutScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSRideAppBar(title: 'About CTSRide'),
+      appBar: const CTSTransportAppBar(title: 'About CTSTransport'),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(20),
@@ -141,11 +154,19 @@ class _AboutScreenState extends State<AboutScreen> {
             const SizedBox(height: 16),
 
             Text(
-              'CTSRide',
-              style: AppTextStyles.heading2
-                  .copyWith(color: AppColors.background),
+              'CTSTransport',
+              style:
+                  AppTextStyles.heading2.copyWith(color: AppColors.background),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
+            Text(
+              'Rides · Deliveries · Gas',
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textOnDarkMuted,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 10),
 
             // Version badge
             GestureDetector(
@@ -162,8 +183,8 @@ class _AboutScreenState extends State<AboutScreen> {
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -208,13 +229,13 @@ class _AboutScreenState extends State<AboutScreen> {
           _LinkTile(
             icon: Icons.star_rounded,
             iconColor: const Color(0xFFF59E0B),
-            label: 'Rate CTSRide',
+            label: 'Rate CTSTransport',
             onTap: _rateApp,
           ),
           _LinkTile(
             icon: Icons.share_rounded,
             iconColor: AppColors.primary,
-            label: 'Share CTSRide',
+            label: 'Share CTSTransport',
             onTap: _shareApp,
             isLast: true,
           ),
@@ -225,9 +246,9 @@ class _AboutScreenState extends State<AboutScreen> {
 
   Widget _buildInfoCard() => _Card(
         children: [
-          _InfoRow(label: 'Version',  value: _version),
-          _InfoRow(label: 'Build',    value: _buildNum),
-          _InfoRow(label: 'Region',   value: 'Ghana (GH)'),
+          _InfoRow(label: 'Version', value: _version),
+          _InfoRow(label: 'Build', value: _buildNum),
+          _InfoRow(label: 'Region', value: 'Ghana (GH)'),
           _InfoRow(label: 'Currency', value: 'GHS (₵)', isLast: true),
         ],
       );
@@ -238,14 +259,14 @@ class _AboutScreenState extends State<AboutScreen> {
         children: [
           Text(
             'Made with ❤️ in Accra',
-            style: AppTextStyles.caption
-                .copyWith(color: AppColors.textTertiary),
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.textTertiary),
           ),
           const SizedBox(height: 4),
           Text(
-            '© ${DateTime.now().year} CTSRide Technologies Ltd',
-            style: AppTextStyles.caption
-                .copyWith(color: AppColors.textTertiary),
+            '© ${DateTime.now().year} CTSTransport Technologies Ltd',
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.textTertiary),
           ),
         ],
       );
@@ -271,11 +292,11 @@ class _Card extends StatelessWidget {
 }
 
 class _LinkTile extends StatelessWidget {
-  final IconData     icon;
-  final Color?       iconColor;
-  final String       label;
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
   final VoidCallback onTap;
-  final bool         isLast;
+  final bool isLast;
 
   const _LinkTile({
     required this.icon,
@@ -292,8 +313,7 @@ class _LinkTile extends StatelessWidget {
         GestureDetector(
           onTap: onTap,
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
             child: Row(
               children: [
                 Container(
@@ -311,8 +331,7 @@ class _LinkTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 14),
-                Expanded(
-                    child: Text(label, style: AppTextStyles.bodyMedium)),
+                Expanded(child: Text(label, style: AppTextStyles.bodyMedium)),
                 const Icon(Icons.chevron_right_rounded,
                     color: AppColors.textTertiary, size: 18),
               ],
@@ -334,7 +353,7 @@ class _LinkTile extends StatelessWidget {
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
-  final bool   isLast;
+  final bool isLast;
 
   const _InfoRow({
     required this.label,
@@ -347,12 +366,10 @@ class _InfoRow extends StatelessWidget {
     return Column(
       children: [
         Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           child: Row(
             children: [
-              Expanded(
-                  child: Text(label, style: AppTextStyles.bodyMedium)),
+              Expanded(child: Text(label, style: AppTextStyles.bodyMedium)),
               Text(
                 value,
                 style: AppTextStyles.bodySmall

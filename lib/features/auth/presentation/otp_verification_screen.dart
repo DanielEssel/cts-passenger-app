@@ -85,9 +85,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
     if (_isSignUp) {
       _pendingProfile = {
         'firstName': args?['firstName'],
-        'lastName':  args?['lastName'],
-        'phone':     _phone,
-        'email':     args?['email'] ?? '',
+        'lastName': args?['lastName'],
+        'phone': _phone,
+        'email': args?['email'] ?? '',
       };
     }
   }
@@ -111,7 +111,10 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
     _resendTimer?.cancel();
     setState(() => _countdown = _resendSeconds);
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         if (_countdown > 0) {
           _countdown--;
@@ -124,106 +127,109 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
 
   // ── OTP logic ──────────────────────────────────────────────────────────────
 
-  String get _currentOtp =>
-      _controllers.map((c) => c.text).join();
+  String get _currentOtp => _controllers.map((c) => c.text).join();
 
   Future<void> _verifyOtp() async {
-  final code = _currentOtp;
-  if (code.length < _otpLength) {
-    _showError('Please enter the complete $_otpLength-digit code');
-    return;
-  }
-
-  HapticFeedback.mediumImpact();
-
-  final success = await ref.read(authProvider.notifier).verifyOtp(
-    smsCode:        code,
-    pendingProfile: _pendingProfile,
-    onError:        (msg) { if (mounted) _showError(msg); },
-  );
-
-  if (!success || !mounted) return;
-
-  HapticFeedback.heavyImpact();
-
-  // ── If sign-up flow → always go to shell (profile was just created) ──
-  if (_isSignUp) {
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.shell, (_) => false,
-    );
-    return;
-  }
-
-  // ── Login flow → check if user document exists ──
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) {
-    _showError('Authentication failed. Please try again.');
-    return;
-  }
-
-  try {
-    // Check users collection (where AuthNotifier writes)
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
-
-    if (!mounted) return;
-
-    if (!userDoc.exists) {
-      // No account found — redirect to signup
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-              'No account found. Please sign up first.'),
-          backgroundColor: AppColors.warning,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        ),
-      );
-      // Sign out the Firebase Auth session
-      await FirebaseAuth.instance.signOut();
-      // Go back to login
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        AppRoutes.login, (_) => false,
-      );
+    final code = _currentOtp;
+    if (code.length < _otpLength) {
+      _showError('Please enter the complete $_otpLength-digit code');
       return;
     }
 
-    // User exists → go to shell
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.shell, (_) => false,
-    );
-  } catch (e) {
-    if (mounted) _showError('Something went wrong. Please try again.');
+    HapticFeedback.mediumImpact();
+
+    final success = await ref.read(authProvider.notifier).verifyOtp(
+          smsCode: code,
+          pendingProfile: _pendingProfile,
+          onError: (msg) {
+            if (mounted) _showError(msg);
+          },
+        );
+
+    if (!success || !mounted) return;
+
+    HapticFeedback.heavyImpact();
+
+    // ── If sign-up flow → always go to shell (profile was just created) ──
+    if (_isSignUp) {
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.welcome,
+        (_) => false,
+      );
+      return;
+    }
+    // ── Login flow → check if user document exists ──
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      _showError('Authentication failed. Please try again.');
+      return;
+    }
+
+    try {
+      // Check users collection (where AuthNotifier writes)
+      final userDoc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+
+      if (!mounted) return;
+
+      if (!userDoc.exists) {
+         if (!context.mounted) return;
+        // No account found — redirect to signup
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No account found. Please sign up first.'),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          ),
+        );
+        // Sign out the Firebase Auth session
+        await FirebaseAuth.instance.signOut();
+        // Go back to login
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.login,
+          (_) => false,
+        );
+        return;
+      }
+
+      // User exists → go to shell
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.shell,
+        (_) => false,
+      );
+    } catch (e) {
+      if (mounted) _showError('Something went wrong. Please try again.');
+    }
   }
-}
 
   Future<void> _resendOtp() async {
     if (_countdown > 0) return;
     HapticFeedback.selectionClick();
 
     await ref.read(authProvider.notifier).sendOtp(
-      phone:      _phone,
-      onCodeSent: () {
-        if (!mounted) return;
-        _startResendTimer();
-        _clearFields();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('A new code has been sent'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          ),
+          phone: _phone,
+          onCodeSent: () {
+            if (!mounted) return;
+            _startResendTimer();
+            _clearFields();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('A new code has been sent'),
+                backgroundColor: AppColors.success,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              ),
+            );
+          },
+          onError: (msg) {
+            if (mounted) _showError(msg);
+          },
         );
-      },
-      onError: (msg) { if (mounted) _showError(msg); },
-    );
   }
 
   void _clearFields() {
@@ -239,8 +245,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
         content: Text(message),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       ),
     );
@@ -259,9 +264,11 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
         children: [
           // Background glow
           Positioned(
-            top: -60, right: -80,
+            top: -60,
+            right: -80,
             child: Container(
-              width: 260, height: 260,
+              width: 260,
+              height: 260,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(colors: [
@@ -282,17 +289,19 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 18),
 
                       // Back button
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
                         child: Container(
-                          width: 42, height: 42,
+                          width: 42,
+                          height: 42,
                           decoration: BoxDecoration(
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
+                            border: Border.all(
+                                color: AppColors.border.withValues(alpha: 0.3)),
                           ),
                           child: const Icon(
                             Icons.arrow_back_ios_new_rounded,
@@ -304,79 +313,92 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
 
                       const SizedBox(height: 40),
 
-                      // Icon
-                      Container(
-                        width: 64, height: 64,
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryDim,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                              color: AppColors.primary.withValues(alpha: 0.3)),
-                        ),
-                        child: const Icon(
-                          Icons.sms_rounded,
-                          color: AppColors.primary,
-                          size: 28,
+                      const SizedBox(height: 24),
+
+                      Center(
+                        child: SizedBox(
+                          width: 240,
+                          height: 240,
+                          child: Image.asset(
+                            'assets/images/otp_illustration.png',
+                            fit: BoxFit.contain,
+                          ),
                         ),
                       ),
 
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
 
-                      Text(
-                        'Verify your\nnumber',
-                        style: AppTextStyles.heading1.copyWith(
-                          fontSize: 38, height: 1.1,
-                          fontWeight: FontWeight.w800,
+                      Center(
+                        child: Text(
+                          'Verify your phone',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.heading1.copyWith(
+                            fontSize: 34,
+                            height: 1.1,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 10),
-                      RichText(
-                        text: TextSpan(
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: AppColors.textSecondary,
-                            height: 1.6,
-                          ),
-                          children: [
-                            const TextSpan(
-                                text: 'Enter the 6-digit code sent to\n'),
-                            TextSpan(
-                              text: _phone,
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                color: AppColors.textPrimary,
-                                fontWeight: FontWeight.w700,
-                              ),
+                      Center(
+                        child: RichText(
+                          textAlign: TextAlign.center,
+                          text: TextSpan(
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textSecondary,
+                              height: 1.6,
                             ),
-                          ],
+                            children: [
+                              const TextSpan(
+                                text:
+                                    'We sent a 6-digit verification code to\n',
+                              ),
+                              TextSpan(
+                                text: _phone,
+                                style: AppTextStyles.bodyMedium.copyWith(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
 
-                      const SizedBox(height: 48),
+                      const SizedBox(height: 28),
 
                       // OTP fields
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: List.generate(_otpLength, (i) =>
-                            _OtpDigitField(
-                              controller: _controllers[i],
-                              focusNode:  _focusNodes[i],
-                              enabled:    !isLoading,
-                              onChanged: (val) {
-                                if (val.isNotEmpty && i < _otpLength - 1) {
-                                  _focusNodes[i + 1].requestFocus();
-                                } else if (val.isEmpty && i > 0) {
-                                  _focusNodes[i - 1].requestFocus();
-                                }
-                                // Auto-submit when last digit entered
-                                if (i == _otpLength - 1 &&
-                                    val.isNotEmpty &&
-                                    _currentOtp.length == _otpLength) {
-                                  _verifyOtp();
-                                }
-                              },
-                            )),
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              _otpLength,
+                              (i) => _OtpDigitField(
+                                controller: _controllers[i],
+                                focusNode: _focusNodes[i],
+                                enabled: !isLoading,
+                                onChanged: (val) {
+                                  if (val.isNotEmpty && i < _otpLength - 1) {
+                                    _focusNodes[i + 1].requestFocus();
+                                  } else if (val.isEmpty && i > 0) {
+                                    _focusNodes[i - 1].requestFocus();
+                                  }
+                                  // Auto-submit when last digit entered
+                                  if (i == _otpLength - 1 &&
+                                      val.isNotEmpty &&
+                                      _currentOtp.length == _otpLength) {
+                                    _verifyOtp();
+                                  }
+                                },
+                              ),
+                            ),
+                          )
+                        ],
                       ),
 
-                      const SizedBox(height: 48),
+                      const SizedBox(height: 32),
 
                       // Verify button
                       _VerifyButton(
@@ -391,15 +413,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                         child: _countdown > 0
                             ? RichText(
                                 text: TextSpan(
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                      color: AppColors.textSecondary),
+                                  style: AppTextStyles.bodySmall
+                                      .copyWith(color: AppColors.textSecondary),
                                   children: [
-                                    const TextSpan(
-                                        text: 'Resend code in '),
+                                    const TextSpan(text: 'Resend code in '),
                                     TextSpan(
                                       text: '${_countdown}s',
-                                      style: AppTextStyles.bodySmall
-                                          .copyWith(
+                                      style: AppTextStyles.bodySmall.copyWith(
                                         color: AppColors.primary,
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -451,8 +471,8 @@ class _OtpDigitField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 48,
-      height: 56,
+      width: 54,
+      height: 64,
       child: TextField(
         controller: controller,
         focusNode: focusNode,
@@ -461,30 +481,30 @@ class _OtpDigitField extends StatelessWidget {
         textAlign: TextAlign.center,
         maxLength: 1,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: AppTextStyles.heading2.copyWith(
-          color: AppColors.textPrimary,
+        style: TextStyle(
+          fontSize: 26,
           fontWeight: FontWeight.w800,
+          color: AppColors.textPrimary,
         ),
         decoration: InputDecoration(
           counterText: '',
           filled: true,
-          fillColor: AppColors.surface,
+          fillColor: AppColors.surfaceAlt,
           contentPadding: EdgeInsets.zero,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(18),
             borderSide: BorderSide(color: AppColors.border, width: 0.5),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: AppColors.border, width: 0.5),
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide(color: AppColors.border, width: 1.5),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide:
-                const BorderSide(color: AppColors.primary, width: 2),
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2),
           ),
           disabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(18),
             borderSide: BorderSide(
                 color: AppColors.border.withValues(alpha: 0.4), width: 0.5),
           ),
@@ -529,7 +549,8 @@ class _VerifyButton extends StatelessWidget {
         child: Center(
           child: isLoading
               ? const SizedBox(
-                  width: 22, height: 22,
+                  width: 22,
+                  height: 22,
                   child: CircularProgressIndicator(
                       strokeWidth: 2.5, color: Colors.white),
                 )

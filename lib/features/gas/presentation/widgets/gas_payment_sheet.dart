@@ -3,10 +3,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/constants/app_colors.dart';
 import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
 import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_providers.dart';
-import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_controller.dart';
 
 /// Slides up before placing a gas order.
 /// Returns `true`  when payment succeeds (caller should proceed to create order).
@@ -85,10 +85,18 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
     setState(() => _isProcessing = true);
 
     try {
-      final controller = ref.read(walletControllerProvider);
-      final success = await controller.topUp(
+      final user = FirebaseAuth.instance.currentUser;
+      final email = user?.email;
+      if (email == null) {
+        _showError('Unable to top up without a signed-in user.');
+        return;
+      }
+
+      final controller = ref.read(paymentControllerProvider);
+      final success = await controller.initializeTopUp(
         amount: topUpAmount,
         paymentMethod: 'card',
+        email: email,
       );
 
       if (!mounted) return;

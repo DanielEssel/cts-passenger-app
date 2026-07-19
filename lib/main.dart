@@ -23,6 +23,7 @@ import 'features/gas/presentation/screens/gas_order_tracking_screen.dart';
 // AUTH FLOW
 import 'features/splash/splash_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
+import 'features/auth/presentation/welcome_screen.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/signup_screen.dart';
 import 'features/auth/presentation/otp_verification_screen.dart';
@@ -296,6 +297,9 @@ class RiderApp extends StatelessWidget {
       AppRoutes.bookRide: (_) => const BookRideScreen(),
       AppRoutes.delivery: (_) => const DeliveryScreen(),
       AppRoutes.gasOrder: (_) => const GasOrderScreen(), // ADD THIS LINE
+
+      // Welcome Screen
+      AppRoutes.welcome: (_) => const WelcomeScreen(),
     };
   }
 

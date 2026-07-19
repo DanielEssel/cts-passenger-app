@@ -1,8 +1,4 @@
-// lib/features/onboarding/onboarding_model.dart
-//
-// ✅ Page 3 gradient darkened — bright #38EF7D was unreadable with white text
-// ✅ All gradients now use 3 stops for smoother blending
-// ✅ Colors stay in the dark cinematic palette across all pages
+
 
 import 'package:flutter/material.dart';
 
@@ -23,12 +19,12 @@ class OnboardingModel {
 }
 
 final List<OnboardingModel> onboardingPages = [
-  // Page 1 — deep ocean blue
+  // Page 1 — Ride Hailing
   OnboardingModel(
     id: 1,
-    title: 'Book Rides in Seconds',
+    title: 'Ride Smarter',
     subtitle:
-        'Connect with nearby drivers instantly and travel safely and comfortably.',
+        'Book trusted rides in seconds and enjoy safe, comfortable journeys wherever life takes you.',
     imagePath: 'assets/images/step1.png',
     backgroundGradient: const [
       Color(0xFF0F2027),
@@ -37,12 +33,12 @@ final List<OnboardingModel> onboardingPages = [
     ],
   ),
 
-  // Page 2 — deep purple-rose
+  // Page 2 — Delivery
   OnboardingModel(
     id: 2,
-    title: 'Lightning-Fast Delivery',
+    title: 'Deliver with Ease',
     subtitle:
-        'Send food, parcels, and packages across the city quickly and reliably.',
+        'Send parcels, food, and everyday essentials with fast, reliable delivery right to the doorstep.',
     imagePath: 'assets/images/step2.png',
     backgroundGradient: const [
       Color(0xFF1A0A2E),
@@ -51,12 +47,12 @@ final List<OnboardingModel> onboardingPages = [
     ],
   ),
 
-  // Page 3 — dark teal (was bright green — now readable with white text)
+  // Page 3 — Gas Delivery
   OnboardingModel(
     id: 3,
-    title: 'Safe & Cashless Payments',
+    title: 'Energy on Demand',
     subtitle:
-        'Pay securely with multiple payment options and track every trip in real time.',
+        'Order LPG safely and have it delivered to your home with real-time tracking and dependable service.',
     imagePath: 'assets/images/step3.png',
     backgroundGradient: const [
       Color(0xFF0A1F1C),

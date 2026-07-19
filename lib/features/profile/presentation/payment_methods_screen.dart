@@ -15,10 +15,10 @@ import '../../wallet/domain/entities/wallet.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SavedMoMo {
-  final String?  id;
-  final String   phone;
-  final String   network; // 'mtn' | 'vodafone' | 'airteltigo'
-  final bool     isDefault;
+  final String? id;
+  final String phone;
+  final String network; // 'mtn' | 'vodafone' | 'airteltigo'
+  final bool isDefault;
   final DateTime? createdAt;
 
   const SavedMoMo({
@@ -32,17 +32,17 @@ class SavedMoMo {
   factory SavedMoMo.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return SavedMoMo(
-      id:        doc.id,
-      phone:     d['phone']     as String? ?? '',
-      network:   d['network']   as String? ?? 'mtn',
-      isDefault: d['isDefault'] as bool?   ?? false,
+      id: doc.id,
+      phone: d['phone'] as String? ?? '',
+      network: d['network'] as String? ?? 'mtn',
+      isDefault: d['isDefault'] as bool? ?? false,
       createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
     );
   }
 
   Map<String, dynamic> toFirestore() => {
-        'phone':     phone,
-        'network':   network,
+        'phone': phone,
+        'network': network,
         'isDefault': isDefault,
         'createdAt': FieldValue.serverTimestamp(),
       };
@@ -52,8 +52,7 @@ class SavedMoMo {
 // Provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-final _momoMethodsProvider =
-    StreamProvider.autoDispose<List<SavedMoMo>>((ref) {
+final _momoMethodsProvider = StreamProvider.autoDispose<List<SavedMoMo>>((ref) {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null) return Stream.value([]);
 
@@ -76,11 +75,11 @@ class PaymentMethodsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final walletAsync = ref.watch(walletStreamProvider);
-    final momoAsync   = ref.watch(_momoMethodsProvider);
+    final momoAsync = ref.watch(_momoMethodsProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSRideAppBar(title: 'Payment Methods'),
+      appBar: const CTSTransportAppBar(title: 'Payment Methods'),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(16),
@@ -89,9 +88,9 @@ class PaymentMethodsScreen extends ConsumerWidget {
           children: [
             // ── Wallet card ──
             walletAsync.when(
-              data:    (w) => _WalletCard(wallet: w),
-              loading: ()  => _WalletCard(wallet: null),
-              error:   (_, __) => _WalletCard(wallet: null),
+              data: (w) => _WalletCard(wallet: w),
+              loading: () => _WalletCard(wallet: null),
+              error: (_, __) => _WalletCard(wallet: null),
             ),
 
             const SizedBox(height: 24),
@@ -114,8 +113,7 @@ class PaymentMethodsScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _MoMoTile(
                           momo: m,
-                          onSetDefault: () =>
-                              _setDefault(context, m, methods),
+                          onSetDefault: () => _setDefault(context, m, methods),
                           onDelete: () => _deleteMoMo(context, m),
                         ),
                       )),
@@ -174,8 +172,7 @@ class PaymentMethodsScreen extends ConsumerWidget {
     // Clear all defaults then set the selected one
     for (final m in all) {
       if (m.id != null) {
-        batch.update(col.doc(m.id),
-            {'isDefault': m.id == selected.id});
+        batch.update(col.doc(m.id), {'isDefault': m.id == selected.id});
       }
     }
 
@@ -198,10 +195,8 @@ class PaymentMethodsScreen extends ConsumerWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: const Text('Remove number?',
-            style: AppTextStyles.heading3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Remove number?', style: AppTextStyles.heading3),
         content: Text(
           'Remove ${momo.phone} from your payment methods?',
           style: AppTextStyles.bodySmall,
@@ -216,8 +211,8 @@ class PaymentMethodsScreen extends ConsumerWidget {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text('Remove',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.error)),
+                style:
+                    AppTextStyles.bodySmall.copyWith(color: AppColors.error)),
           ),
         ],
       ),
@@ -254,8 +249,7 @@ class PaymentMethodsScreen extends ConsumerWidget {
       useSafeArea: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetCtx) => _AddMoMoSheet(
         onSaved: (momo) async {
           Navigator.pop(sheetCtx);
@@ -280,8 +274,7 @@ class PaymentMethodsScreen extends ConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Row(children: [
-              Icon(Icons.check_circle_rounded,
-                  color: Colors.white, size: 18),
+              Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
               SizedBox(width: 8),
               Text('Mobile Money number saved'),
             ]),
@@ -314,12 +307,12 @@ class _AddMoMoSheet extends StatefulWidget {
 
 class _AddMoMoSheetState extends State<_AddMoMoSheet> {
   final _phoneCtrl = TextEditingController();
-  String _network  = 'mtn';
+  String _network = 'mtn';
 
   static const _networks = [
-    _Network(key: 'mtn',       label: 'MTN',       color: Color(0xFFFFCC00)),
-    _Network(key: 'vodafone',  label: 'Vodafone',  color: Color(0xFFE60000)),
-    _Network(key: 'airteltigo',label: 'AirtelTigo',color: Color(0xFF0070CD)),
+    _Network(key: 'mtn', label: 'MTN', color: Color(0xFFFFCC00)),
+    _Network(key: 'vodafone', label: 'Vodafone', color: Color(0xFFE60000)),
+    _Network(key: 'airteltigo', label: 'AirtelTigo', color: Color(0xFF0070CD)),
   ];
 
   @override
@@ -354,7 +347,7 @@ class _AddMoMoSheetState extends State<_AddMoMoSheet> {
     }
 
     widget.onSaved(SavedMoMo(
-      phone:   phone,
+      phone: phone,
       network: _network,
     ));
   }
@@ -363,7 +356,9 @@ class _AddMoMoSheetState extends State<_AddMoMoSheet> {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-        left: 20, right: 20, top: 20,
+        left: 20,
+        right: 20,
+        top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: Column(
@@ -373,7 +368,8 @@ class _AddMoMoSheetState extends State<_AddMoMoSheet> {
           // Handle
           Center(
             child: Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               decoration: BoxDecoration(
                 color: AppColors.border,
                 borderRadius: BorderRadius.circular(2),
@@ -416,9 +412,7 @@ class _AddMoMoSheetState extends State<_AddMoMoSheet> {
                       n.label,
                       style: AppTextStyles.labelMedium.copyWith(
                         color: isSel ? n.color : AppColors.textSecondary,
-                        fontWeight: isSel
-                            ? FontWeight.w700
-                            : FontWeight.w400,
+                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w400,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -450,8 +444,8 @@ class _AddMoMoSheetState extends State<_AddMoMoSheet> {
                 prefixIcon: const Icon(Icons.phone_rounded,
                     size: 18, color: AppColors.textSecondary),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               ),
             ),
           ),
@@ -487,7 +481,8 @@ class _WalletCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 46, height: 46,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
@@ -500,7 +495,7 @@ class _WalletCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('CTSRide Wallet',
+                Text('CTSTransport Wallet',
                     style: AppTextStyles.labelLarge
                         .copyWith(color: AppColors.background)),
                 const SizedBox(height: 2),
@@ -512,7 +507,8 @@ class _WalletCard extends StatelessWidget {
           ),
           wallet == null
               ? Container(
-                  width: 80, height: 20,
+                  width: 80,
+                  height: 20,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(4),
@@ -530,7 +526,7 @@ class _WalletCard extends StatelessWidget {
 }
 
 class _MoMoTile extends StatelessWidget {
-  final SavedMoMo    momo;
+  final SavedMoMo momo;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
 
@@ -542,19 +538,27 @@ class _MoMoTile extends StatelessWidget {
 
   Color get _networkColor {
     switch (momo.network) {
-      case 'mtn':        return const Color(0xFFFFCC00);
-      case 'vodafone':   return const Color(0xFFE60000);
-      case 'airteltigo': return const Color(0xFF0070CD);
-      default:           return AppColors.primary;
+      case 'mtn':
+        return const Color(0xFFFFCC00);
+      case 'vodafone':
+        return const Color(0xFFE60000);
+      case 'airteltigo':
+        return const Color(0xFF0070CD);
+      default:
+        return AppColors.primary;
     }
   }
 
   String get _networkLabel {
     switch (momo.network) {
-      case 'mtn':        return 'MTN MoMo';
-      case 'vodafone':   return 'Vodafone Cash';
-      case 'airteltigo': return 'AirtelTigo Money';
-      default:           return 'Mobile Money';
+      case 'mtn':
+        return 'MTN MoMo';
+      case 'vodafone':
+        return 'Vodafone Cash';
+      case 'airteltigo':
+        return 'AirtelTigo Money';
+      default:
+        return 'Mobile Money';
     }
   }
 
@@ -573,7 +577,8 @@ class _MoMoTile extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 40, height: 40,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: _networkColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
@@ -593,8 +598,7 @@ class _MoMoTile extends StatelessWidget {
           ),
           if (momo.isDefault)
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
@@ -627,9 +631,9 @@ class _MoMoTile extends StatelessWidget {
 }
 
 class _AddOptionTile extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final Color        color;
+  final IconData icon;
+  final String label;
+  final Color color;
   final VoidCallback onTap;
 
   const _AddOptionTile({
@@ -643,8 +647,7 @@ class _AddOptionTile extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
@@ -653,7 +656,8 @@ class _AddOptionTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 38, height: 38,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(9),
@@ -661,10 +665,8 @@ class _AddOptionTile extends StatelessWidget {
                 child: Icon(icon, color: color, size: 20),
               ),
               const SizedBox(width: 12),
-              Expanded(
-                  child: Text(label, style: AppTextStyles.bodyMedium)),
-              const Icon(Icons.add_rounded,
-                  color: AppColors.primary, size: 20),
+              Expanded(child: Text(label, style: AppTextStyles.bodyMedium)),
+              const Icon(Icons.add_rounded, color: AppColors.primary, size: 20),
             ],
           ),
         ),
@@ -673,8 +675,8 @@ class _AddOptionTile extends StatelessWidget {
 
 class _InfoTile extends StatelessWidget {
   final IconData icon;
-  final String   title;
-  final String   subtitle;
+  final String title;
+  final String subtitle;
 
   const _InfoTile({
     required this.icon,
@@ -694,7 +696,8 @@ class _InfoTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: AppColors.info.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
@@ -709,8 +712,7 @@ class _InfoTile extends StatelessWidget {
                   Text(title, style: AppTextStyles.labelLarge),
                   const SizedBox(height: 4),
                   Text(subtitle,
-                      style: AppTextStyles.caption
-                          .copyWith(height: 1.5)),
+                      style: AppTextStyles.caption.copyWith(height: 1.5)),
                 ],
               ),
             ),
@@ -726,8 +728,7 @@ class _HowItWorksCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.primary.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: AppColors.primary.withValues(alpha: 0.15)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -745,12 +746,14 @@ class _HowItWorksCard extends StatelessWidget {
             const SizedBox(height: 12),
             _Step(
               number: '1',
-              text: 'Top up your CTSRide Wallet using MoMo or card via Paystack',
+              text:
+                  'Top up your CTSTransport Wallet using MoMo or card via Paystack',
             ),
             const SizedBox(height: 8),
             _Step(
               number: '2',
-              text: 'Your wallet balance is used automatically when you book a ride or order gas',
+              text:
+                  'Your wallet balance is used automatically when you book a ride or order gas',
             ),
             const SizedBox(height: 8),
             _Step(
@@ -772,7 +775,8 @@ class _Step extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 20, height: 20,
+            width: 20,
+            height: 20,
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.15),
               shape: BoxShape.circle,
@@ -787,8 +791,8 @@ class _Step extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(text,
-                style: AppTextStyles.caption.copyWith(height: 1.5)),
+            child:
+                Text(text, style: AppTextStyles.caption.copyWith(height: 1.5)),
           ),
         ],
       );
@@ -804,8 +808,7 @@ class _ErrorTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.errorLight,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: AppColors.error.withValues(alpha: 0.2)),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
         ),
         child: Row(
           children: [
@@ -814,8 +817,8 @@ class _ErrorTile extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text('Could not load payment methods',
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.error)),
+                  style:
+                      AppTextStyles.bodySmall.copyWith(color: AppColors.error)),
             ),
           ],
         ),
@@ -829,7 +832,7 @@ class _ErrorTile extends StatelessWidget {
 class _Network {
   final String key;
   final String label;
-  final Color  color;
+  final Color color;
   const _Network({
     required this.key,
     required this.label,

@@ -60,6 +60,70 @@ class DeliveryVehicleScreen extends ConsumerStatefulWidget {
 class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
   int _selectedVehicleIndex = 0;
 
+  Widget _buildPaymentSelector() {
+    Widget option(String value, IconData icon, String label, String sub) {
+      final selected = _paymentMethod == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _paymentMethod = value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFF16A34A).withValues(alpha: 0.08)
+                  : const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF16A34A)
+                    : const Color(0xFFE5E7EB),
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Row(children: [
+              Icon(icon,
+                  size: 18,
+                  color: selected
+                      ? const Color(0xFF16A34A)
+                      : const Color(0xFF6B7280)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: selected
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFF111827),
+                        )),
+                    const SizedBox(height: 1),
+                    Text(sub,
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF9CA3AF))),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Row(children: [
+        option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
+            'Pay from balance'),
+        const SizedBox(width: 10),
+        option('cash', Icons.money_rounded, 'Cash', 'Pay driver directly'),
+      ]),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -79,7 +143,6 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       if (result != null) {
         setState(() {
           _distanceKm = result.distanceKm;
-          _durationMin = result.durationMin.toDouble();
           _distanceApproximate = false;
           _calculatingDistance = false;
         });
@@ -107,7 +170,6 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
   }
 
   double _distanceKm = 0.0;
-  double _durationMin = 0.0;
   bool _calculatingDistance = true;
   bool _distanceApproximate = false;
 
@@ -173,12 +235,11 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
   double get _surchargeAmount =>
       _surchargeOptions[_selectedSurcharge]['amount'] as double;
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSRideAppBar(title: 'Choose vehicle'),
+      appBar: const CTSTransportAppBar(title: 'Choose vehicle'),
       body: Column(
         children: [
           // ── Route summary strip ─────────────────────────────────────────
@@ -231,6 +292,9 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
               ),
             ),
           ),
+
+          // ── Payment method ─────────────────────────────────────────────
+          _buildPaymentSelector(),
 
           // ── Confirm button ─────────────────────────────────────────────
           _buildConfirmButton(),
@@ -394,6 +458,9 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
 
   bool _isCreating = false;
 
+  String _paymentMethod =
+      'wallet'; // 'wallet' | 'cash'final deliveryId = await repo.createDelivery
+
   Widget _buildConfirmButton() => Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         decoration: const BoxDecoration(
@@ -411,40 +478,41 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       );
 
   Future<void> _confirmDelivery() async {
-    if (_isCreating) return;                     // re-entry guard
+    if (_isCreating) return; // re-entry guard
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    HapticFeedback.mediumImpact();               // instant tactile feedback
-    setState(() => _isCreating = true);          // immediate loading state
+    HapticFeedback.mediumImpact(); // instant tactile feedback
+    setState(() => _isCreating = true); // immediate loading state
 
-    // ── Step 1: Hold funds ────────────────────────────────────────────────
-    final escrowResult = await EscrowService.instance.holdBalance(
-      amount: _totalFare,
-      serviceType: 'delivery',
-      referenceType: 'delivery',
-    );
-    if (!escrowResult.success) {
-      if (mounted) {
-        setState(() => _isCreating = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(escrowResult.shortfall != null
-              ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up your wallet.'
-              : escrowResult.error ?? 'Payment hold failed.'),
-          backgroundColor: const Color(0xFFDC2626),
-          action: SnackBarAction(
-            label: 'Top Up',
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true).pushNamed('/wallet'),
-          ),
-        ));
+    // ── Step 1: Hold funds (wallet only — cash is collected by the driver) ──
+    String? escrowId;
+    if (_paymentMethod == 'wallet') {
+      final escrowResult = await EscrowService.instance.holdBalance(
+        amount: _totalFare,
+        serviceType: 'delivery',
+        referenceType: 'delivery',
+      );
+      if (!escrowResult.success) {
+        if (mounted) {
+          setState(() => _isCreating = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(escrowResult.shortfall != null
+                ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up your wallet.'
+                : escrowResult.error ?? 'Payment hold failed.'),
+            backgroundColor: const Color(0xFFDC2626),
+            action: SnackBarAction(
+              label: 'Top Up',
+              onPressed: () => Navigator.of(context, rootNavigator: true)
+                  .pushNamed('/wallet'),
+            ),
+          ));
+        }
+        return;
       }
-      return;
+      escrowId = escrowResult.escrowId!;
     }
-    final escrowId = escrowResult.escrowId!;
     // ─────────────────────────────────────────────────────────────────────
-
-    
 
     try {
       final request = DeliveryRequest(
@@ -468,24 +536,24 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
         receiverName: widget.receiverName.isEmpty ? null : widget.receiverName,
         estimatedFare: _totalFare,
         createdAt: DateTime.now(),
-        paymentMethod: 'wallet',
+        paymentMethod: _paymentMethod,
       );
 
       final repo = ref.read(deliveryRepositoryProvider);
       final deliveryId = await repo.createDelivery(request);
-
-      // ── Step 2: Attach escrow ─────────────────────────────────────────────
-      await EscrowService.instance.attachToOrder(
-        escrowId: escrowId,
-        referenceId: deliveryId,
-        referenceType: 'delivery',
-      );
-
-      // Save escrowId to delivery document for CF cancellation refund
-      await FirebaseFirestore.instance
-          .collection('deliveries')
-          .doc(deliveryId)
-          .update({'escrowId': escrowId});
+      // ── Step 2: Attach escrow (wallet bookings only) ──────────────────────
+      if (escrowId != null) {
+        await EscrowService.instance.attachToOrder(
+          escrowId: escrowId,
+          referenceId: deliveryId,
+          referenceType: 'delivery',
+        );
+        // Save escrowId to delivery document for CF cancellation refund
+        await FirebaseFirestore.instance
+            .collection('deliveries')
+            .doc(deliveryId)
+            .update({'escrowId': escrowId});
+      }
 
       if (!mounted) return;
 
@@ -502,7 +570,7 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       );
     } catch (e) {
       // Rollback escrow if delivery creation failed
-      if (escrowId.isNotEmpty) {
+      if (escrowId != null) {
         try {
           final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');
           await fns.httpsCallable('refundEscrowOnError').call({

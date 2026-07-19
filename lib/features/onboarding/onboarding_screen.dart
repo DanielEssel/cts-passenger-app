@@ -61,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     final screenSize = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.transparent,
       body: Stack(
         children: [
           /// 🎨 LAYER 1: Dynamic Animated Background
@@ -206,11 +206,6 @@ class _AnimatedBackground extends StatelessWidget {
     );
   }
 }
-
-/// ============================================================================
-/// HERO ILLUSTRATION WITH BLENDING & SMOOTH TRANSITIONS
-/// ============================================================================
-
 class _HeroIllustration extends StatelessWidget {
   final String imagePath;
   final bool isActive;
@@ -228,51 +223,70 @@ class _HeroIllustration extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Scale animation during page transition
-    final scale = isActive 
-        ? 1.0 - ((1 - progress) * 0.15)  // Scale down slightly when leaving
-        : 0.85 + (progress * 0.15);       // Scale up when entering
-    
-    // Opacity for smooth blending
-    final opacity = isActive 
-        ? 1.0
-        : progress;
-    
-    return Opacity(
+
+    final scale = isActive
+        ? 1.05
+        : 1.0 + (progress * 0.05);
+
+    final opacity = isActive ? 1.0 : progress;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 400),
       opacity: opacity.clamp(0.0, 1.0),
+
       child: Transform.scale(
-        scale: scale.clamp(0.85, 1.0),
+        scale: scale,
+
         child: AnimatedBuilder(
           animation: floatController,
+
           builder: (context, child) {
-            // Continuous floating effect
-            final floatY = floatController.value * 20 - 10;
-            
+
+            final floatY =
+                (floatController.value * 8) - 4;
+
             return Transform.translate(
               offset: Offset(0, floatY),
-              child: Container(
-                width: double.infinity,
-                height: screenHeight * 0.72,
-                decoration: BoxDecoration(
-                  // GRADIENT OVERLAY FOR BLENDING INTO BACKGROUND
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.3),
-                      Colors.black.withValues(alpha: 0.6),
-                    ],
-                    stops: const [0.0, 0.5, 0.85, 1.0],
-                  ),
-                ),
-                child: Center(
-                  child: Image.asset(
-                    imagePath,
-                    height: screenHeight * 0.6,
-                    fit: BoxFit.contain,
-                  ),
+
+              child: SizedBox.expand(
+
+                child: Stack(
+                  fit: StackFit.expand,
+
+                  children: [
+
+                    /// FULL SCREEN IMAGE
+                    Image.asset(
+                      imagePath,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                    ),
+
+
+                    /// PREMIUM DARK GRADIENT BLEND
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+
+                          colors: [
+                            Colors.black.withValues(alpha: 0.05),
+                            Colors.black.withValues(alpha: 0.15),
+                            Colors.black.withValues(alpha: 0.65),
+                          ],
+
+                          stops: const [
+                            0.0,
+                            0.55,
+                            1.0,
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  ],
                 ),
               ),
             );

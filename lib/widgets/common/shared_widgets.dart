@@ -65,14 +65,15 @@ class PrimaryButton extends StatelessWidget {
 }
 
 // ─── Custom AppBar ─────────────────────────────────────────────────────────
-class CTSRideAppBar extends StatelessWidget implements PreferredSizeWidget {
+class CTSTransportAppBar extends StatelessWidget
+    implements PreferredSizeWidget {
   final String title;
   final bool showBack;
   final List<Widget>? actions;
   final Color? backgroundColor;
   final Color? titleColor;
 
-  const CTSRideAppBar({
+  const CTSTransportAppBar({
     super.key,
     required this.title,
     this.showBack = true,
@@ -406,11 +407,11 @@ class RoutePainter extends CustomPainter {
 }
 
 // ─── Bottom Nav Bar ────────────────────────────────────────────────────────
-class CTSRideBottomNav extends StatelessWidget {
+class CTSTransportBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  const CTSRideBottomNav({
+  const CTSTransportBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,

@@ -30,6 +30,12 @@ class PassengerFlowResolver {
         return const RouteDestination(AppRoutes.login);
       }
 
+      // ── First-time passenger → welcome screen (once) ──
+      final hasSeenWelcome = data['hasSeenWelcome'] as bool? ?? false;
+      if (!hasSeenWelcome) {
+        return const RouteDestination(AppRoutes.welcome);
+      }
+
       // ── All checks passed → main shell ──
       return const RouteDestination(AppRoutes.shell);
     } catch (e) {

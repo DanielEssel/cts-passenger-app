@@ -5,9 +5,6 @@ import '../../../core/services/pricing_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../models/service_type.dart';
 
-
-
-
 extension ServiceTypeExtension on ServiceType {
   String get displayName {
     switch (this) {
@@ -48,7 +45,6 @@ extension ServiceTypeExtension on ServiceType {
     }
   }
 
-
   String get route {
     switch (this) {
       case ServiceType.taxi:
@@ -75,20 +71,28 @@ extension ServiceTypeExtension on ServiceType {
   double get baseFare {
     final p = PricingService.instance;
     switch (this) {
-      case ServiceType.taxi:     return p.taxiBaseFare;
-      case ServiceType.okada:    return p.okadaBaseFare;
-      case ServiceType.delivery: return p.deliveryBaseFare;
-      case ServiceType.gas:      return p.gasDeliveryFee;
+      case ServiceType.taxi:
+        return p.taxiBaseFare;
+      case ServiceType.okada:
+        return p.okadaBaseFare;
+      case ServiceType.delivery:
+        return p.deliveryBaseFare;
+      case ServiceType.gas:
+        return p.gasDeliveryFee;
     }
   }
 
   double get pricePerKm {
     final p = PricingService.instance;
     switch (this) {
-      case ServiceType.taxi:     return p.taxiPerKmRate;
-      case ServiceType.okada:    return p.okadaPerKmRate;
-      case ServiceType.delivery: return p.deliveryPerKmRate;
-      case ServiceType.gas:      return 0;
+      case ServiceType.taxi:
+        return p.taxiPerKmRate;
+      case ServiceType.okada:
+        return p.okadaPerKmRate;
+      case ServiceType.delivery:
+        return p.deliveryPerKmRate;
+      case ServiceType.gas:
+        return 0;
     }
   }
 
@@ -172,9 +176,19 @@ extension ServiceTypeExtension on ServiceType {
   List<String> get perks {
     switch (this) {
       case ServiceType.taxi:
-        return ['AC included', 'Insured', 'Real-time tracking', 'Professional driver'];
+        return [
+          'AC included',
+          'Insured',
+          'Real-time tracking',
+          'Professional driver'
+        ];
       case ServiceType.okada:
-        return ['Helmet provided', 'Skip traffic', 'Quick pickup', 'Cash payment'];
+        return [
+          'Helmet provided',
+          'Skip traffic',
+          'Quick pickup',
+          'Cash payment'
+        ];
       case ServiceType.delivery:
         return ['Door-to-door', 'Secure handling', 'Live tracking'];
       case ServiceType.gas:
@@ -233,7 +247,7 @@ class RideOption {
     return RideOption(
       serviceType: type,
       icon: type.icon,
-      name: type.displayName == 'Taxi' ? 'CTSRide Taxi' : type.displayName,
+      name: type.displayName == 'Taxi' ? 'CTSTransport Taxi' : type.displayName,
       badge: type.badge,
       description: type.description,
       eta: type.eta,
@@ -268,22 +282,24 @@ class RideOptionsService {
   static double calculateDynamicPrice(RideOption option, double distanceKm) {
     final pricing = PricingService.instance;
     return switch (option.serviceType) {
-      ServiceType.taxi     => pricing.calculateRideFare('taxi',     distanceKm),
-      ServiceType.okada    => pricing.calculateRideFare('okada',    distanceKm),
-      ServiceType.delivery => pricing.calculateDeliveryFare(distanceKm, vehicleType: 'okada'),
-      ServiceType.gas      => pricing.gasDeliveryFee,
+      ServiceType.taxi => pricing.calculateRideFare('taxi', distanceKm),
+      ServiceType.okada => pricing.calculateRideFare('okada', distanceKm),
+      ServiceType.delivery =>
+        pricing.calculateDeliveryFare(distanceKm, vehicleType: 'okada'),
+      ServiceType.gas => pricing.gasDeliveryFee,
     };
   }
 
   /// Calculate price with surge — surge is already applied inside PricingService
-  static double calculatePriceWithSurge(RideOption option, double distanceKm, double surgeMultiplier) {
+  static double calculatePriceWithSurge(
+      RideOption option, double distanceKm, double surgeMultiplier) {
     return calculateDynamicPrice(option, distanceKm);
   }
 
   /// Get estimated time based on distance and service type
   static int getEstimatedTime(RideOption option, double distanceKm) {
     final speedPerMinute = switch (option.serviceType) {
-      ServiceType.taxi => 0.5,  // 500m per minute
+      ServiceType.taxi => 0.5, // 500m per minute
       ServiceType.okada => 0.7, // 700m per minute
       ServiceType.delivery => 0.4, // 400m per minute
       ServiceType.gas => 0.3, // 300m per minute
@@ -294,7 +310,7 @@ class RideOptionsService {
   /// Check if service is available at given time
   static bool isServiceAvailable(ServiceType type, [int? hour]) {
     final currentHour = hour ?? DateTime.now().hour;
-    
+
     switch (type) {
       case ServiceType.taxi:
         return true; // 24/7

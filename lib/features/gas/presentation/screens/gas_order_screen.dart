@@ -38,6 +38,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   GeoPoint? _deliveryGeoPoint;
   double _distanceKm = 5.0; // one-way estimate; defaults to 5km fallback
   bool _calculatingDistance = false;
+  String _paymentMethod = 'wallet'; // 'wallet' | 'cash'
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
@@ -1149,6 +1150,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
             children: [
               if (!_isOrderValid()) _buildValidationHint(),
               if (!_isOrderValid()) const SizedBox(height: 10),
+              _buildPaymentSelector(),
               GestureDetector(
                 onTap: _isSubmitting || !_isOrderValid() ? null : _placeOrder,
                 child: AnimatedContainer(
@@ -1368,57 +1370,129 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
+
+  Widget _buildPaymentSelector() {
+    Widget option(String value, IconData icon, String label, String sub) {
+      final selected = _paymentMethod == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _paymentMethod = value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFF16A34A).withValues(alpha: 0.08)
+                  : const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF16A34A)
+                    : const Color(0xFFE5E7EB),
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Row(children: [
+              Icon(icon,
+                  size: 18,
+                  color: selected
+                      ? const Color(0xFF16A34A)
+                      : const Color(0xFF6B7280)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: selected
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFF111827),
+                        )),
+                    const SizedBox(height: 1),
+                    Text(sub,
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF9CA3AF))),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Row(children: [
+        option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
+            'Pay from balance'),
+        const SizedBox(width: 10),
+        option('cash', Icons.money_rounded, 'Cash', 'Pay driver directly'),
+      ]),
+    );
+  }
+
+
+
   Future<void> _placeOrder() async {
     if (!_isOrderValid() || _isSubmitting) return; // ← add _isSubmitting check
     setState(() => _isSubmitting = true);
 
-    final paymentConfirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      isDismissible: !_isSubmitting,
-      useSafeArea: true,
-      builder: (ctx) => GasPaymentSheet(
-        refillType: _selectedType,
-        cylinderSize: _selectedSize,
-        brand: _selectedBrand,
-        quantity: _quantity,
-        gasPrice: _selectedSize.refillPrice,
-        deliveryFee: _deliveryFee,
-        total: _total,
-      ),
-    );
+    if (_paymentMethod == 'wallet') {
+      final paymentConfirmed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        isDismissible: !_isSubmitting,
+        useSafeArea: true,
+        builder: (ctx) => GasPaymentSheet(
+          refillType: _selectedType,
+          cylinderSize: _selectedSize,
+          brand: _selectedBrand,
+          quantity: _quantity,
+          gasPrice: _selectedSize.refillPrice,
+          deliveryFee: _deliveryFee,
+          total: _total,
+        ),
+      );
 
-    if (paymentConfirmed != true || !mounted) {
-      if (mounted) setState(() => _isSubmitting = false);
-      return;
-    }
-
-    // ── Hold funds before placing gas order ──────────────────────────────
-    final escrowResult = await EscrowService.instance.holdBalance(
-      amount: _total,
-      serviceType: 'delivery',
-      referenceType: 'gas_order',
-    );
-    if (!escrowResult.success) {
-      if (mounted) {
-        setState(() => _isSubmitting = false); // ← add this
-
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(escrowResult.shortfall != null
-              ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
-              : escrowResult.error ?? 'Payment hold failed.'),
-          backgroundColor: const Color(0xFFDC2626),
-          action: SnackBarAction(
-            label: 'Top Up',
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true).pushNamed('/wallet'),
-          ),
-        ));
+      if (paymentConfirmed != true || !mounted) {
+        if (mounted) setState(() => _isSubmitting = false);
+        return;
       }
-      return;
     }
-    final escrowId = escrowResult.escrowId!;
+
+    // ── Hold funds before placing gas order (wallet only) ─────────────────
+    String? escrowId;
+    if (_paymentMethod == 'wallet') {
+      final escrowResult = await EscrowService.instance.holdBalance(
+        amount: _total,
+        serviceType: 'delivery',
+        referenceType: 'gas_order',
+      );
+      if (!escrowResult.success) {
+        if (mounted) {
+          setState(() => _isSubmitting = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(escrowResult.shortfall != null
+                ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
+                : escrowResult.error ?? 'Payment hold failed.'),
+            backgroundColor: const Color(0xFFDC2626),
+            action: SnackBarAction(
+              label: 'Top Up',
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pushNamed('/wallet'),
+            ),
+          ));
+        }
+        return;
+      }
+      escrowId = escrowResult.escrowId!;
+    }
+    
 
     try {
       final user = FirebaseAuth.instance.currentUser ??
@@ -1458,7 +1532,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
         refillCompletedAt: null,
         deliveredAt: null,
         cancelledAt: null,
-        paymentMethod: 'wallet',
+        paymentMethod: _paymentMethod,
         requiresReceipt: false,
         receiptEmail: null,
         passengerRating: null,
@@ -1472,17 +1546,18 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       final repo = ref.read(gasOrderRepositoryProvider);
       final orderId = await repo.createGasOrder(order);
 
-      await EscrowService.instance.attachToOrder(
-        escrowId: escrowId,
-        referenceId: orderId,
-        referenceType: 'gas_order',
-      );
-
-      // Save escrowId to gas order document for CF cancellation refund
-      await FirebaseFirestore.instance
-          .collection('gas_orders')
-          .doc(orderId)
-          .update({'escrowId': escrowId});
+      if (escrowId != null) {
+        await EscrowService.instance.attachToOrder(
+          escrowId: escrowId,
+          referenceId: orderId,
+          referenceType: 'gas_order',
+        );
+        // Save escrowId to gas order document for CF cancellation refund
+        await FirebaseFirestore.instance
+            .collection('gas_orders')
+            .doc(orderId)
+            .update({'escrowId': escrowId});
+      }
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -1491,7 +1566,18 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               builder: (_) => GasOrderTrackingScreen(orderId: orderId)),
         );
       }
-    } catch (e) {
+
+      } catch (e) {
+      // Rollback escrow if order creation failed (wallet bookings only)
+      if (escrowId != null) {
+        try {
+          final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');
+          await fns.httpsCallable('refundEscrowOnError').call({
+            'escrowId': escrowId,
+            'reason': 'order_creation_failed',
+          });
+        } catch (_) {/* Stuck escrow auto-releases after 2hrs */}
+      }
       // Rollback escrow if order creation failed
       try {
         final fns = FirebaseFunctions.instanceFor(region: 'europe-west2');

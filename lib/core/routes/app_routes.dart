@@ -37,4 +37,7 @@ class AppRoutes {
   static const String profile = '/profile';
 
   static const String deliveryTracking = '/delivery-tracking';
+
+  // ── welcome ───────────────────────────────────────────────────────
+  static const String welcome = '/welcome';
 }

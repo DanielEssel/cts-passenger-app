@@ -19,41 +19,49 @@ class HelpSupportScreen extends StatefulWidget {
 
 class _HelpSupportScreenState extends State<HelpSupportScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
-  String _query        = '';
-  int?   _expandedFaq;
+  String _query = '';
+  int? _expandedFaq;
 
   static const List<Map<String, String>> _faqs = [
     {
       'q': 'How do I book a ride?',
-      'a': 'Tap "Book Ride" on the home screen, enter your destination, choose a vehicle type, and confirm. A nearby driver will be matched to you.',
+      'a':
+          'Tap "Book Ride" on the home screen, enter your destination, choose a vehicle type, and confirm. A nearby driver will be matched to you.',
     },
     {
       'q': 'How is the fare calculated?',
-      'a': 'Fares are based on a base fee plus a per-kilometre rate. Delivery fares also factor in the weight tier of your parcel.',
+      'a':
+          'Fares are based on a base fee plus a per-kilometre rate. Delivery fares also factor in the weight tier of your parcel.',
     },
     {
       'q': 'Can I cancel a ride?',
-      'a': 'Yes, you can cancel before a driver is assigned for free. After a driver is matched, a small cancellation fee may apply.',
+      'a':
+          'Yes, you can cancel before a driver is assigned for free. After a driver is matched, a small cancellation fee may apply.',
     },
     {
       'q': 'How do I top up my wallet?',
-      'a': 'Go to the Wallet tab and tap "Add Money". You can top up via Mobile Money (MTN, Vodafone, AirtelTigo) or a debit/credit card.',
+      'a':
+          'Go to the Wallet tab and tap "Add Money". You can top up via Mobile Money (MTN, Vodafone, AirtelTigo) or a debit/credit card.',
     },
     {
       'q': 'What is Aboboya delivery?',
-      'a': 'Aboboya is our tricycle delivery service for medium loads (5–100 kg). Great for market goods, appliances, and bulk items.',
+      'a':
+          'Aboboya is our tricycle delivery service for medium loads (5–100 kg). Great for market goods, appliances, and bulk items.',
     },
     {
       'q': 'How do I track my delivery?',
-      'a': 'After confirming a delivery, track the rider in real time on the delivery tracking screen. You can also share a tracking link with the receiver.',
+      'a':
+          'After confirming a delivery, track the rider in real time on the delivery tracking screen. You can also share a tracking link with the receiver.',
     },
     {
       'q': "What if my driver doesn't show up?",
-      'a': "Call or message your driver directly. If unreachable, cancel the ride and you won't be charged. Contact support for a refund if needed.",
+      'a':
+          "Call or message your driver directly. If unreachable, cancel the ride and you won't be charged. Contact support for a refund if needed.",
     },
     {
       'q': 'How do referrals work?',
-      'a': 'Share your referral link from the Promotions screen. When a friend signs up and takes their first ride, both of you earn GHS 5.',
+      'a':
+          'Share your referral link from the Promotions screen. When a friend signs up and takes their first ride, both of you earn GHS 5.',
     },
   ];
 
@@ -71,7 +79,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
   void initState() {
     super.initState();
     _searchCtrl.addListener(() => setState(() {
-          _query       = _searchCtrl.text;
+          _query = _searchCtrl.text;
           _expandedFaq = null; // reset open item on new search
         }));
   }
@@ -93,7 +101,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
 
   Future<void> _launchWhatsApp() async {
     final uri = Uri.parse(
-        'https://wa.me/233302000000?text=Hello%2C%20I%20need%20help%20with%20CTSRide');
+        'https://wa.me/233302000000?text=Hello%2C%20I%20need%20help%20with%20CTSTransport');
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       _showError('WhatsApp is not installed');
     }
@@ -103,7 +111,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     final uri = Uri(
       scheme: 'mailto',
       path: 'support@ctstransport.com',
-      queryParameters: {'subject': 'CTSRide Support Request'},
+      queryParameters: {'subject': 'CTSTransport Support Request'},
     );
     if (!await launchUrl(uri)) {
       _showError('Could not open email app');
@@ -116,7 +124,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSRideAppBar(title: 'Help & Support'),
+      appBar: const CTSTransportAppBar(title: 'Help & Support'),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(16),
@@ -165,8 +173,8 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
           style: AppTextStyles.bodyMedium,
           decoration: InputDecoration(
             hintText: 'Search help articles…',
-            hintStyle: AppTextStyles.bodySmall
-                .copyWith(color: AppColors.textTertiary),
+            hintStyle:
+                AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
             prefixIcon: const Icon(Icons.search_rounded,
                 color: AppColors.textSecondary, size: 20),
             suffixIcon: _query.isNotEmpty
@@ -276,8 +284,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               const Icon(Icons.search_off_rounded,
                   color: AppColors.textTertiary, size: 40),
               const SizedBox(height: 12),
-              Text('No results for "$_query"',
-                  style: AppTextStyles.bodySmall),
+              Text('No results for "$_query"', style: AppTextStyles.bodySmall),
             ],
           ),
         ),
@@ -300,8 +307,8 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
           child: Column(
             children: [
               GestureDetector(
-                onTap: () => setState(
-                    () => _expandedFaq = isOpen ? null : e.key),
+                onTap: () =>
+                    setState(() => _expandedFaq = isOpen ? null : e.key),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
                   child: Row(
@@ -337,12 +344,10 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                 curve: Curves.easeInOut,
                 child: isOpen
                     ? Padding(
-                        padding:
-                            const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                         child: Text(
                           e.value['a']!,
-                          style: AppTextStyles.bodySmall
-                              .copyWith(height: 1.6),
+                          style: AppTextStyles.bodySmall.copyWith(height: 1.6),
                         ),
                       )
                     : const SizedBox.shrink(),
@@ -369,8 +374,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Row(children: [
-                Icon(Icons.check_circle_rounded,
-                    color: Colors.white, size: 18),
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
                 SizedBox(width: 8),
                 Text('Report submitted — we\'ll follow up shortly'),
               ]),
@@ -405,7 +409,7 @@ class _ReportTripSheet extends StatefulWidget {
 class _ReportTripSheetState extends State<_ReportTripSheet> {
   final TextEditingController _descCtrl = TextEditingController();
   String? _selectedIssue;
-  bool    _isSubmitting = false;
+  bool _isSubmitting = false;
 
   static const _issueTypes = [
     'Overcharged',
@@ -438,14 +442,12 @@ class _ReportTripSheetState extends State<_ReportTripSheet> {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
 
-      await FirebaseFirestore.instance
-          .collection('support_reports')
-          .add({
-        'userId':      uid,
-        'issueType':   _selectedIssue,
+      await FirebaseFirestore.instance.collection('support_reports').add({
+        'userId': uid,
+        'issueType': _selectedIssue,
         'description': _descCtrl.text.trim(),
-        'status':      'open',
-        'createdAt':   FieldValue.serverTimestamp(),
+        'status': 'open',
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
       widget.onSubmitted();
@@ -489,8 +491,7 @@ class _ReportTripSheetState extends State<_ReportTripSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Report a trip issue',
-                style: AppTextStyles.heading3),
+            const Text('Report a trip issue', style: AppTextStyles.heading3),
             const SizedBox(height: 4),
             const Text(
               'Our team will review your report within 24 hours.',
@@ -507,32 +508,27 @@ class _ReportTripSheetState extends State<_ReportTripSheet> {
               children: _issueTypes.map((t) {
                 final isSelected = _selectedIssue == t;
                 return GestureDetector(
-                  onTap: () =>
-                      setState(() => _selectedIssue = t),
+                  onTap: () => setState(() => _selectedIssue = t),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.surfaceAlt,
+                      color:
+                          isSelected ? AppColors.primary : AppColors.surfaceAlt,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: isSelected
-                            ? AppColors.primary
-                            : AppColors.border,
+                        color:
+                            isSelected ? AppColors.primary : AppColors.border,
                       ),
                     ),
                     child: Text(
                       t,
                       style: AppTextStyles.labelMedium.copyWith(
-                        color: isSelected
-                            ? Colors.white
-                            : AppColors.textSecondary,
-                        fontWeight: isSelected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
+                        color:
+                            isSelected ? Colors.white : AppColors.textSecondary,
+                        fontWeight:
+                            isSelected ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
                   ),
@@ -586,10 +582,10 @@ class _ReportTripSheetState extends State<_ReportTripSheet> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ContactCard extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final String       sub;
-  final Color        color;
+  final IconData icon;
+  final String label;
+  final String sub;
+  final Color color;
   final VoidCallback onTap;
 
   const _ContactCard({
@@ -604,8 +600,7 @@ class _ContactCard extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(12),

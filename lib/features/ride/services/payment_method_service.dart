@@ -11,22 +11,10 @@ class PaymentMethodService {
       isRecommended: true
     ),
     PaymentMethod(
-      type: PaymentType.momo,   
-      name: 'Mobile Money', 
-      icon: Icons.phone_android_rounded, 
-      subtitle: 'MTN MoMo'
-    ),
-    PaymentMethod(
       type: PaymentType.cash,   
       name: 'Cash',         
       icon: Icons.money_rounded,          
       subtitle: 'Pay driver directly'
-    ),
-    PaymentMethod(
-      type: PaymentType.card,   
-      name: 'Card',         
-      icon: Icons.credit_card_rounded,    
-      subtitle: '•••• 4242'
     ),
   ];
 

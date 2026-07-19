@@ -332,7 +332,7 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
                         icon: Icons.account_balance_wallet_rounded,
                         iconColor: AppColors.info,
                         label: 'Payment',
-                        value: 'CTSRide Wallet',
+                        value: 'CTSTransport Wallet',
                       ),
                     ],
                   ),

@@ -286,6 +286,7 @@ exports.onDeliveryStatusChanged = notifications.onDeliveryStatusChanged;
 exports.onWalletChanged         = notifications.onWalletChanged;
 exports.onDeliveryNotification  = notifications.onDeliveryCompleted;
 exports.checkDocumentExpiry     = notifications.checkDocumentExpiry;
+exports.onTripCreatedNotify = notifications.onTripCreatedNotify;
 
 // ── Trip lifecycle (fare validation + wallet deduction + driver credit) ────────
 exports.onTripCreated       = trips.onTripCreated;
@@ -312,3 +313,18 @@ exports.migrateWallets = wallet.migrateWallets;
 exports.refundEscrowOnError = escrow.refundEscrowOnError;
 exports.broadcastNotification = notifications.broadcastNotification;
 exports.onDeliveryCreated = notifications.onDeliveryCreated;
+
+// ── Bridge payment integration (collection + payout) ──────────────────────────
+const bridge = require("./bridge");
+exports.initiateBridgeTopUp    = bridge.initiateBridgeTopUp;
+exports.bridgeTopUpCallback    = bridge.bridgeTopUpCallback;
+exports.checkBridgeTopUpStatus = bridge.checkBridgeTopUpStatus;
+exports.initiateBridgePayout   = bridge.initiateBridgePayout;
+exports.bridgePayoutCallback   = bridge.bridgePayoutCallback;
+
+// ── Passenger ratings → driver aggregate ─────────────────────────────────────
+const ratings = require("./ratings");
+exports.onTripRated     = ratings.onTripRated;
+exports.onDeliveryRated = ratings.onDeliveryRated;
+exports.onGasOrderRated = ratings.onGasOrderRated;
+

@@ -288,50 +288,49 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> _createPassengerProfile({
-  required User user,
-  required String firstName,
-  required String lastName,
-  required String phone,
-  required String email,
-}) async {
-  // Reload to ensure the auth token is fully settled after OTP sign-in
-  await user.reload();
-  final freshUser = _auth.currentUser;
-  if (freshUser == null) return;
+    required User user,
+    required String firstName,
+    required String lastName,
+    required String phone,
+    required String email,
+  }) async {
+    // Reload to ensure the auth token is fully settled after OTP sign-in
+    await user.reload();
+    final freshUser = _auth.currentUser;
+    if (freshUser == null) return;
 
-  await _firestore.collection('users').doc(freshUser.uid).set({
-    'uid':         freshUser.uid,
-    'firstName':   firstName,
-    'lastName':    lastName,
-    'displayName': '$firstName $lastName',
-    'phoneNumber': phone,
-    'email':       email.isNotEmpty ? email : null,
-    'role':        'passenger',
-    'createdAt':   FieldValue.serverTimestamp(),
-    'lastLoginAt': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
+    await _firestore.collection('users').doc(freshUser.uid).set({
+      'uid': freshUser.uid,
+      'firstName': firstName,
+      'lastName': lastName,
+      'displayName': '$firstName $lastName',
+      'phoneNumber': phone,
+      'email': email.isNotEmpty ? email : null,
+      'role': 'passenger',
+      'hasSeenWelcome': false,
+      'termsAcceptedAt': FieldValue.serverTimestamp(),
+      'termsVersion': '1.0',
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastLoginAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
 
-  // Wallet is created by a Cloud Function triggered on users/{uid} onCreate.
-  // Do NOT write to /wallets from the client — rules block it.
-
-
-    }
-
+    // Wallet is created by a Cloud Function triggered on users/{uid} onCreate.
+    // Do NOT write to /wallets from the client — rules block it.
   }
+}
 
-  String _phoneErrorMessage(String code, String? message) {
-    return switch (code) {
-      'invalid-phone-number' =>
-        'Invalid phone number. Include country code (e.g. +233).',
-      'too-many-requests' => 'Too many attempts. Please try again later.',
-      'session-expired' => 'Code expired. Please request a new one.',
-      'invalid-verification-code' => 'Incorrect code. Please try again.',
-      'quota-exceeded' => 'SMS quota exceeded. Please try again later.',
-      'missing-phone-number' => 'Please enter a phone number.',
-      _ => 'Verification failed: ${message ?? code}',
-    };
-  }
-
+String _phoneErrorMessage(String code, String? message) {
+  return switch (code) {
+    'invalid-phone-number' =>
+      'Invalid phone number. Include country code (e.g. +233).',
+    'too-many-requests' => 'Too many attempts. Please try again later.',
+    'session-expired' => 'Code expired. Please request a new one.',
+    'invalid-verification-code' => 'Incorrect code. Please try again.',
+    'quota-exceeded' => 'SMS quota exceeded. Please try again later.',
+    'missing-phone-number' => 'Please enter a phone number.',
+    _ => 'Verification failed: ${message ?? code}',
+  };
+}
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -398,6 +397,7 @@ class UserData {
         'phoneNumber': phoneNumber,
         'photoURL': photoURL,
         'role': role,
+
         'createdAt': Timestamp.fromDate(createdAt),
         'lastLoginAt':
             lastLoginAt != null ? Timestamp.fromDate(lastLoginAt!) : null,

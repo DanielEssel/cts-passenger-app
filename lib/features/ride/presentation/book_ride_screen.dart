@@ -294,8 +294,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
         ),
       );
 
-
-      
   // ---------------------------------------------------------------------------
   // Navigation & Actions
   // ---------------------------------------------------------------------------
@@ -478,15 +476,13 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
       debugPrint('Trip creation failed: $e\n$stack');
 
       // Rollback: refund escrow if it was held and trip creation failed.
-      if (escrowId.isNotEmpty) {
-        try {
-          await FirebaseFunctions.instanceFor(region: 'europe-west2')
-              .httpsCallable('refundEscrowOnError')
-              .call({'escrowId': escrowId, 'reason': 'trip_creation_failed'});
-        } catch (refundErr) {
-          debugPrint('⚠️ Escrow refund failed: $refundErr');
-          // Stuck escrow auto-released after 2h by releaseStuckEscrows.
-        }
+      try {
+        await FirebaseFunctions.instanceFor(region: 'europe-west2')
+            .httpsCallable('refundEscrowOnError')
+            .call({'escrowId': escrowId, 'reason': 'trip_creation_failed'});
+      } catch (refundErr) {
+        debugPrint('⚠️ Escrow refund failed: $refundErr');
+        // Stuck escrow auto-released after 2h by releaseStuckEscrows.
       }
 
       if (mounted) _showErrorSnack(RideConstants.errorCreateTrip);

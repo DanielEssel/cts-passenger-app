@@ -125,7 +125,6 @@ function calculateGasFare(cylinderSize, quantity, settings) {
   return round2(unitPrice * qty + deliveryFee);
 }
 
-const PLATFORM_FEE_PERCENT = 0.15; // 15% default
 
 // ── onTripCreated: validate & correct fare ────────────────────────────────────
 exports.onTripCreated = onDocumentCreated(
@@ -512,7 +511,6 @@ exports.onDeliveryCompleted = onDocumentUpdated(
           tx.update(driverRef, {
             totalEarnings: admin.firestore.FieldValue.increment(actualFare),
             todayEarnings: admin.firestore.FieldValue.increment(actualFare),
-            walletBalance: admin.firestore.FieldValue.increment(actualFare),
             commissionOwed:
               admin.firestore.FieldValue.increment(commissionDebt),
             totalDeliveries: admin.firestore.FieldValue.increment(1),
@@ -703,7 +701,6 @@ exports.onGasOrderCompleted = onDocumentUpdated(
           tx.update(driverRef, {
             totalEarnings: admin.firestore.FieldValue.increment(actualFare),
             todayEarnings: admin.firestore.FieldValue.increment(actualFare),
-            walletBalance: admin.firestore.FieldValue.increment(actualFare),
             commissionOwed:
               admin.firestore.FieldValue.increment(commissionDebt),
             totalDeliveries: admin.firestore.FieldValue.increment(1),

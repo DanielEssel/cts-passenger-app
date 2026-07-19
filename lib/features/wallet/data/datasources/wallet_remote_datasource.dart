@@ -8,6 +8,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../models/wallet_model.dart';
 import '../../domain/entities/transaction.dart';
 import '../../data/models/transaction_model.dart';
+import '../../domain/entities/bridge_payment_status.dart';
 
 class WalletRemoteDataSource {
   final FirebaseFirestore _firestore;
@@ -299,6 +300,81 @@ Future<WalletModel> getWallet() async {
           .httpsCallable('verifyPaystackPayment')
           .call({'reference': reference});
       return result.data['success'] as bool? ?? false;
+    } catch (e) {
+      throw _handleException(e);
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Bridge — top-up (collection)
+  // ─────────────────────────────────────────────
+
+  /// Initiates a Bridge MoMo top-up. Returns the transactionId
+  /// used for polling via [checkBridgeTopUpStatus].
+  Future<String> initiateBridgeTopUp({
+    required double amount,
+    required String phone,
+    required String network,
+  }) async {
+    try {
+      final result = await _functions
+          .httpsCallable('initiateBridgeTopUp')
+          .call({
+        'amount':  amount,
+        'phone':   phone,
+        'network': network,
+      });
+      return result.data['transactionId'] as String;
+    } catch (e) {
+      throw _handleException(e);
+    }
+  }
+
+  /// Polls the status of a pending Bridge top-up.
+  /// Called every 5 seconds from the UI during the "Approve on your phone" state.
+  Future<BridgePaymentStatus> checkBridgeTopUpStatus(
+    String transactionId,
+  ) async {
+    try {
+      final result = await _functions
+          .httpsCallable('checkBridgeTopUpStatus')
+          .call({'transactionId': transactionId});
+      return BridgePaymentStatus.fromMap(
+        Map<String, dynamic>.from(result.data as Map),
+      );
+    } catch (e) {
+      // On any transient error during polling, return pending so the
+      // UI keeps trying rather than showing a false failure.
+      if (e is FirebaseFunctionsException &&
+          const ['not-found', 'unauthenticated', 'permission-denied']
+              .contains(e.code)) {
+        rethrow; // Fatal errors should propagate
+      }
+      return const BridgePaymentStatus(localStatus: BridgeLocalStatus.pending);
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Bridge — payout (withdrawal)
+  // ─────────────────────────────────────────────
+
+  /// Initiates a Bridge MTC payout (immediate MoMo withdrawal).
+  /// Works for both passengers (from wallet) and drivers (from earnings).
+  /// Returns the transactionId; settlement is confirmed via FCM.
+  Future<String> initiateBridgePayout({
+    required double amount,
+    required String phone,
+    required String network,
+  }) async {
+    try {
+      final result = await _functions
+          .httpsCallable('initiateBridgePayout')
+          .call({
+        'amount':  amount,
+        'phone':   phone,
+        'network': network,
+      });
+      return result.data['transactionId'] as String;
     } catch (e) {
       throw _handleException(e);
     }

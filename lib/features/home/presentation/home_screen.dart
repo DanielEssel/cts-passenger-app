@@ -48,7 +48,7 @@ final savedPlacesProvider =
       .collection('users')
       .doc(uid)
       .collection('saved_places')
-      .orderBy('order')
+      .orderBy('createdAt', descending: false)
       .snapshots()
       .map((s) => s.docs.map(_SavedPlace.fromFirestore).toList());
 });
@@ -898,12 +898,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               GestureDetector(
                 onTap: () =>
                     Navigator.pushNamed(context, AppRoutes.savedPlaces),
-                child: const Text('Edit',
-                    style: TextStyle(
-                      color: HomeTheme.primary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    )),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text('View all',
+                        style: TextStyle(
+                          color: HomeTheme.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        )),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_rounded,
+                        size: 16, color: HomeTheme.primary),
+                  ],
+                ),
               ),
             ],
           ),
@@ -912,9 +920,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           height: 76,
           child: placesAsync.when(
             data: (places) {
+              final saved = places.take(4).toList(); // home strip shows ≤4
               final all = [
-                ...defaults.where((d) => !places.any((p) => p.id == d.id)),
-                ...places,
+                ...defaults.where((d) => !saved.any(
+                    (p) => p.label.toLowerCase() == d.label.toLowerCase())),
+                ...saved,
                 _SavedPlace(
                     id: 'add',
                     label: 'Add',
@@ -1612,6 +1622,17 @@ class _PromoCard extends StatelessWidget {
 // DATA MODELS
 // ─────────────────────────────────────────────────
 
+// Map saved-place icon keys (from Firestore) to IconData.
+IconData _homeIconFor(String key) => const {
+      'home': Icons.home_rounded,
+      'work': Icons.business_rounded,
+      'gym': Icons.fitness_center_rounded,
+      'hospital': Icons.local_hospital_rounded,
+      'school': Icons.school_rounded,
+      'food': Icons.restaurant_rounded,
+      'place': Icons.place_rounded,
+    }[key] ?? Icons.place_rounded;
+
 class _SavedPlace {
   final String id;
   final String label;
@@ -1631,6 +1652,7 @@ class _SavedPlace {
       id: doc.id,
       label: d['label'] as String? ?? 'Place',
       address: d['address'] as String? ?? '',
+      icon: _homeIconFor(d['iconKey'] as String? ?? 'place'),
     );
   }
 }

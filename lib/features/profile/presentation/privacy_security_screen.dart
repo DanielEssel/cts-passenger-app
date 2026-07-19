@@ -25,7 +25,7 @@ final _privacyPrefsProvider =
   final data = doc.data() ?? {};
   return {
     'biometrics': data['biometricsEnabled'] ?? false,
-    'marketingEmails': data['marketingEmails'] ?? true,
+    'marketingEmails': data['marketingEmails'] ?? false, // opt-in by default
   };
 });
 
@@ -43,7 +43,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
   final _localAuth = LocalAuthentication();
 
   bool _biometrics = false;
-  bool _marketingEmails = true;
+  bool _marketingEmails = false;
   bool _prefsLoaded = false;
 
   // ── Seed toggles from Firestore once ────────────────────────────────────
@@ -52,7 +52,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
     if (_prefsLoaded) return;
     _prefsLoaded = true;
     _biometrics = prefs['biometrics'] as bool? ?? false;
-    _marketingEmails = prefs['marketingEmails'] as bool? ?? true;
+    _marketingEmails = prefs['marketingEmails'] as bool? ?? false;
   }
 
   // ── Persist a single pref to Firestore ──────────────────────────────────
@@ -70,22 +70,25 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
 
   Future<void> _toggleBiometrics(bool value) async {
     if (value) {
-      // Check device support
-      final canCheck = await _localAuth.canCheckBiometrics;
-      final isAvailable = await _localAuth.isDeviceSupported();
+      try {
+        final canCheck = await _localAuth.canCheckBiometrics;
+        final isAvailable = await _localAuth.isDeviceSupported();
 
-      if (!canCheck || !isAvailable) {
-        _showError('Biometrics not available on this device');
+        if (!canCheck || !isAvailable) {
+          _showError('Biometrics not available on this device');
+          return;
+        }
+
+        final authenticated = await _localAuth.authenticate(
+          localizedReason: 'Confirm your identity to enable biometric login',
+          biometricOnly: true,
+        );
+
+        if (!authenticated) return;
+      } catch (_) {
+        _showError('Could not verify biometrics. Please try again.');
         return;
       }
-
-      // Require auth before enabling
-      final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Confirm your identity to enable biometric login',
-        persistAcrossBackgrounding: true,
-      );
-
-      if (!authenticated) return;
     }
 
     setState(() => _biometrics = value);
@@ -100,34 +103,41 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
   }
 
   // ── Delete account ───────────────────────────────────────────────────────
-
+  // Client-side deletion can't safely cascade subcollections, Storage files,
+  // or reconcile a non-zero wallet balance, and it races the Auth delete
+  // (which usually fails with requires-recent-login, leaving data already
+  // gone but the account alive). Instead we record a deletion request and a
+  // Cloud Function performs the cascade server-side with admin rights, then
+  // deletes the Auth user. Mirrors the data-export flow.
   Future<void> _deleteAccount() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
     try {
-      // Delete Firestore data
-      final batch = FirebaseFirestore.instance.batch();
-      batch.delete(FirebaseFirestore.instance.collection('users').doc(uid));
-      batch.delete(FirebaseFirestore.instance.collection('wallets').doc(uid));
-      await batch.commit();
+      await FirebaseFirestore.instance
+          .collection('account_deletion_requests')
+          .doc(uid) // doc-id = uid makes the request idempotent
+          .set({
+        'userId': uid,
+        'status': 'pending',
+        'requestedAt': FieldValue.serverTimestamp(),
+      });
 
-      // Delete Auth account
-      await FirebaseAuth.instance.currentUser?.delete();
+      // Flag the profile so the app treats the account as closing immediately,
+      // even before the CF finishes the cascade.
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'isDeactivated': true,
+        'deletionRequestedAt': FieldValue.serverTimestamp(),
+      });
+
+      await ref.read(authNotifierProvider.notifier).signOut();
 
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(
             context, AppRoutes.login, (_) => false);
       }
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'requires-recent-login') {
-        _showError(
-            'Please log out and log back in before deleting your account.');
-      } else {
-        _showError('Failed to delete account: ${e.message}');
-      }
     } catch (e) {
-      _showError('Something went wrong. Please try again.');
+      _showError('Could not process deletion. Please try again.');
     }
   }
 
@@ -163,19 +173,19 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
     return prefsAsync.when(
       loading: () => const Scaffold(
         backgroundColor: AppColors.background,
-        appBar: CTSRideAppBar(title: 'Privacy & Security'),
+        appBar: CTSTransportAppBar(title: 'Privacy & Security'),
         body: Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => Scaffold(
         backgroundColor: AppColors.background,
-        appBar: const CTSRideAppBar(title: 'Privacy & Security'),
+        appBar: const CTSTransportAppBar(title: 'Privacy & Security'),
         body: Center(child: Text('Error: $e')),
       ),
       data: (prefs) {
         _seedPrefs(prefs);
         return Scaffold(
           backgroundColor: AppColors.background,
-          appBar: const CTSRideAppBar(title: 'Privacy & Security'),
+          appBar: const CTSTransportAppBar(title: 'Privacy & Security'),
           body: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.all(16),
@@ -367,7 +377,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Delete account?', style: AppTextStyles.heading3),
           content: const Text(
-            'This cannot be undone. Your ride history, wallet balance and all data will be permanently deleted.',
+            'This cannot be undone. Your account will be closed and your ride history, wallet and all data permanently deleted. You\'ll be signed out now while we complete the removal.',
             style: AppTextStyles.bodySmall,
           ),
           actions: [

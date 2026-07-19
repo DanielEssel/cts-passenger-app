@@ -38,18 +38,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 700),
     );
     _fadeAnim = CurvedAnimation(
       parent: _animController,
       curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
     );
     _slideAnim = Tween(
-      begin: const Offset(0, 0.06),
+      begin: const Offset(0, 0.05),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _animController,
-      curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
     ));
     _animController.forward();
   }
@@ -70,23 +70,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     HapticFeedback.mediumImpact();
 
     // ✅ Use E.164 number from PhoneInputField (includes country code)
-    final phone = _phoneKey.currentState?.fullNumber
-        ?? _phoneController.text.trim();
+    final phone =
+        _phoneKey.currentState?.fullNumber ?? _phoneController.text.trim();
 
     await ref.read(authProvider.notifier).sendOtp(
-      phone: phone,
-      onCodeSent: () {
-        if (!mounted) return;
-        Navigator.pushNamed(
-          context,
-          AppRoutes.otpVerification,
-          arguments: {'phone': phone},
+          phone: phone,
+          onCodeSent: () {
+            if (!mounted) return;
+            Navigator.pushNamed(
+              context,
+              AppRoutes.otpVerification,
+              arguments: {'phone': phone},
+            );
+          },
+          onError: (msg) {
+            if (mounted) _showError(msg);
+          },
         );
-      },
-      onError: (msg) {
-        if (mounted) _showError(msg);
-      },
-    );
   }
 
   void _showError(String message) {
@@ -95,8 +95,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         content: Text(message),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       ),
     );
@@ -125,23 +124,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // Background glows
+          // Refined background glows - reduced size and opacity
           Positioned(
-            top: -80,
-            right: -60,
+            top: -60,
+            right: -40,
             child: AuthGlow(
-                color: AppColors.primary, size: 260, opacity: 0.18),
+              color: AppColors.primary,
+              size: 200,
+              opacity: 0.12,
+            ),
           ),
           Positioned(
-            bottom: size.height * 0.3,
-            left: -80,
+            bottom: size.height * 0.35,
+            left: -60,
             child: AuthGlow(
-                color: AppColors.secondary, size: 200, opacity: 0.12),
+              color: AppColors.secondary,
+              size: 160,
+              opacity: 0.08,
+            ),
           ),
 
           SafeArea(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: FadeTransition(
                 opacity: _fadeAnim,
                 child: SlideTransition(
@@ -151,93 +156,115 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(height: 24),
-                        const AuthBackButton(),
-                        SizedBox(height: size.height * 0.06),
-                        const AuthLogo(),
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 12),
+                        // Premium Back Button - larger touch target
+                        
+                        const SizedBox(height: 28),
+                        // Premium Logo - refined icon card
+                        const Center(
+                          child: _PremiumLogo(),
+                        ),
+                        const SizedBox(height: 28),
 
-                        Text(
-                          'Welcome\nback',
-                          style: AppTextStyles.heading1.copyWith(
-                            fontSize: 42,
-                            height: 1.1,
-                            fontWeight: FontWeight.w800,
+                        // Typography with better hierarchy
+                        Center(
+                          child: Text(
+                            'Welcome back',
+                            style: AppTextStyles.heading1.copyWith(
+                              fontSize: 34,
+                              height: 1.1,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 16),
+                        
                         Text(
-                          'Enter your phone number to\ncontinue your journey.',
+                          'Enter your phone number to continue',
                           style: AppTextStyles.bodyMedium.copyWith(
                             color: AppColors.textSecondary,
-                            height: 1.6,
+                            height: 1.5,
+                            fontSize: 16,
                           ),
                         ),
-                        const SizedBox(height: 48),
+                        const SizedBox(height: 32),
 
+                        // Phone input with premium styling
                         const AuthFieldLabel('PHONE NUMBER'),
-                        const SizedBox(height: 10),
-
-                        // ✅ PhoneInputField with country picker
-                        PhoneInputField(
-                          key: _phoneKey,
-                          controller: _phoneController,
-                          validator: _validatePhone,
-                          enabled: !isLoading,
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppColors.border.withValues(alpha: 0.3),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.03),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: PhoneInputField(
+                            key: _phoneKey,
+                            controller: _phoneController,
+                            validator: _validatePhone,
+                            enabled: !isLoading,
+                          ),
                         ),
                         const SizedBox(height: 40),
 
-                        AuthCtaButton(
+                        // Premium CTA Button with enhanced interactions
+                        _PremiumCtaButton(
                           label: 'Continue',
                           isLoading: isLoading,
                           onTap: _requestOtp,
                         ),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 28),
 
-                        Row(children: [
-                          const Expanded(
-                              child: Divider(color: AppColors.border)),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16),
-                            child: Text(
-                              'New to CTS?',
-                              style: AppTextStyles.caption.copyWith(
-                                  color: AppColors.textTertiary),
+                        // Refined Divider
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Divider(
+                                color: AppColors.border,
+                                thickness: 0.5,
+                              ),
                             ),
-                          ),
-                          const Expanded(
-                              child: Divider(color: AppColors.border)),
-                        ]),
-                        const SizedBox(height: 24),
-
-                        GestureDetector(
-                          onTap: () => Navigator.pushNamed(
-                              context, AppRoutes.signup),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 16),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface,
-                              borderRadius: BorderRadius.circular(16),
-                              border:
-                                  Border.all(color: AppColors.border),
-                            ),
-                            child: Center(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                               child: Text(
-                                'Create an account',
-                                style: AppTextStyles.button.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w600,
+                                'New to CTS?',
+                                style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.textTertiary,
+                                  fontSize: 13,
+                                  letterSpacing: 0.3,
                                 ),
                               ),
                             ),
+                            const Expanded(
+                              child: Divider(
+                                color: AppColors.border,
+                                thickness: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Premium Secondary Button
+                        _PremiumSecondaryButton(
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.signup,
                           ),
                         ),
                         SizedBox(
-                          height:
-                              MediaQuery.of(context).padding.bottom + 32,
+                          height: MediaQuery.of(context).padding.bottom + 24,
                         ),
                       ],
                     ),
@@ -247,6 +274,244 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+class _PremiumLogo extends StatelessWidget {
+  const _PremiumLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Image.asset(
+        'assets/logos/logo.png',
+        width: 150,
+        fit: BoxFit.contain,
+      ),
+    );
+  }
+}
+
+// ── Premium CTA Button ──────────────────────────────────────────────────────
+
+class _PremiumCtaButton extends StatefulWidget {
+  final String label;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _PremiumCtaButton({
+    required this.label,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  State<_PremiumCtaButton> createState() => _PremiumCtaButtonState();
+}
+
+class _PremiumCtaButtonState extends State<_PremiumCtaButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _scaleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+      lowerBound: 0.97,
+      upperBound: 1.0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) {
+        if (!widget.isLoading) {
+          _scaleController.forward();
+          HapticFeedback.lightImpact();
+        }
+      },
+      onTapUp: (_) {
+        _scaleController.reverse();
+        if (!widget.isLoading) {
+          widget.onTap();
+        }
+      },
+      onTapCancel: () {
+        _scaleController.reverse();
+      },
+      child: AnimatedBuilder(
+        animation: _scaleController,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleController.value,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                gradient: widget.isLoading
+                    ? LinearGradient(
+                        colors: [
+                          AppColors.primary.withValues(alpha: 0.6),
+                          AppColors.primary.withValues(alpha: 0.4),
+                        ],
+                      )
+                    : LinearGradient(
+                        colors: [
+                          AppColors.primary,
+                          AppColors.primary.withValues(alpha: 0.8),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: widget.isLoading
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+              ),
+              child: Center(
+                child: widget.isLoading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.label,
+                            style: AppTextStyles.button.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 17,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Premium Secondary Button ────────────────────────────────────────────────
+
+class _PremiumSecondaryButton extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _PremiumSecondaryButton({
+    required this.onTap,
+  });
+
+  @override
+  State<_PremiumSecondaryButton> createState() =>
+      _PremiumSecondaryButtonState();
+}
+
+class _PremiumSecondaryButtonState extends State<_PremiumSecondaryButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _scaleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+      lowerBound: 0.98,
+      upperBound: 1.0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) {
+        _scaleController.forward();
+        HapticFeedback.lightImpact();
+      },
+      onTapUp: (_) {
+        _scaleController.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () {
+        _scaleController.reverse();
+      },
+      child: AnimatedBuilder(
+        animation: _scaleController,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleController.value,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppColors.border.withValues(alpha: 0.3),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Text(
+                  'Create an account',
+                  style: AppTextStyles.button.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

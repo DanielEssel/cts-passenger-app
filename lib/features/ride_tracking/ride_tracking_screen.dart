@@ -213,31 +213,32 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
 
     if (_pickupLatLng != null) {
       markers.add(Marker(
-        markerId:   const MarkerId('pickup'),
-        position:   _pickupLatLng!,
-        icon:       ms.pickup(),
-        anchor:     const Offset(0.5, 1.0),   // pin tip on coord
+        markerId: const MarkerId('pickup'),
+        position: _pickupLatLng!,
+        icon: ms.pickup(),
+        anchor: const Offset(0.5, 1.0), // pin tip on coord
         infoWindow: const InfoWindow(title: 'Pickup'),
       ));
     }
     if (_dropoffLatLng != null) {
       markers.add(Marker(
-        markerId:   const MarkerId('dropoff'),
-        position:   _dropoffLatLng!,
-        icon:       ms.dropoff(),
-        anchor:     const Offset(0.5, 1.0),
+        markerId: const MarkerId('dropoff'),
+        position: _dropoffLatLng!,
+        icon: ms.dropoff(),
+        anchor: const Offset(0.5, 1.0),
         infoWindow: const InfoWindow(title: 'Drop-off'),
       ));
     }
     if (_driverLatLng != null) {
       markers.add(Marker(
-        markerId:   const MarkerId('driver'),
-        position:   _driverLatLng!,
-        icon:       ms.vehicle(serviceType),
-        anchor:     const Offset(0.5, 0.5),   // vehicle centered on coord
-        rotation:   (_tripData['driverHeading'] as num?)?.toDouble() ?? 0,
-        flat:       true,                      // flat = rotates with map/heading
-        infoWindow: InfoWindow(title: _tripData['driverName'] as String? ?? 'Driver'),
+        markerId: const MarkerId('driver'),
+        position: _driverLatLng!,
+        icon: ms.vehicle(serviceType),
+        anchor: const Offset(0.5, 0.5), // vehicle centered on coord
+        rotation: (_tripData['driverHeading'] as num?)?.toDouble() ?? 0,
+        flat: true, // flat = rotates with map/heading
+        infoWindow:
+            InfoWindow(title: _tripData['driverName'] as String? ?? 'Driver'),
       ));
     }
     return markers;
@@ -425,9 +426,9 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   }
 
   void _shareTrip() => Share.share(
-        'I\'m on a CTSRide trip to ${_tripData['dropoffAddress'] ?? 'my destination'}. '
+        'I\'m on a CTSTransport trip to ${_tripData['dropoffAddress'] ?? 'my destination'}. '
         'Track me: https://ctstrip.app/track/${widget.tripId}',
-        subject: 'My CTSRide trip',
+        subject: 'My CTSTransport trip',
       );
 
   Future<void> _cancelRide() async {
@@ -1017,7 +1018,7 @@ class _SOSSheet extends StatelessWidget {
                   Navigator.pop(context);
                   Share.share(
                       'I need help. Trip: $tripId. Track: https://ctstrip.app/track/$tripId',
-                      subject: 'Emergency — CTSRide');
+                      subject: 'Emergency — CTSTransport');
                 }),
           ],
         ),

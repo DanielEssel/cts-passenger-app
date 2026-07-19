@@ -37,7 +37,7 @@ class DeliveryTrackingScreen extends ConsumerWidget {
             builder: (_) => TripCompleteScreen(
               tripId: delivery.id,
               collection: 'deliveries',
-              tipReferenceType: 'delivery',
+              serviceType: 'delivery',
               driverId: delivery.driverId ?? '',
               driverName: delivery.driverName ?? 'Your rider',
               destination: delivery.dropoffAddress,
@@ -352,7 +352,7 @@ class _TrackingBody extends ConsumerWidget {
     // WhatsApp share message
     final shareMsg = 'Hi $receiverName, your delivery OTP is: *$otp*\n\n'
         'Please give this code to the delivery rider when they arrive. '
-        'CTSRide Delivery';
+        'CTSTransport Delivery';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -514,8 +514,8 @@ class _TrackingBody extends ConsumerWidget {
             const SizedBox(width: 8),
             // Share via SMS/other
             GestureDetector(
-              onTap: () =>
-                  Share.share(shareMsg, subject: 'Your CTSRide Delivery OTP'),
+              onTap: () => Share.share(shareMsg,
+                  subject: 'Your CTSTransport Delivery OTP'),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -821,6 +821,7 @@ class _DeliveryMapState extends State<_DeliveryMap> {
     final loc = widget.delivery.driverLocation;
     return loc == null ? null : LatLng(loc.latitude, loc.longitude);
   }
+
   double get _driverHeading => widget.delivery.driverHeading ?? 0;
 
   @override

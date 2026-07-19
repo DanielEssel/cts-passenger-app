@@ -10,8 +10,8 @@ import '../../../widgets/common/shared_widgets.dart';
 class TripCompleteScreen extends StatefulWidget {
   final String tripId; // ✅ required to save rating against the trip
   final String driverId; // ✅ required to update driver's rating aggregate
-  final String collection; // ← NEW: 'trips' | 'gas_orders' | 'deliveries'
-  final String tipReferenceType; // ← NEW: 'trip' | 'gas' | 'delivery'
+  final String collection; // 'trips' | 'gas_orders' | 'deliveries'
+  final String serviceType; // 'trip' | 'gas' | 'delivery' — drives copy only
   final String driverName;
   final String destination;
   final String fare;
@@ -23,7 +23,7 @@ class TripCompleteScreen extends StatefulWidget {
     super.key,
     required this.tripId,
     this.collection = 'trips', // ← NEW (default = ride)
-    this.tipReferenceType = 'trip',
+    this.serviceType = 'trip',
     required this.driverId,
     required this.driverName,
     required this.destination,
@@ -39,11 +39,9 @@ class TripCompleteScreen extends StatefulWidget {
 class _TripCompleteScreenState extends State<TripCompleteScreen>
     with SingleTickerProviderStateMixin {
   int _selectedStars = 0;
-  int _selectedTip = -1; // index into _tipOptions; -1 = none
   final TextEditingController _feedbackController = TextEditingController();
   bool _isSubmitting = false;
-
-  static const List<int> _tipOptions = [2, 5, 10];
+  bool _submitted = false; // ← show thank-you view after submission
 
   final List<String> _positiveTags = [
     'Great driver',
@@ -65,20 +63,20 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
-  // Service-aware copy, derived from tipReferenceType ('trip'|'gas'|'delivery').
-  String get _completionTitle => switch (widget.tipReferenceType) {
+  // Service-aware copy, derived from serviceType ('trip'|'gas'|'delivery').
+  String get _completionTitle => switch (widget.serviceType) {
         'gas' => 'Order delivered!',
         'delivery' => 'Delivery complete!',
         _ => 'Trip completed!',
       };
 
-  String get _completionSubtitle => switch (widget.tipReferenceType) {
+  String get _completionSubtitle => switch (widget.serviceType) {
         'gas' => 'Your gas was delivered safely',
         'delivery' => 'Your parcel was delivered',
         _ => 'Hope you had a great ride',
       };
 
-  String get _ratingQuestion => switch (widget.tipReferenceType) {
+  String get _ratingQuestion => switch (widget.serviceType) {
         'gas' => 'How was your gas delivery?',
         'delivery' => 'How was your delivery?',
         _ => 'How was your ride with ${widget.driverName}?',
@@ -111,57 +109,39 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
 
   Future<void> _submitRating() async {
     if (_isSubmitting) return;
+    if (_selectedStars == 0) {
+      _goHome();
+      return;
+    }
     setState(() => _isSubmitting = true);
 
     try {
-      final db = FirebaseFirestore.instance;
-      final batch = db.batch();
+      await FirebaseFirestore.instance
+          .collection(widget.collection)
+          .doc(widget.tripId)
+          .update({
+        'passengerRating': _selectedStars,
+        'passengerTags': _selectedTags,
+        'passengerFeedback': _feedbackController.text.trim(),
+        'ratedAt': FieldValue.serverTimestamp(),
+      });
 
-      final hasRating = _selectedStars > 0;
-      final hasTip = _selectedTip >= 0;
-
-      if (hasRating) {
-        batch.update(db.collection(widget.collection).doc(widget.tripId), {
-          // ← was 'trips'
-          'passengerRating': _selectedStars,
-          'passengerTip': hasTip ? _tipOptions[_selectedTip] : 0,
-          'passengerTags': _selectedTags,
-          'passengerFeedback': _feedbackController.text.trim(),
-          'ratedAt': FieldValue.serverTimestamp(),
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _submitted = true; // ← show thank-you view
         });
-
-        batch.update(db.collection('drivers').doc(widget.driverId), {
-          'ratingTotal': FieldValue.increment(_selectedStars),
-          'ratingCount': FieldValue.increment(1),
-        });
+        _checkController.forward(from: 0); // replay the checkmark pop
       }
-
-      if (hasTip) {
-        batch.set(db.collection('tip_transactions').doc(), {
-          'referenceId': widget.tripId, // ← was 'tripId'
-          'referenceType': widget.tipReferenceType, // ← NEW
-          'driverId': widget.driverId,
-          'amount': _tipOptions[_selectedTip],
-          'currency': 'GHS',
-          'status': 'pending',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      if (hasRating || hasTip) await batch.commit();
     } catch (_) {
       if (mounted) {
+        setState(() => _isSubmitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not save your rating. You can rate later.'),
+            content: Text('Could not save your rating. Please try again.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-        _goHome();
       }
     }
   }
@@ -173,12 +153,46 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
     );
   }
 
+  Widget _buildThankYou() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const Spacer(),
+              _AnimatedCheckmark(animation: _checkScale),
+              const SizedBox(height: 20),
+              Text('Thank you!', style: AppTextStyles.heading2),
+              const SizedBox(height: 8),
+              Text(
+                'Your $_selectedStars-star rating helps keep '
+                '${widget.driverName} and CTS at their best.',
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textSecondary),
+                textAlign: TextAlign.center,
+              ),
+              const Spacer(),
+              PrimaryButton(
+                label: 'Go Home',
+                onTap: _goHome,
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
+    if (_submitted) return _buildThankYou(); // ← inserted line
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -221,13 +235,6 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
                 ),
                 const SizedBox(height: 16),
               ],
-              _TipSection(
-                tipOptions: _tipOptions,
-                selectedTip: _selectedTip,
-                onTipTap: (i) =>
-                    setState(() => _selectedTip = _selectedTip == i ? -1 : i),
-              ),
-              const SizedBox(height: 16),
               _FeedbackField(controller: _feedbackController),
               const SizedBox(height: 24),
               PrimaryButton(
@@ -395,7 +402,7 @@ class _FareCard extends StatelessWidget {
                       color: AppColors.success, size: 13),
                   const SizedBox(width: 4),
                   Text(
-                    'CTSRide Wallet',
+                    'CTSTransport Wallet',
                     style: AppTextStyles.caption
                         .copyWith(color: AppColors.success),
                   ),
@@ -545,79 +552,6 @@ class _TagsSection extends StatelessWidget {
                 ),
               );
             }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TipSection extends StatelessWidget {
-  final List<int> tipOptions;
-  final int selectedTip;
-  final ValueChanged<int> onTipTap;
-
-  const _TipSection({
-    required this.tipOptions,
-    required this.selectedTip,
-    required this.onTipTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Add a tip?', style: AppTextStyles.heading4),
-          const SizedBox(height: 4),
-          Text(
-            '100% goes directly to your driver',
-            style: AppTextStyles.caption.copyWith(color: AppColors.success),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: List.generate(tipOptions.length, (i) {
-              final isSelected = selectedTip == i;
-              return Expanded(
-                child: Padding(
-                  padding:
-                      EdgeInsets.only(right: i < tipOptions.length - 1 ? 8 : 0),
-                  child: GestureDetector(
-                    onTap: () => onTipTap(i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? AppColors.primary
-                            : AppColors.surfaceAlt,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color:
-                              isSelected ? AppColors.primary : AppColors.border,
-                        ),
-                      ),
-                      child: Text(
-                        'GHS ${tipOptions[i]}',
-                        style: AppTextStyles.labelLarge.copyWith(
-                          color: isSelected
-                              ? AppColors.background
-                              : AppColors.textPrimary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }),
           ),
         ],
       ),

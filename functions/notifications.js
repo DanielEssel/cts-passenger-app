@@ -51,6 +51,91 @@ async function notifyPassenger(uid, { type, title, body, route, metadata = {} })
   await _sendFcm(token, { type, title, body, route, metadata });
 }
 
+
+// ── onTripCreatedNotify: broadcast new ride requests to nearby drivers ───────
+// Companion to onGasOrderCreated / onDeliveryCreated. The fare-validation
+// onTripCreated in trips.js is separate; two create-triggers on trips/ is fine.
+exports.onTripCreatedNotify = onDocumentCreated(
+  { region: "europe-west2", document: "trips/{tripId}" },
+  async (event) => {
+    const data   = event.data?.data();
+    const tripId = event.params.tripId;
+    if (!data) return;
+
+    // Only broadcast while unassigned & searching
+    if (data.driverId) return;
+    if (data.status && data.status !== "searching") return;
+
+    try {
+      const lat = data.pickupLocation?.latitude  ?? 0;
+      const lng = data.pickupLocation?.longitude ?? 0;
+
+      const driversSnap = await getDb().collection("drivers")
+        .where("isAvailable", "==", true)
+        .where("isOnline",    "==", true)
+        .where("isApproved",  "==", true)
+        .where("serviceType", "==", "ride")
+        .get();
+
+      if (driversSnap.empty) {
+        console.log(`Trip ${tripId}: no available ride drivers`);
+        return;
+      }
+
+      const now = Date.now();
+      const nearby = driversSnap.docs.filter((doc) => {
+        const d   = doc.data();
+        const loc = d.location;
+        if (!loc) return false;
+        // Stale-location tolerance: if the last update is >15 min old the
+        // position is unreliable — include the driver rather than silently
+        // excluding them. Over-notifying beats no-dispatch for a small fleet.
+        const updatedAt =
+          d.locationUpdatedAt?.toMillis?.() ??
+          d.lastLocationUpdate?.toMillis?.() ?? 0;
+        if (now - updatedAt > 15 * 60 * 1000) return true;
+        return haversineKm(lat, lng, loc.latitude, loc.longitude) <= 10.0;
+      });
+
+      if (nearby.length === 0) {
+        console.log(`Trip ${tripId}: no drivers within 10km`);
+        return;
+      }
+
+      const tokens = nearby.map((d) => d.data().fcmToken).filter(Boolean);
+      if (tokens.length === 0) return;
+
+      await admin.messaging().sendEachForMulticast({
+        tokens,
+        notification: {
+          title: "🛵 New Ride Request",
+          body:  `${data.pickupAddress ?? "Nearby pickup"} → ${data.dropoffAddress ?? "destination"} · GH₵${Number(data.estimatedFare ?? 0).toFixed(2)}`,
+        },
+        android: {
+          priority: "high",                     // ← immediate delivery even in Doze
+          notification: {
+            channelId: "driver_trips",          // ← the high-importance channel the app creates
+            sound: "default",
+          },
+        },
+        apns: {
+          payload: { aps: { sound: "default" } },
+        },
+        data: {
+          type:           "NEW_RIDE_REQUEST",
+          tripId,
+          pickupAddress:  data.pickupAddress  ?? "",
+          dropoffAddress: data.dropoffAddress ?? "",
+          estimatedFare:  String(data.estimatedFare ?? 0),
+        },
+      });
+      console.log(`Trip ${tripId}: notified ${tokens.length} nearby ride drivers`);
+    } catch (err) {
+      console.error(`Trip ${tripId}: notify failed (non-fatal):`, err);
+    }
+  },
+);
+
 // ── Send to DRIVER ────────────────────────────────────────────────────────────
 // Reads FCM token from drivers/{uid}
 
@@ -320,6 +405,16 @@ exports.onGasOrderCreated = onDocumentCreated(
             title: "🔥 New Gas Order",
             body:  `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
           },
+          android: {
+          priority: "high",                     // ← immediate delivery even in Doze
+          notification: {
+            channelId: "driver_trips",          // ← the high-importance channel the app creates
+            sound: "default",
+          },
+        },
+        apns: {
+          payload: { aps: { sound: "default" } },
+        },
           data: {
             type:      "NEW_GAS_REQUEST",
             orderId,
@@ -396,6 +491,16 @@ exports.onDeliveryCreated = onDocumentCreated(
             title: "📦 New Delivery Request",
             body:  `${data.parcelType ?? "Parcel"} — ${data.pickupAddress ?? "Nearby"}`,
           },
+          android: {
+          priority: "high",                     // ← immediate delivery even in Doze
+          notification: {
+            channelId: "driver_trips",          // ← the high-importance channel the app creates
+            sound: "default",
+          },
+        },
+        apns: {
+          payload: { aps: { sound: "default" } },
+        },
           data: {
             type:           "NEW_DELIVERY_REQUEST",
             deliveryId,
@@ -699,7 +804,7 @@ exports.onWalletChanged = onDocumentUpdated(
       await notifyPassenger(uid, {
         type:  "wallet",
         title: "Low wallet balance ⚠️",
-        body:  `Your balance is GHS ${newBalance.toFixed(2)}. Top up to keep using CTSRide.`,
+        body:  `Your balance is GHS ${newBalance.toFixed(2)}. Top up to keep using CTSTransport.`,
         route: "/shell?tab=wallet",
         metadata: { balance: newBalance },
       });

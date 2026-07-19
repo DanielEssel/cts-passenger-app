@@ -10,6 +10,8 @@ import '../../../core/constants/app_text_styles.dart';
 import '../../../core/routes/app_routes.dart';
 import '../providers/auth_providers.dart';
 import '../../auth/widgets/auth_widgets.dart';
+import 'package:flutter/gestures.dart';
+import '../../../../core/legal/legal_urls.dart'; // adjust depth to match
 
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({super.key});
@@ -44,18 +46,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
 
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 700),
     );
     _fadeAnim = CurvedAnimation(
       parent: _animController,
       curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
     );
     _slideAnim = Tween(
-      begin: const Offset(0, 0.06),
+      begin: const Offset(0, 0.05),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _animController,
-      curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
     ));
     _animController.forward();
   }
@@ -187,17 +189,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
+          // Refined background glows - reduced size and opacity
           Positioned(
-            top: -60,
-            left: -80,
+            top: -50,
+            left: -60,
             child: AuthGlow(
-                color: AppColors.primary, size: 280, opacity: 0.14),
+              color: AppColors.primary, 
+              size: 200, 
+              opacity: 0.10,
+            ),
           ),
           Positioned(
-            bottom: 100,
-            right: -60,
+            bottom: 120,
+            right: -50,
             child: AuthGlow(
-                color: AppColors.secondary, size: 200, opacity: 0.10),
+              color: AppColors.secondary, 
+              size: 160, 
+              opacity: 0.08,
+            ),
           ),
 
           SafeArea(
@@ -206,35 +215,46 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
               child: SlideTransition(
                 position: _slideAnim,
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: Form(
                     key: _formKey,
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+  crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const SizedBox(height: 12),
+                        // Premium Back Button - larger touch target
+                        const _PremiumBackButton(),
                         const SizedBox(height: 24),
-                        const AuthBackButton(),
+                        // Premium Logo - refined icon card
+                        const _PremiumSignupLogo(),
                         const SizedBox(height: 32),
 
-                        Text(
-                          'Create\naccount',
-                          style: AppTextStyles.heading1.copyWith(
-                            fontSize: 40,
-                            height: 1.1,
-                            fontWeight: FontWeight.w800,
+                        // Typography with better hierarchy
+                        Center(
+                          child: Text(
+                            'Create account',
+                            style: AppTextStyles.heading1.copyWith(
+                              fontSize: 34,
+                              height: 1.1,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Join thousands riding smarter\nacross Ghana.',
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: AppColors.textSecondary,
-                            height: 1.6,
+                        const SizedBox(height: 6),
+                        Center(
+                          child: Text(
+                            'Join thousands riding smarter across Ghana',
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textSecondary,
+                              height: 1.5,
+                              fontSize: 16,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 32),
 
-                        // Name row
+                        // Name row with premium styling
                         Row(
                           children: [
                             Expanded(
@@ -262,19 +282,36 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 18),
 
-                        // ✅ Phone with country picker
+                        // Phone with premium styling
                         const AuthFieldLabel('PHONE NUMBER'),
-                        const SizedBox(height: 8),
-                        PhoneInputField(
-                          key: _phoneKey,
-                          controller: _phoneController,
-                          validator: _validatePhone,
-                          enabled: !isLoading,
+                        const SizedBox(height: 6),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppColors.border.withValues(alpha: 0.3),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.03),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: PhoneInputField(
+                            key: _phoneKey,
+                            controller: _phoneController,
+                            validator: _validatePhone,
+                            enabled: !isLoading,
+                          ),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 18),
 
+                        // Email field with premium styling
                         AuthFormField(
                           label: 'EMAIL (OPTIONAL)',
                           hint: 'john@example.com',
@@ -284,39 +321,55 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                           keyboardType: TextInputType.emailAddress,
                           prefixIcon: Icons.mail_outline_rounded,
                         ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 24),
 
-                        _TermsCheckbox(
+                        // Premium Terms checkbox
+                        _PremiumTermsCheckbox(
                           value: _agreeToTerms,
                           onChanged: (v) =>
                               setState(() => _agreeToTerms = v),
                         ),
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 32),
 
-                        AuthCtaButton(
+                        // Premium CTA Button with enhanced interactions
+                        _PremiumSignupButton(
                           label: 'Create Account',
                           isLoading: isLoading,
                           onTap: _signup,
                         ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 24),
 
+                        // Premium Sign in link
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
                               'Already have an account? ',
                               style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textSecondary),
+                                color: AppColors.textSecondary,
+                                fontSize: 14,
+                              ),
                             ),
                             GestureDetector(
-                              onTap: () =>
-                                  Navigator.pushReplacementNamed(
-                                      context, AppRoutes.login),
-                              child: Text(
-                                'Sign in',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w700,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                Navigator.pushReplacementNamed(
+                                  context, 
+                                  AppRoutes.login,
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  'Sign in',
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ),
                             ),
@@ -324,7 +377,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                         ),
                         SizedBox(
                           height:
-                              MediaQuery.of(context).padding.bottom + 32,
+                              MediaQuery.of(context).padding.bottom + 24,
                         ),
                       ],
                     ),
@@ -340,14 +393,71 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
 }
 
 // =============================================================================
-// Terms checkbox — extracted so it doesn't bloat the build method
+// Premium Back Button
 // =============================================================================
 
-class _TermsCheckbox extends StatelessWidget {
+class _PremiumBackButton extends StatelessWidget {
+  const _PremiumBackButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.pop(context),
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.border.withValues(alpha: 0.3),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: AppColors.textPrimary,
+          size: 20,
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Premium Signup Logo
+// =============================================================================
+
+class _PremiumSignupLogo extends StatelessWidget {
+  const _PremiumSignupLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Image.asset(
+        'assets/logos/logo.png',
+        width: 150,
+        fit: BoxFit.contain,
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Premium Terms Checkbox
+// =============================================================================
+
+class _PremiumTermsCheckbox extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
 
-  const _TermsCheckbox({
+  const _PremiumTermsCheckbox({
     required this.value,
     required this.onChanged,
   });
@@ -355,43 +465,62 @@ class _TermsCheckbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => onChanged(!value),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onChanged(!value);
+      },
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 22,
-            height: 22,
+            duration: const Duration(milliseconds: 200),
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(
-              color: value ? AppColors.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
+              color: value ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.circular(7),
               border: Border.all(
-                color: value ? AppColors.primary : AppColors.textTertiary,
-                width: 1.5,
+                color: value ? AppColors.primary : AppColors.border,
+                width: value ? 0 : 1.5,
               ),
+              boxShadow: value
+                  ? [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
             ),
             child: value
-                ? const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 14)
+                ? const Icon(
+                    Icons.check_rounded,
+                    color: Colors.white,
+                    size: 16,
+                  )
                 : null,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: RichText(
               text: TextSpan(
                 style: AppTextStyles.bodySmall.copyWith(
                   color: AppColors.textSecondary,
                   height: 1.5,
+                  fontSize: 14,
                 ),
                 children: [
-                  const TextSpan(text: 'I agree to the '),
+                  const TextSpan(text: 'I confirm I am 18 or older and agree to the '),
                   TextSpan(
                     text: 'Terms & Conditions',
                     style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w600,
+                      fontSize: 14,
                     ),
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () => LegalUrls.open(context, LegalUrls.terms),
                   ),
                   const TextSpan(text: ' and '),
                   TextSpan(
@@ -399,13 +528,150 @@ class _TermsCheckbox extends StatelessWidget {
                     style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w600,
+                      fontSize: 14,
                     ),
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () => LegalUrls.open(context, LegalUrls.privacy),
                   ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Premium Signup Button
+// =============================================================================
+
+class _PremiumSignupButton extends StatefulWidget {
+  final String label;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _PremiumSignupButton({
+    required this.label,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  State<_PremiumSignupButton> createState() => _PremiumSignupButtonState();
+}
+
+class _PremiumSignupButtonState extends State<_PremiumSignupButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _scaleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+      lowerBound: 0.97,
+      upperBound: 1.0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) {
+        if (!widget.isLoading) {
+          _scaleController.forward();
+          HapticFeedback.lightImpact();
+        }
+      },
+      onTapUp: (_) {
+        _scaleController.reverse();
+        if (!widget.isLoading) {
+          widget.onTap();
+        }
+      },
+      onTapCancel: () {
+        _scaleController.reverse();
+      },
+      child: AnimatedBuilder(
+        animation: _scaleController,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleController.value,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                gradient: widget.isLoading
+                    ? LinearGradient(
+                        colors: [
+                          AppColors.primary.withValues(alpha: 0.6),
+                          AppColors.primary.withValues(alpha: 0.4),
+                        ],
+                      )
+                    : LinearGradient(
+                        colors: [
+                          AppColors.primary,
+                          AppColors.primary.withValues(alpha: 0.8),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: widget.isLoading
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+              ),
+              child: Center(
+                child: widget.isLoading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.label,
+                            style: AppTextStyles.button.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 17,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.person_add_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

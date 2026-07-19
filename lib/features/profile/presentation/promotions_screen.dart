@@ -60,7 +60,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSRideAppBar(title: 'Promotions & Referrals'),
+      appBar: const CTSTransportAppBar(title: 'Promotions & Referrals'),
       body: Column(
         children: [
           // Promo code entry

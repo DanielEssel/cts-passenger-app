@@ -45,7 +45,7 @@ class GasOrderTrackingScreen extends ConsumerWidget {
             builder: (_) => TripCompleteScreen(
               tripId: order.id,
               collection: 'gas_orders',
-              tipReferenceType: 'gas',
+              serviceType: 'gas',
               driverId: order.driverId ?? '',
               driverName: order.driverName ?? 'Your driver',
               destination: order.deliveryAddress ?? '',
@@ -117,7 +117,9 @@ class _TrackingBody extends ConsumerWidget {
       order.status == GasOrderStatus.cancelled ||
       order.status == GasOrderStatus.failed;
 
-  bool get _isActive => !_isCompleted && !_isCancelled &&
+  bool get _isActive =>
+      !_isCompleted &&
+      !_isCancelled &&
       order.status != GasOrderStatus.pendingApproval;
 
   bool get _hasDriver =>
@@ -378,7 +380,7 @@ class _TrackingBody extends ConsumerWidget {
     if (!_isActive || !_hasDriver) return const SizedBox.shrink();
 
     final shareMsg = 'Your gas delivery OTP is: *$otp*\n\n'
-        'Please give this code to the CTSRide rider when they arrive.';
+        'Please give this code to the CTSTransport rider when they arrive.';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -470,7 +472,7 @@ class _TrackingBody extends ConsumerWidget {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Only share this OTP with the CTSRide rider. Do not share with anyone else.',
+                  'Only share this OTP with the CTSTransport rider. Do not share with anyone else.',
                   style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
                 ),
               ),
@@ -480,8 +482,8 @@ class _TrackingBody extends ConsumerWidget {
           SizedBox(
             width: double.infinity,
             child: GestureDetector(
-              onTap: () =>
-                  Share.share(shareMsg, subject: 'CTSRide Gas Delivery OTP'),
+              onTap: () => Share.share(shareMsg,
+                  subject: 'CTSTransport Gas Delivery OTP'),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
@@ -651,7 +653,8 @@ class _TrackingBody extends ConsumerWidget {
           Text(label,
               style: AppTextStyles.bodyMedium
                   .copyWith(color: AppColors.textSecondary)),
-          Text('₵${amount.toStringAsFixed(2)}', style: AppTextStyles.bodyMedium),
+          Text('₵${amount.toStringAsFixed(2)}',
+              style: AppTextStyles.bodyMedium),
         ],
       );
 
@@ -680,7 +683,7 @@ class _TrackingBody extends ConsumerWidget {
                 final shortId = orderId.length >= 8
                     ? orderId.substring(0, 8).toUpperCase()
                     : orderId.toUpperCase();
-                Share.share('Track my CTSRide gas order #$shortId');
+                Share.share('Track my CTSTransport gas order #$shortId');
               },
             ),
           ),
@@ -931,13 +934,17 @@ class _GasMapState extends State<_GasMap> {
   void _fit() {
     if (!_mapReady) return;
     final sw = LatLng(
-      _pickup.latitude < _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+      _pickup.latitude < _dropoff.latitude
+          ? _pickup.latitude
+          : _dropoff.latitude,
       _pickup.longitude < _dropoff.longitude
           ? _pickup.longitude
           : _dropoff.longitude,
     );
     final ne = LatLng(
-      _pickup.latitude > _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+      _pickup.latitude > _dropoff.latitude
+          ? _pickup.latitude
+          : _dropoff.latitude,
       _pickup.longitude > _dropoff.longitude
           ? _pickup.longitude
           : _dropoff.longitude,

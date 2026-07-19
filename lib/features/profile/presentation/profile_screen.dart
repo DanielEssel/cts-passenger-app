@@ -6,16 +6,16 @@ import '../../../../core/routes/app_routes.dart';
 import '../../auth/providers/auth_providers.dart';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
-const _kPrimary      = Color(0xFF16A34A);
-const _kPrimaryDim   = Color(0xFFDCFCE7);
-const _kBg           = Color(0xFFF8FAF9);
-const _kSurface      = Colors.white;
-const _kBorder       = Color(0xFFE5E7EB);
-const _kBorderLight  = Color(0xFFF3F4F6);
-const _kError        = Color(0xFFDC2626);
-const _kErrorLight   = Color(0xFFFEE2E2);
-const _kTextPrimary  = Color(0xFF111827);
-const _kTextSecond   = Color(0xFF6B7280);
+const _kPrimary = Color(0xFF16A34A);
+const _kPrimaryDim = Color(0xFFDCFCE7);
+const _kBg = Color(0xFFF8FAF9);
+const _kSurface = Colors.white;
+const _kBorder = Color(0xFFE5E7EB);
+const _kBorderLight = Color(0xFFF3F4F6);
+const _kError = Color(0xFFDC2626);
+const _kErrorLight = Color(0xFFFEE2E2);
+const _kTextPrimary = Color(0xFF111827);
+const _kTextSecond = Color(0xFF6B7280);
 const _kTextTertiary = Color(0xFF9CA3AF);
 
 // ── Providers ─────────────────────────────────────────────────────────────────
@@ -35,12 +35,31 @@ class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key, required this.scrollController});
 
   static const _menuItems = [
-    (icon: Icons.edit_rounded,         label: 'Edit Profile',       route: AppRoutes.editProfile),
-    (icon: Icons.location_on_rounded,  label: 'Saved Places',       route: AppRoutes.savedPlaces),
-    (icon: Icons.credit_card_rounded,  label: 'Payment Methods',    route: AppRoutes.paymentMethods),
-    (icon: Icons.lock_rounded,         label: 'Privacy & Security', route: AppRoutes.privacySecurity),
-    (icon: Icons.help_rounded,         label: 'Help & Support',     route: AppRoutes.helpSupport),
-    (icon: Icons.info_rounded,         label: 'About CTSRide',      route: AppRoutes.about),
+    (
+      icon: Icons.edit_rounded,
+      label: 'Edit Profile',
+      route: AppRoutes.editProfile
+    ),
+    (
+      icon: Icons.location_on_rounded,
+      label: 'Saved Places',
+      route: AppRoutes.savedPlaces
+    ),
+    (
+      icon: Icons.lock_rounded,
+      label: 'Privacy & Security',
+      route: AppRoutes.privacySecurity
+    ),
+    (
+      icon: Icons.help_rounded,
+      label: 'Help & Support',
+      route: AppRoutes.helpSupport
+    ),
+    (
+      icon: Icons.info_rounded,
+      label: 'About CTSTransport',
+      route: AppRoutes.about
+    ),
   ];
 
   @override
@@ -51,28 +70,28 @@ class ProfileScreen extends ConsumerWidget {
       backgroundColor: _kBg,
       body: SingleChildScrollView(
         controller: scrollController,
-        physics:    const BouncingScrollPhysics(),
+        physics: const BouncingScrollPhysics(),
         child: Column(
           children: [
             userAsync.when(
-              data:    (u) => _ProfileHeader(user: u),
-              loading: ()  => const _ProfileHeader(user: null),
-              error:   (_, __) => const _ProfileHeader(user: null),
+              data: (u) => _ProfileHeader(user: u),
+              loading: () => const _ProfileHeader(user: null),
+              error: (_, __) => const _ProfileHeader(user: null),
             ),
             const SizedBox(height: 20),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child:   _MenuCard(items: _menuItems),
+              child: _MenuCard(items: _menuItems),
             ),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child:   _LogoutButton(
+              child: _LogoutButton(
                 onTap: () => _confirmLogout(context, ref),
               ),
             ),
             const SizedBox(height: 24),
-            const Text('CTSRide v1.0.0',
+            const Text('CTSTransport v1.0.0',
                 style: TextStyle(fontSize: 11, color: _kTextTertiary)),
             const SizedBox(height: 40),
           ],
@@ -85,19 +104,21 @@ class ProfileScreen extends ConsumerWidget {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape:   RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title:   const Text('Log out?',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Log out?',
             style: TextStyle(fontWeight: FontWeight.w700)),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child:     const Text('Cancel'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              try { await ref.read(authNotifierProvider.notifier).signOut(); } catch (_) {}
+              try {
+                await ref.read(authNotifierProvider.notifier).signOut();
+              } catch (_) {}
               if (context.mounted) {
                 Navigator.of(context, rootNavigator: true)
                     .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
@@ -137,8 +158,8 @@ class _ProfileHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top;
     return Container(
-      width:  double.infinity,
-      color:  _kSurface,
+      width: double.infinity,
+      color: _kSurface,
       padding: EdgeInsets.fromLTRB(20, top + 24, 20, 28),
       child: Column(
         children: [
@@ -146,15 +167,16 @@ class _ProfileHeader extends StatelessWidget {
           Stack(
             children: [
               Container(
-                width:  88, height: 88,
+                width: 88,
+                height: 88,
                 decoration: BoxDecoration(
-                  shape:     BoxShape.circle,
-                  border:    Border.all(color: _kBorder, width: 2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _kBorder, width: 2),
                   boxShadow: [
                     BoxShadow(
-                      color:      Colors.black.withValues(alpha: 0.07),
+                      color: Colors.black.withValues(alpha: 0.07),
                       blurRadius: 10,
-                      offset:     const Offset(0, 3),
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -162,21 +184,24 @@ class _ProfileHeader extends StatelessWidget {
                   child: user?.photoURL?.isNotEmpty == true
                       ? Image.network(
                           user!.photoURL!,
-                          fit:          BoxFit.cover,
+                          fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => _fallback(),
                         )
                       : _fallback(),
                 ),
               ),
               Positioned(
-                right: 0, bottom: 0,
+                right: 0,
+                bottom: 0,
                 child: GestureDetector(
-                  onTap: () => Navigator.pushNamed(context, AppRoutes.editProfile),
+                  onTap: () =>
+                      Navigator.pushNamed(context, AppRoutes.editProfile),
                   child: Container(
-                    width:  28, height: 28,
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
-                      color:  _kPrimary,
-                      shape:  BoxShape.circle,
+                      color: _kPrimary,
+                      shape: BoxShape.circle,
                       border: Border.all(color: Colors.white, width: 2),
                     ),
                     child: const Icon(Icons.camera_alt_rounded,
@@ -194,9 +219,9 @@ class _ProfileHeader extends StatelessWidget {
               ? _Skeleton(width: 140, height: 18)
               : Text(_displayName,
                   style: const TextStyle(
-                    fontSize:   20,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
-                    color:      _kTextPrimary,
+                    color: _kTextPrimary,
                   )),
 
           const SizedBox(height: 6),
@@ -208,7 +233,7 @@ class _ProfileHeader extends StatelessWidget {
                   user!.phoneNumber ?? user!.email ?? '',
                   style: const TextStyle(
                     fontSize: 13,
-                    color:    _kTextSecond,
+                    color: _kTextSecond,
                   ),
                 ),
         ],
@@ -221,9 +246,9 @@ class _ProfileHeader extends StatelessWidget {
         child: Center(
           child: Text(_initials,
               style: const TextStyle(
-                fontSize:   32,
+                fontSize: 32,
                 fontWeight: FontWeight.w800,
-                color:      _kPrimary,
+                color: _kPrimary,
               )),
         ),
       );
@@ -237,10 +262,10 @@ class _Skeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width:  width,
+        width: width,
         height: height,
         decoration: BoxDecoration(
-          color:        _kBorder,
+          color: _kBorder,
           borderRadius: BorderRadius.circular(4),
         ),
       );
@@ -254,32 +279,34 @@ class _MenuCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color:        _kSurface,
+          color: _kSurface,
           borderRadius: BorderRadius.circular(16),
-          border:       Border.all(color: _kBorder),
+          border: Border.all(color: _kBorder),
           boxShadow: [
             BoxShadow(
-              color:      Colors.black.withValues(alpha: 0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 8,
-              offset:     const Offset(0, 2),
+              offset: const Offset(0, 2),
             ),
           ],
         ),
         child: Column(
           children: items.asMap().entries.map((e) {
-            final i       = e.key;
-            final item    = e.value;
+            final i = e.key;
+            final item = e.value;
             final isFirst = i == 0;
-            final isLast  = i == items.length - 1;
+            final isLast = i == items.length - 1;
             return Column(
               children: [
                 InkWell(
-                  onTap:        () => Navigator.pushNamed(context, item.route),
+                  onTap: () => Navigator.pushNamed(context, item.route),
                   borderRadius: BorderRadius.only(
-                    topLeft:     isFirst ? const Radius.circular(16) : Radius.zero,
-                    topRight:    isFirst ? const Radius.circular(16) : Radius.zero,
-                    bottomLeft:  isLast  ? const Radius.circular(16) : Radius.zero,
-                    bottomRight: isLast  ? const Radius.circular(16) : Radius.zero,
+                    topLeft: isFirst ? const Radius.circular(16) : Radius.zero,
+                    topRight: isFirst ? const Radius.circular(16) : Radius.zero,
+                    bottomLeft:
+                        isLast ? const Radius.circular(16) : Radius.zero,
+                    bottomRight:
+                        isLast ? const Radius.circular(16) : Radius.zero,
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
@@ -287,9 +314,10 @@ class _MenuCard extends StatelessWidget {
                     child: Row(
                       children: [
                         Container(
-                          width:  36, height: 36,
+                          width: 36,
+                          height: 36,
                           decoration: BoxDecoration(
-                            color:        _kPrimaryDim,
+                            color: _kPrimaryDim,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(item.icon, size: 18, color: _kPrimary),
@@ -298,9 +326,9 @@ class _MenuCard extends StatelessWidget {
                         Expanded(
                           child: Text(item.label,
                               style: const TextStyle(
-                                fontSize:   13,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w500,
-                                color:      _kTextPrimary,
+                                color: _kTextPrimary,
                               )),
                         ),
                         const Icon(Icons.chevron_right_rounded,
@@ -311,10 +339,10 @@ class _MenuCard extends StatelessWidget {
                 ),
                 if (!isLast)
                   const Divider(
-                    height:    0.5,
+                    height: 0.5,
                     thickness: 0.5,
-                    indent:    66,
-                    color:     _kBorderLight,
+                    indent: 66,
+                    color: _kBorderLight,
                   ),
               ],
             );
@@ -330,14 +358,14 @@ class _LogoutButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InkWell(
-        onTap:        onTap,
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color:        _kErrorLight,
+            color: _kErrorLight,
             borderRadius: BorderRadius.circular(16),
-            border:       Border.all(color: _kError.withValues(alpha: 0.2)),
+            border: Border.all(color: _kError.withValues(alpha: 0.2)),
           ),
           child: const Row(
             children: [
@@ -345,9 +373,9 @@ class _LogoutButton extends StatelessWidget {
               SizedBox(width: 12),
               Text('Log Out',
                   style: TextStyle(
-                    fontSize:   13,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color:      _kError,
+                    color: _kError,
                   )),
             ],
           ),
@@ -358,8 +386,8 @@ class _LogoutButton extends StatelessWidget {
 // ── Avatar widget — shared ────────────────────────────────────────────────────
 class AvatarWidget extends StatelessWidget {
   final String? photoURL;
-  final String  displayName;
-  final double  radius;
+  final String displayName;
+  final double radius;
 
   const AvatarWidget({
     super.key,
@@ -370,10 +398,15 @@ class AvatarWidget extends StatelessWidget {
 
   Color get _bgColor {
     const colors = [
-      Color(0xFF16A34A), Color(0xFF0284C7), Color(0xFF7C3AED),
-      Color(0xFFDB2777), Color(0xFFD97706), Color(0xFF0891B2),
+      Color(0xFF16A34A),
+      Color(0xFF0284C7),
+      Color(0xFF7C3AED),
+      Color(0xFFDB2777),
+      Color(0xFFD97706),
+      Color(0xFF0891B2),
     ];
-    return colors[displayName.codeUnits.fold(0, (a, b) => a + b) % colors.length];
+    return colors[
+        displayName.codeUnits.fold(0, (a, b) => a + b) % colors.length];
   }
 
   String get _initials {
@@ -388,21 +421,21 @@ class AvatarWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     if (photoURL?.isNotEmpty == true) {
       return CircleAvatar(
-        radius:          radius,
+        radius: radius,
         backgroundImage: NetworkImage(photoURL!),
         backgroundColor: _bgColor,
         onBackgroundImageError: (_, __) {},
       );
     }
     return CircleAvatar(
-      radius:          radius,
+      radius: radius,
       backgroundColor: _bgColor,
       child: Text(_initials,
           style: TextStyle(
-            fontFamily:  'Inter',
-            fontSize:    radius * 0.5,
-            fontWeight:  FontWeight.w700,
-            color:       Colors.white,
+            fontFamily: 'Inter',
+            fontSize: radius * 0.5,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
           )),
     );
   }

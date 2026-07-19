@@ -21,16 +21,16 @@ class EditProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
-  final _formKey    = GlobalKey<FormState>();
-  final _firstCtrl  = TextEditingController();
-  final _lastCtrl   = TextEditingController();
-  final _emailCtrl  = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _firstCtrl = TextEditingController();
+  final _lastCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
 
-  bool    _isSaving       = false;
-  bool    _isUploadingPhoto = false;
-  File?   _pickedImage;
-  bool    _hasEmail       = false; // only show email field if doc has it
-  bool    _loaded         = false;
+  bool _isSaving = false;
+  bool _isUploadingPhoto = false;
+  File? _pickedImage;
+  bool _hasEmail = false; // only show email field if doc has it
+  bool _loaded = false;
 
   @override
   void dispose() {
@@ -46,8 +46,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     if (_loaded) return;
     _loaded = true;
     _firstCtrl.text = user.firstName ?? '';
-    _lastCtrl.text  = user.lastName  ?? '';
-    _emailCtrl.text = user.email     ?? '';
+    _lastCtrl.text = user.lastName ?? '';
+    _emailCtrl.text = user.email ?? '';
     _hasEmail = user.email != null && user.email!.isNotEmpty;
   }
 
@@ -56,7 +56,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   Future<void> _pickPhoto(ImageSource source) async {
     Navigator.pop(context); // close bottom sheet
     final picker = ImagePicker();
-    final file   = await picker.pickImage(
+    final file = await picker.pickImage(
       source: source,
       imageQuality: 75,
       maxWidth: 512,
@@ -70,9 +70,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     if (_pickedImage == null) return null;
     setState(() => _isUploadingPhoto = true);
     try {
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('profile_photos/$uid.jpg');
+      final ref =
+          FirebaseStorage.instance.ref().child('profile_photos/$uid.jpg');
       await ref.putFile(
         _pickedImage!,
         SettableMetadata(contentType: 'image/jpeg'),
@@ -99,7 +98,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: AppColors.border,
@@ -174,15 +174,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       // Upload photo if changed
       final newPhotoURL = await _uploadPhoto(uid);
 
-      final firstName   = _firstCtrl.text.trim();
-      final lastName    = _lastCtrl.text.trim();
+      final firstName = _firstCtrl.text.trim();
+      final lastName = _lastCtrl.text.trim();
       final displayName = '$firstName $lastName'.trim();
 
       final updates = <String, dynamic>{
-        'firstName':   firstName,
-        'lastName':    lastName,
+        'firstName': firstName,
+        'lastName': lastName,
         'displayName': displayName,
-        'updatedAt':   FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
       if (_hasEmail) {
@@ -192,12 +192,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
       if (newPhotoURL != null) {
         updates['photoURL'] = newPhotoURL;
-        await FirebaseAuth.instance.currentUser
-            ?.updatePhotoURL(newPhotoURL);
+        await FirebaseAuth.instance.currentUser?.updatePhotoURL(newPhotoURL);
       }
 
-      await FirebaseAuth.instance.currentUser
-          ?.updateDisplayName(displayName);
+      await FirebaseAuth.instance.currentUser?.updateDisplayName(displayName);
 
       await FirebaseFirestore.instance
           .collection('users')
@@ -208,8 +206,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Row(children: [
-            Icon(Icons.check_circle_rounded,
-                color: Colors.white, size: 18),
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
             SizedBox(width: 8),
             Text('Profile updated'),
           ]),
@@ -244,7 +241,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       ),
       error: (e, _) => Scaffold(
         backgroundColor: AppColors.background,
-        appBar: const CTSRideAppBar(title: 'Edit Profile'),
+        appBar: const CTSTransportAppBar(title: 'Edit Profile'),
         body: Center(child: Text('Error: $e')),
       ),
       data: (user) {
@@ -253,12 +250,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           _currentPhotoURL = user.photoURL;
         }
 
-        final phone = user?.phoneNumber ??
-            ref.read(userPhoneProvider) ?? '';
+        final phone = user?.phoneNumber ?? ref.read(userPhoneProvider) ?? '';
 
         return Scaffold(
           backgroundColor: AppColors.background,
-          appBar: const CTSRideAppBar(title: 'Edit Profile'),
+          appBar: const CTSTransportAppBar(title: 'Edit Profile'),
           body: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.all(20),
@@ -276,8 +272,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           child: _pickedImage != null
                               ? CircleAvatar(
                                   radius: 48,
-                                  backgroundImage:
-                                      FileImage(_pickedImage!),
+                                  backgroundImage: FileImage(_pickedImage!),
                                 )
                               : AvatarWidget(
                                   photoURL: user?.photoURL,
@@ -311,8 +306,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                 color: AppColors.primary,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                    color: AppColors.background,
-                                    width: 2),
+                                    color: AppColors.background, width: 2),
                               ),
                               child: const Icon(Icons.camera_alt_rounded,
                                   size: 15, color: Colors.white),
@@ -423,8 +417,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     );
   }
 
-  Widget _label(String text) =>
-      Text(text, style: AppTextStyles.labelLarge);
+  Widget _label(String text) => Text(text, style: AppTextStyles.labelLarge);
 
   Widget _buildField({
     required TextEditingController controller,
@@ -452,8 +445,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 child: trailingWidget,
               )
             : null,
-        suffixIconConstraints:
-            const BoxConstraints(minWidth: 0, minHeight: 0),
+        suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         filled: true,
         fillColor: readOnly ? AppColors.surfaceAlt : AppColors.surface,
         border: OutlineInputBorder(
@@ -466,8 +458,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: AppColors.primary, width: 1.5),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -485,10 +476,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 // ── Photo option tile ─────────────────────────────────────────────────────────
 
 class _PhotoOption extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
-  final Color        color;
+  final Color color;
 
   const _PhotoOption({
     required this.icon,
@@ -501,8 +492,7 @@ class _PhotoOption extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           decoration: BoxDecoration(
             color: AppColors.surfaceAlt,
             borderRadius: BorderRadius.circular(12),
@@ -513,8 +503,7 @@ class _PhotoOption extends StatelessWidget {
               Icon(icon, color: color, size: 20),
               const SizedBox(width: 12),
               Text(label,
-                  style:
-                      AppTextStyles.bodyMedium.copyWith(color: color)),
+                  style: AppTextStyles.bodyMedium.copyWith(color: color)),
             ],
           ),
         ),

@@ -12,6 +12,7 @@ import '../providers/wallet_controller.dart';
 import 'transaction_detail_screen.dart';
 import '../../domain/entities/transaction.dart';
 import '../../domain/entities/wallet.dart';
+import '../widgets/bridge_momo_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Derived stats provider
@@ -29,14 +30,18 @@ final _walletStatsProvider = Provider.autoDispose<_WalletStats>((ref) {
       totalSpent += tx.amount;
       final cat = tx.metadata?['category'] as String? ?? '';
       final desc = tx.description.toLowerCase();
-      if (cat == 'ride' || desc.contains('ride') ||
-          desc.contains('taxi') || desc.contains('okada')) {
+      if (cat == 'ride' ||
+          desc.contains('ride') ||
+          desc.contains('taxi') ||
+          desc.contains('okada')) {
         tripCount++;
       }
     } else if (tx.type == TransactionType.credit) {
       final desc = tx.description.toLowerCase();
-      if (desc.contains('promo') || desc.contains('bonus') ||
-          desc.contains('reward') || desc.contains('cashback')) {
+      if (desc.contains('promo') ||
+          desc.contains('bonus') ||
+          desc.contains('reward') ||
+          desc.contains('cashback')) {
         totalSaved += tx.amount;
       }
     }
@@ -65,17 +70,22 @@ class WalletScreen extends ConsumerStatefulWidget {
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   String _activeFilter = 'All';
   bool _balanceVisible = true;
-  bool _isTopUpLoading = false; // ← FIX 1: loading overlay state
+  final bool _isTopUpLoading = false; // ← FIX 1: loading overlay state
 
   static const _filters = [
-    'All', 'Rides', 'Deliveries', 'Gas', 'Top-ups', 'Transfers',
+    'All',
+    'Rides',
+    'Deliveries',
+    'Gas',
+    'Top-ups',
+    'Transfers',
   ];
 
   @override
   Widget build(BuildContext context) {
     final walletAsync = ref.watch(walletStreamProvider);
-    final txAsync     = ref.watch(recentTransactionsStreamProvider);
-    final stats       = ref.watch(_walletStatsProvider);
+    final txAsync = ref.watch(recentTransactionsStreamProvider);
+    final stats = ref.watch(_walletStatsProvider);
 
     ref.listen<AsyncValue<Wallet>>(walletStreamProvider, (_, next) {
       next.whenOrNull(error: (e, _) => _showError('Wallet error: $e'));
@@ -95,9 +105,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               slivers: [
                 SliverToBoxAdapter(
                   child: walletAsync.when(
-                    data:    (w) => _buildBalanceHeader(w),
-                    loading: ()  => _buildBalanceHeader(null),
-                    error:   (_, __) => _buildBalanceHeader(null),
+                    data: (w) => _buildBalanceHeader(w),
+                    loading: () => _buildBalanceHeader(null),
+                    error: (_, __) => _buildBalanceHeader(null),
                   ),
                 ),
                 SliverToBoxAdapter(child: _buildStatsRow(stats)),
@@ -114,7 +124,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     if (filtered.isEmpty) {
                       return SliverToBoxAdapter(child: _buildEmptyState());
                     }
-                    final items = _buildFlatItemList(_groupTransactions(filtered));
+                    final items =
+                        _buildFlatItemList(_groupTransactions(filtered));
                     return SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (_, i) => items[i],
@@ -123,8 +134,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     );
                   },
                   loading: () => SliverToBoxAdapter(child: _buildTxSkeleton()),
-                  error:   (e, _) => SliverToBoxAdapter(
-                      child: _buildTxError(e.toString())),
+                  error: (e, _) =>
+                      SliverToBoxAdapter(child: _buildTxError(e.toString())),
                 ),
                 SliverToBoxAdapter(
                   child: SizedBox(
@@ -151,7 +162,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   children: [
                     const CircularProgressIndicator(color: AppColors.primary),
                     const SizedBox(height: 16),
-                    Text('Processing payment...', style: AppTextStyles.labelLarge),
+                    Text('Processing payment...',
+                        style: AppTextStyles.labelLarge),
                     const SizedBox(height: 4),
                     Text(
                       'Please do not close the app',
@@ -175,7 +187,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       color: AppColors.darkNavy,
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 16,
-        left: 20, right: 20, bottom: 24,
+        left: 20,
+        right: 20,
+        bottom: 24,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -246,14 +260,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           const SizedBox(height: 24),
           Row(
             children: [
-              _ActionBtn(icon: Icons.arrow_upward_rounded,
-                  label: 'Top Up',   onTap: _showTopUpSheet),
+              _ActionBtn(
+                  icon: Icons.arrow_upward_rounded,
+                  label: 'Top Up',
+                  onTap: _showTopUpSheet),
               const SizedBox(width: 10),
-              _ActionBtn(icon: Icons.arrow_downward_rounded,
-                  label: 'Withdraw', onTap: _showWithdrawSheet),
+              _ActionBtn(
+                  icon: Icons.arrow_downward_rounded,
+                  label: 'Withdraw',
+                  onTap: _showWithdrawSheet),
               const SizedBox(width: 10),
-              _ActionBtn(icon: Icons.swap_horiz_rounded,
-                  label: 'Transfer', onTap: _showTransferSheet),
+              _ActionBtn(
+                  icon: Icons.swap_horiz_rounded,
+                  label: 'Transfer',
+                  onTap: _showTransferSheet),
             ],
           ),
         ],
@@ -267,14 +287,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
             children: [
-              _StatChip(value: '${stats.tripCount}',
-                  label: 'Trips', color: AppColors.success),
+              _StatChip(
+                  value: '${stats.tripCount}',
+                  label: 'Trips',
+                  color: AppColors.success),
               _StatsDiv(),
-              _StatChip(value: 'GHS ${stats.totalSpent.toStringAsFixed(0)}',
-                  label: 'Total spent', color: AppColors.info),
+              _StatChip(
+                  value: 'GHS ${stats.totalSpent.toStringAsFixed(0)}',
+                  label: 'Total spent',
+                  color: AppColors.info),
               _StatsDiv(),
-              _StatChip(value: 'GHS ${stats.totalSaved.toStringAsFixed(0)}',
-                  label: 'Saved', color: AppColors.primary),
+              _StatChip(
+                  value: 'GHS ${stats.totalSaved.toStringAsFixed(0)}',
+                  label: 'Saved',
+                  color: AppColors.primary),
             ],
           ),
         ),
@@ -289,7 +315,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             GestureDetector(
               onTap: _showFilterSheet,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceAlt,
                   borderRadius: BorderRadius.circular(20),
@@ -323,7 +350,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                 decoration: BoxDecoration(
                   color: isActive ? AppColors.primary : AppColors.surface,
                   borderRadius: BorderRadius.circular(20),
@@ -335,8 +363,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       color: isActive
                           ? AppColors.background
                           : AppColors.textSecondary,
-                      fontWeight:
-                          isActive ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
                     )),
               ),
             );
@@ -373,13 +400,15 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
   String _categoryLabel(Transaction tx) {
     if (tx.type == TransactionType.credit) return 'Top-ups';
-    final cat  = (tx.metadata?['category'] as String? ?? '').toLowerCase();
+    final cat = (tx.metadata?['category'] as String? ?? '').toLowerCase();
     final desc = tx.description.toLowerCase();
-    if (cat == 'gas_order'  || desc.contains('gas'))      return 'Gas';
-    if (cat == 'delivery'   || desc.contains('delivery')) return 'Deliveries';
-    if (cat == 'transfer'   || desc.contains('transfer')) return 'Transfers';
-    if (cat == 'ride'       || desc.contains('ride') ||
-        desc.contains('taxi') || desc.contains('okada')) {
+    if (cat == 'gas_order' || desc.contains('gas')) return 'Gas';
+    if (cat == 'delivery' || desc.contains('delivery')) return 'Deliveries';
+    if (cat == 'transfer' || desc.contains('transfer')) return 'Transfers';
+    if (cat == 'ride' ||
+        desc.contains('ride') ||
+        desc.contains('taxi') ||
+        desc.contains('okada')) {
       return 'Rides';
     }
     return 'Rides';
@@ -389,7 +418,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final diff = DateTime.now().difference(date).inDays;
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Yesterday';
-    if (diff < 7)  return 'This Week';
+    if (diff < 7) return 'This Week';
     return 'Earlier';
   }
 
@@ -406,21 +435,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget _buildTxTile(Transaction tx) {
     final isCredit = tx.type == TransactionType.credit;
     final category = _categoryLabel(tx);
-    final meta     = _txMeta(isCredit, category);
+    final meta = _txMeta(isCredit, category);
 
     final txItem = TxItem(
-      icon:      meta.icon,
-      iconBg:    meta.bg,
+      icon: meta.icon,
+      iconBg: meta.bg,
       iconColor: meta.fg,
-      label:     tx.description,
-      sub:       _formatDate(tx.createdAt),
-      amount:    '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
-      isCredit:  isCredit,
-      type:      category,
-      ref:       tx.reference,
-      fullDate:  _formatFullDate(tx.createdAt),
-      status:    tx.status.toString().split('.').last,
-      note:      tx.metadata?['note'] as String? ?? '',
+      label: tx.description,
+      sub: _formatDate(tx.createdAt),
+      amount: '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
+      isCredit: isCredit,
+      type: category,
+      ref: tx.reference,
+      fullDate: _formatFullDate(tx.createdAt),
+      status: tx.status.toString().split('.').last,
+      note: tx.metadata?['note'] as String? ?? '',
     );
 
     return GestureDetector(
@@ -439,7 +468,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         child: Row(
           children: [
             Container(
-              width: 40, height: 40,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                   color: meta.bg, borderRadius: BorderRadius.circular(12)),
               child: Icon(meta.icon, color: meta.fg, size: 19),
@@ -514,7 +544,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         child: Center(
           child: Column(children: [
             Container(
-              width: 72, height: 72,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
                 color: AppColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(20),
@@ -567,7 +598,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             GestureDetector(
               onTap: _refresh,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(20),
@@ -608,7 +640,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
           return SingleChildScrollView(
             padding: EdgeInsets.only(
-              left: 20, right: 20, top: 16,
+              left: 20,
+              right: 20,
+              top: 16,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 28,
             ),
             child: Column(
@@ -657,9 +691,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                               color: isSel
                                   ? AppColors.background
                                   : AppColors.textPrimary,
-                              fontWeight: isSel
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
+                              fontWeight:
+                                  isSel ? FontWeight.w700 : FontWeight.w400,
                             ),
                           ),
                         ),
@@ -672,8 +705,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   controller: customCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) =>
-                      setLocal(() => selectedAmountIndex = -1),
+                  onChanged: (_) => setLocal(() => selectedAmountIndex = -1),
                   style: AppTextStyles.bodyMedium,
                   decoration: InputDecoration(
                     hintText: 'Or enter custom amount',
@@ -684,12 +716,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     fillColor: AppColors.surfaceAlt,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: AppColors.border)),
+                        borderSide: const BorderSide(color: AppColors.border)),
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: AppColors.border)),
+                        borderSide: const BorderSide(color: AppColors.border)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(
@@ -703,7 +733,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 const SizedBox(height: 10),
                 ...methods.asMap().entries.map((e) {
                   final isSel = selectedMethodIndex == e.key;
-                  final m     = e.value;
+                  final m = e.value;
                   return GestureDetector(
                     onTap: () => setLocal(() => selectedMethodIndex = e.key),
                     child: AnimatedContainer(
@@ -723,7 +753,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       ),
                       child: Row(children: [
                         Container(
-                          width: 36, height: 36,
+                          width: 36,
+                          height: 36,
                           decoration: BoxDecoration(
                             color: m.color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
@@ -736,7 +767,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(m.label, style: AppTextStyles.labelLarge),
-                              Text(m.sub,   style: AppTextStyles.caption),
+                              Text(m.sub, style: AppTextStyles.caption),
                             ],
                           ),
                         ),
@@ -779,7 +810,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                     ),
                     child: Text(
                       canPay
-                          ? 'Pay GHS ${resolvedAmount.toStringAsFixed(2)} via Paystack'
+                          ? 'Pay GHS ${resolvedAmount.toStringAsFixed(2)} via MoMo'
                           : 'Select an amount',
                       style: const TextStyle(
                         fontFamily: 'Inter',
@@ -797,65 +828,23 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
+  
+
   // ── FIX 1 + 2: loading state + correct channel mapping ──
-  Future<void> _processTopUp(double amount, String method) async {
-    setState(() => _isTopUpLoading = true);
-    try {
-      final success = await ref.read(walletControllerProvider).topUp(
-        amount: amount,
-        paymentMethod: _toPaystackChannel(method), // ← FIX 2
-      );
-      if (success && mounted) {
-        await _refresh();
-        _showSuccess('GHS ${amount.toStringAsFixed(2)} added to your wallet');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      final msg = e.toString().replaceFirst('Exception: ', '');
-      msg.toLowerCase().contains('cancel')
-          ? _showError('Payment cancelled')
-          : _showError('Top-up failed: $msg');
-    } finally {
-      if (mounted) setState(() => _isTopUpLoading = false);
-    }
-  }
+ Future<void> _processTopUp(double amount, String method) async {
+  if (!mounted) return;
+  if (Navigator.canPop(context)) Navigator.pop(context);
 
-  // ── FIX 2: map UI value → Paystack channel ──
-  String _toPaystackChannel(String method) {
-    switch (method) {
-      case 'momo':     return 'mobile_money';
-      case 'vodafone': return 'mobile_money';
-      case 'card':     return 'card';
-      default:         return 'card';
-    }
-  }
+  if (!mounted) return;
+  final success = await showBridgeMomoSheet(context, amount: amount);
 
-  void _showWithdrawSheet() => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: AppColors.surface,
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (_) => Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SheetHandle(),
-              const SizedBox(height: 16),
-              Text('Withdraw funds', style: AppTextStyles.heading3),
-              const SizedBox(height: 4),
-              Text('Coming soon — withdrawal in development',
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.textSecondary)),
-              const SizedBox(height: 20),
-              PrimaryButton(label: 'Close', onTap: () => Navigator.pop(context)),
-            ],
-          ),
-        ),
-      );
+  if (success && mounted) {
+    await _refresh();
+    _showSuccess('GHS ${amount.toStringAsFixed(2)} added to your wallet');
+  }
+}
+
+  void _showWithdrawSheet() => showBridgePayoutSheet(context);
 
   void _showTransferSheet() => showModalBottomSheet(
         context: context,
@@ -905,7 +894,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               Text('Filter transactions', style: AppTextStyles.heading3),
               const SizedBox(height: 16),
               Wrap(
-                spacing: 8, runSpacing: 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: _filters.map((f) {
                   final isSel = tempFilter == f;
                   return GestureDetector(
@@ -918,9 +908,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                         color: isSel ? AppColors.primary : AppColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                            color: isSel
-                                ? AppColors.primary
-                                : AppColors.border),
+                            color:
+                                isSel ? AppColors.primary : AppColors.border),
                       ),
                       child: Text(f,
                           style: AppTextStyles.labelMedium.copyWith(
@@ -962,9 +951,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   // ── FIX 3: correct refresh for StreamProviders ──
   Future<void> _refresh() async {
     await ref.read(walletProvider.notifier).refresh();
-    ref.invalidate(walletStreamProvider);             // ← re-subscribes stream
+    ref.invalidate(walletStreamProvider); // ← re-subscribes stream
     ref.invalidate(recentTransactionsStreamProvider); // ← re-subscribes stream
-    ref.invalidate(transactionHistoryProvider);       // ← busts future cache
+    ref.invalidate(transactionHistoryProvider); // ← busts future cache
   }
 
   void _showError(String msg) {
@@ -990,25 +979,25 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   // ── FIX 2: UI labels unchanged, values mapped in _toPaystackChannel ──
   List<_PayMethod> _payMethods() => [
         _PayMethod(
-          label: 'MTN MoMo',
-          sub: 'Mobile Money',
+          label: 'MTN Mobile Money',
+          sub: 'MTN MoMo — 024, 054, 055, 059',
           icon: Icons.phone_android_rounded,
           color: const Color(0xFFFFCC00),
-          value: 'momo', // mapped → 'mobile_money' before sending to function
+          value: 'MTN',
         ),
         _PayMethod(
-          label: 'Vodafone Cash',
-          sub: 'Mobile Money',
+          label: 'Telecel Cash',
+          sub: 'Telecel — 020, 050',
           icon: Icons.phone_android_rounded,
           color: const Color(0xFFE60000),
-          value: 'vodafone', // mapped → 'mobile_money'
+          value: 'TELECEL',
         ),
         _PayMethod(
-          label: 'Debit / Credit Card',
-          sub: 'Visa · Mastercard',
-          icon: Icons.credit_card_rounded,
-          color: AppColors.info,
-          value: 'card',
+          label: 'AirtelTigo Money',
+          sub: 'AirtelTigo — 027, 057, 026, 056',
+          icon: Icons.phone_android_rounded,
+          color: const Color(0xFF1565C0),
+          value: 'AIRTELTIGO',
         ),
       ];
 
@@ -1018,19 +1007,29 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       return 'Today ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
     }
     if (diff == 1) return 'Yesterday';
-    if (diff < 7)  return '${date.day}/${date.month}';
+    if (diff < 7) return '${date.day}/${date.month}';
     return '${date.day}/${date.month}/${date.year}';
   }
 
   String _formatFullDate(DateTime date) {
     const months = [
-      'Jan','Feb','Mar','Apr','May','Jun',
-      'Jul','Aug','Sep','Oct','Nov','Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
-    final h      = date.hour;
-    final m      = date.minute.toString().padLeft(2, '0');
+    final h = date.hour;
+    final m = date.minute.toString().padLeft(2, '0');
     final period = h >= 12 ? 'PM' : 'AM';
-    final hour   = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    final hour = h > 12 ? h - 12 : (h == 0 ? 12 : h);
     return '${months[date.month - 1]} ${date.day}, ${date.year} · $hour:$m $period';
   }
 }
@@ -1041,9 +1040,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
 class TxItem {
   final IconData icon;
-  final Color    iconBg, iconColor;
-  final String   label, sub, amount, type, ref, fullDate, status, note;
-  final bool     isCredit;
+  final Color iconBg, iconColor;
+  final String label, sub, amount, type, ref, fullDate, status, note;
+  final bool isCredit;
 
   const TxItem({
     required this.icon,
@@ -1062,7 +1061,7 @@ class TxItem {
 }
 
 class _WalletStats {
-  final int    tripCount;
+  final int tripCount;
   final double totalSpent;
   final double totalSaved;
   const _WalletStats({
@@ -1074,14 +1073,14 @@ class _WalletStats {
 
 class _TxMeta {
   final IconData icon;
-  final Color    bg, fg;
+  final Color bg, fg;
   const _TxMeta({required this.icon, required this.bg, required this.fg});
 }
 
 class _PayMethod {
-  final String   label, sub, value;
+  final String label, sub, value;
   final IconData icon;
-  final Color    color;
+  final Color color;
   const _PayMethod({
     required this.label,
     required this.sub,
@@ -1089,6 +1088,287 @@ class _PayMethod {
     required this.color,
     required this.value,
   });
+}
+
+// Bridge payout sheet — instant MoMo withdrawal
+Future<void> showBridgePayoutSheet(BuildContext context) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const _BridgeWithdrawSheet(),
+  );
+  // Balance stream auto-updates — nothing more needed
+}
+
+// ─── Bridge withdraw sheet (passenger) ───────────────────────────────────────
+class _BridgeWithdrawSheet extends ConsumerStatefulWidget {
+  const _BridgeWithdrawSheet();
+
+  @override
+  ConsumerState<_BridgeWithdrawSheet> createState() =>
+      _BridgeWithdrawSheetState();
+}
+
+class _BridgeWithdrawSheetState extends ConsumerState<_BridgeWithdrawSheet> {
+  final _amountCtrl = TextEditingController();
+  final _phoneCtrl  = TextEditingController();
+  String? _network;
+  bool    _processing = false;
+  String? _error;
+
+  static const _networks = [
+    ('MTN',        'MTN MoMo',        Color(0xFFFFCC00)),
+    ('TELECEL',    'Telecel Cash',    Color(0xFFE60000)),
+    ('AIRTELTIGO', 'AirtelTigo',      Color(0xFF1565C0)),
+  ];
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    final phone  = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+
+    if (amount < 10) {
+      setState(() => _error = 'Minimum withdrawal is GHS 10.00');
+      return;
+    }
+    if (phone.length != 10) {
+      setState(() => _error = 'Enter a valid 10-digit Ghana mobile number');
+      return;
+    }
+    if (_network == null) {
+      setState(() => _error = 'Please select your MoMo network');
+      return;
+    }
+
+    setState(() { _processing = true; _error = null; });
+
+    try {
+      await ref.read(walletControllerProvider).initiateBridgePayout(
+        amount:  amount,
+        phone:   phone,
+        network: _network!,
+      );
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle_rounded,
+                color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('GHS ${amount.toStringAsFixed(2)} withdrawal initiated — '
+                'you will receive a MoMo confirmation shortly.'),
+          ]),
+          backgroundColor: AppColors.success,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error      = e.toString().replaceFirst('Exception: ', '');
+          _processing = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20, 16, 20,
+        MediaQuery.of(context).viewInsets.bottom + 32,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Withdraw Funds', style: AppTextStyles.heading3),
+            const SizedBox(height: 4),
+            Text(
+              'Funds sent directly to your MoMo — usually instant.',
+              style: AppTextStyles.bodySmall
+                  .copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 20),
+
+            // Amount
+            Text('Amount (GHS)', style: AppTextStyles.labelLarge),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _amountCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                hintText:     'Minimum GHS 10.00',
+                prefixText:   'GHS ',
+                filled:       true,
+                fillColor:    AppColors.surfaceAlt,
+                border:       OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:   BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:   BorderSide(color: AppColors.primary, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Phone
+            Text('MoMo Number', style: AppTextStyles.labelLarge),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                hintText:  '0244000000',
+                filled:    true,
+                fillColor: AppColors.surfaceAlt,
+                border:    OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:   BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:   BorderSide(
+                    color: AppColors.primary, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Network
+            Text('MoMo Network', style: AppTextStyles.labelLarge),
+            const SizedBox(height: 8),
+            ..._networks.map((n) {
+              final selected = _network == n.$1;
+              return GestureDetector(
+                onTap: () => setState(() => _network = n.$1),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppColors.primary.withValues(alpha: 0.06)
+                        : AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : AppColors.border,
+                      width: selected ? 1.5 : 0.8,
+                    ),
+                  ),
+                  child: Row(children: [
+                    Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(
+                        color: n.$3, shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(n.$2, style: AppTextStyles.labelLarge),
+                    const Spacer(),
+                    Icon(
+                      selected
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textTertiary,
+                      size: 18,
+                    ),
+                  ]),
+                ),
+              );
+            }),
+
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.errorLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.error_outline,
+                      color: AppColors.error, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(_error!,
+                        style: AppTextStyles.bodySmall
+                            .copyWith(color: AppColors.error)),
+                  ),
+                ]),
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            // Security note
+            Row(children: [
+              const Icon(Icons.lock_rounded, size: 13, color: Colors.green),
+              const SizedBox(width: 6),
+              Text(
+                'Secured by Bridge · Funds sent directly to MoMo',
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textSecondary),
+              ),
+            ]),
+
+            const SizedBox(height: 16),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _processing ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  disabledBackgroundColor:
+                      AppColors.primary.withValues(alpha: 0.35),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: _processing
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Withdraw Now',
+                        style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1131,7 +1411,8 @@ class _BalanceSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 38, width: 180,
+        height: 38,
+        width: 180,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
@@ -1140,8 +1421,11 @@ class _BalanceSkeleton extends StatelessWidget {
 }
 
 class _ActionBtn extends StatelessWidget {
-  final IconData icon; final String label; final VoidCallback onTap;
-  const _ActionBtn({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ActionBtn(
+      {required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -1166,15 +1450,18 @@ class _ActionBtn extends StatelessWidget {
 }
 
 class _StatChip extends StatelessWidget {
-  final String value, label; final Color color;
-  const _StatChip({required this.value, required this.label, required this.color});
+  final String value, label;
+  final Color color;
+  const _StatChip(
+      {required this.value, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) => Expanded(
         child: Column(children: [
           Text(value, style: AppTextStyles.heading4.copyWith(color: color)),
           const SizedBox(height: 2),
-          Text(label, style: AppTextStyles.caption, textAlign: TextAlign.center),
+          Text(label,
+              style: AppTextStyles.caption, textAlign: TextAlign.center),
         ]),
       );
 }
@@ -1182,7 +1469,9 @@ class _StatChip extends StatelessWidget {
 class _StatsDiv extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-      width: 0.5, height: 36, color: AppColors.border,
+      width: 0.5,
+      height: 36,
+      color: AppColors.border,
       margin: const EdgeInsets.symmetric(horizontal: 12));
 }
 
@@ -1192,12 +1481,14 @@ class _StatusBadge extends StatelessWidget {
 
   Color get _color {
     final s = status.toLowerCase();
-    if (s.contains('complete') || s.contains('success')) return AppColors.success;
-    if (s.contains('fail')     || s.contains('cancel'))  return AppColors.error;
-    if (s.contains('pending'))                            return AppColors.warning;
+    if (s.contains('complete') || s.contains('success')) {
+      return AppColors.success;
+    }
+    if (s.contains('fail') || s.contains('cancel')) return AppColors.error;
+    if (s.contains('pending')) return AppColors.warning;
     return AppColors.warning;
   }
-
+  
   String get _label {
     final s = status.split('.').last;
     return s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
@@ -1212,7 +1503,9 @@ class _StatusBadge extends StatelessWidget {
         ),
         child: Text(_label,
             style: AppTextStyles.caption.copyWith(
-              color: _color, fontSize: 9, fontWeight: FontWeight.w700,
+              color: _color,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
             )),
       );
 }
@@ -1221,9 +1514,11 @@ class _SheetHandle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
         child: Container(
-          width: 40, height: 4,
+          width: 40,
+          height: 4,
           decoration: BoxDecoration(
-            color: AppColors.border, borderRadius: BorderRadius.circular(2),
+            color: AppColors.border,
+            borderRadius: BorderRadius.circular(2),
           ),
         ),
       );
@@ -1242,7 +1537,7 @@ class _SecurityBadge extends StatelessWidget {
           children: [
             const Icon(Icons.lock_rounded, color: AppColors.success, size: 14),
             const SizedBox(width: 6),
-            Text('Secured by Paystack · 256-bit encryption',
+            Text('Secured by Bridge · MoMo payments only',
                 style: AppTextStyles.caption.copyWith(
                   color: AppColors.success, fontWeight: FontWeight.w600,
                 )),
