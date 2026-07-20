@@ -46,3 +46,7 @@ app.*.map.json
 env.json
 .env.yaml
 env.json
+
+
+android/key.properties
+*.jks

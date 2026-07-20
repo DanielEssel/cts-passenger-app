@@ -1541,9 +1541,13 @@ class _PromoCard extends StatelessWidget {
   final _PromoBanner promo;
   const _PromoCard({required this.promo});
 
+  // Parse a hex string ('#RRGGBB' or 'RRGGBB', 6 or 8 digits) to a Color,
+  // falling back to the theme colour if it's malformed.
   Color _parseColor(String hex, Color fallback) {
     try {
-      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+      final cleaned = hex.replaceAll('#', '').trim();
+      final value = cleaned.length == 6 ? 'FF$cleaned' : cleaned;
+      return Color(int.parse(value, radix: 16));
     } catch (_) {
       return fallback;
     }
@@ -1551,67 +1555,75 @@ class _PromoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final start = _parseColor(promo.colorStart, HomeTheme.primary);
-    final end = _parseColor(promo.colorEnd, HomeTheme.primary);
+    final bg = _parseColor(promo.backgroundColor, HomeTheme.primary);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
       child: Container(
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [start, end],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: bg,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Row(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(promo.tag,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 9,
-                        letterSpacing: 1.5,
-                        fontWeight: FontWeight.w700,
-                      )),
-                  const SizedBox(height: 6),
-                  Text(promo.title,
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        height: 1.2,
-                        letterSpacing: -0.4,
-                      )),
-                  if (promo.code != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('Code: ${promo.code}',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            color: start,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          )),
-                    ),
-                  ],
-                ],
+            Expanded(child: _text()),
+            const SizedBox(width: 12),
+            _trailing(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _text() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            promo.title,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              height: 1.2,
+              letterSpacing: -0.4,
+            ),
+          ),
+          if (promo.subtitle.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              promo.subtitle,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                color: Colors.white.withValues(alpha: 0.92),
+                fontSize: 13,
+                height: 1.3,
               ),
             ),
-            Icon(Icons.local_offer_rounded,
-                color: Colors.white.withValues(alpha: 0.15), size: 80),
           ],
+        ],
+      );
+
+  // The admin's image if provided, otherwise the decorative offer glyph.
+  Widget _trailing() {
+    if (promo.imageUrl.isEmpty) {
+      return Icon(
+        Icons.local_offer_rounded,
+        color: Colors.white.withValues(alpha: 0.15),
+        size: 80,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Image.network(
+        promo.imageUrl,
+        width: 64,
+        height: 64,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Icon(
+          Icons.local_offer_rounded,
+          color: Colors.white.withValues(alpha: 0.15),
+          size: 64,
         ),
       ),
     );
@@ -1659,27 +1671,24 @@ class _SavedPlace {
 
 class _PromoBanner {
   final String title;
-  final String tag;
-  final String? code;
-  final String colorStart;
-  final String colorEnd;
+  final String subtitle;
+  final String backgroundColor;
+  final String imageUrl;
 
   const _PromoBanner({
     required this.title,
-    required this.tag,
-    this.code,
-    required this.colorStart,
-    required this.colorEnd,
+    required this.subtitle,
+    required this.backgroundColor,
+    required this.imageUrl,
   });
 
   factory _PromoBanner.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return _PromoBanner(
       title: d['title'] as String? ?? '',
-      tag: d['tag'] as String? ?? 'OFFER',
-      code: d['code'] as String?,
-      colorStart: d['colorStart'] as String? ?? '#16A34A',
-      colorEnd: d['colorEnd'] as String? ?? '#15803D',
+      subtitle: d['subtitle'] as String? ?? '',
+      backgroundColor: d['backgroundColor'] as String? ?? '#16A34A',
+      imageUrl: d['imageUrl'] as String? ?? '',
     );
   }
 }
