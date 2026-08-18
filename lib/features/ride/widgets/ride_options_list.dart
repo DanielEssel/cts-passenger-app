@@ -1,4 +1,4 @@
-// lib/features/ride/widgets/ride_options_list.dart
+// features/ride/widgets/ride_options_list.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +15,9 @@ import '../services/ride_options_service.dart';
 import '../constants/ride_constants.dart';
 import 'ride_option_card.dart';
 
+// Service types shown in the ride options list
+const _hailingTypes = {'taxi', 'okada', 'pragyia'};
+
 class RideOptionsList extends ConsumerWidget {
   final RideRequestState state;
   final VoidCallback     onShowPaymentSheet;
@@ -25,7 +28,7 @@ class RideOptionsList extends ConsumerWidget {
     required this.onShowPaymentSheet,
   });
 
-   @override
+  @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nearbyAsync = ref.watch(driversNearbyProvider);
 
@@ -49,9 +52,7 @@ class RideOptionsList extends ConsumerWidget {
               nearbyAsync.when(
                 data: (drivers) {
                   final total = drivers
-                      .where((d) =>
-                          d.serviceType == 'taxi' ||
-                          d.serviceType == 'okada')
+                      .where((d) => _hailingTypes.contains(d.serviceType))
                       .length;
                   return Text(
                     '$total driver${total == 1 ? '' : 's'} nearby',
@@ -76,7 +77,8 @@ class RideOptionsList extends ConsumerWidget {
 
           // ── Ride options ──
           ...RideOptionsService.availableRides.map((ride) {
-            final serviceKey = ride.serviceType.name; // 'taxi' or 'okada'
+            // Use the Firestore string value — pragyia stays 'pragyia'
+            final serviceKey = ride.serviceType.name;
 
             final driverCount = nearbyAsync.maybeWhen(
               data: (drivers) => drivers
@@ -112,8 +114,8 @@ class RideOptionsList extends ConsumerWidget {
           // ── No drivers banner ──
           nearbyAsync.when(
             data: (drivers) {
-              final hasAny = drivers.any((d) =>
-                  d.serviceType == 'taxi' || d.serviceType == 'okada');
+              final hasAny = drivers
+                  .any((d) => _hailingTypes.contains(d.serviceType));
               if (hasAny) return const SizedBox.shrink();
               return Container(
                 margin:  const EdgeInsets.only(bottom: 12),
@@ -133,8 +135,8 @@ class RideOptionsList extends ConsumerWidget {
                       child: Text(
                         'No drivers available in your area right now. '
                         'Please try again in a few minutes.',
-                        style: AppTextStyles.caption.copyWith(
-                            color: AppColors.warning),
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.warning),
                       ),
                     ),
                   ],
@@ -178,8 +180,8 @@ class PaymentSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedMethod = PaymentMethod.fromType(state.paymentMethod);
     final walletBalance  = ref.watch(walletBalanceProvider).maybeWhen(
-      data:    (b) => b,
-      orElse:  () => 0.0,
+      data:   (b) => b,
+      orElse: () => 0.0,
     );
 
     return GestureDetector(

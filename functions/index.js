@@ -328,3 +328,11 @@ exports.onTripRated     = ratings.onTripRated;
 exports.onDeliveryRated = ratings.onDeliveryRated;
 exports.onGasOrderRated = ratings.onGasOrderRated;
 
+
+const adminAlerts = require("./admin_alerts");
+exports.onDriverSubmittedForReview = adminAlerts.onDriverSubmittedForReview;
+
+// ── withdrawal approval ─────────────────────────────────────
+const withdrawalApproval = require("./withdrawal_approval");
+exports.approveWithdrawal = withdrawalApproval.approveWithdrawal;
+exports.rejectWithdrawal = withdrawalApproval.rejectWithdrawal;

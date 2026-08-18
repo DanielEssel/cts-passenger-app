@@ -31,7 +31,7 @@ class LocationService {
         distanceFilter: 10,
         intervalDuration: Duration(seconds: 3),
         foregroundNotificationConfig: ForegroundNotificationConfig(
-          notificationTitle: 'CTS Transport is tracking location',
+          notificationTitle: 'CTS Go is tracking location',
           notificationText: 'Live tracking active',
           enableWakeLock: true,
         ),

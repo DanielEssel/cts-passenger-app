@@ -570,7 +570,7 @@ exports.approveDriver = onCall(
         token: fcmToken,
         notification: {
           title: "🎉 Account Approved!",
-          body:  "Your CTS Transport driver account is verified. Start driving now!",
+          body:  "Your CTS Go driver account is verified. Start driving now!",
         },
         data: { type: "account_approved", route: "/driver-shell" },
       }).catch(console.error); // Don't fail if FCM fails

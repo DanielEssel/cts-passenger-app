@@ -517,14 +517,26 @@ exports.initiateBridgePayout = onCall(
       );
     }
 
-    // ── Determine role and balance source ─────────────────────────────────────
+   // ── Driver-only: passengers must never withdraw (laundering vector) ────────
     const driverDoc = await db.collection("drivers").doc(uid).get();
-    const isDriver = driverDoc.exists;
+    if (!driverDoc.exists) {
+      throw new HttpsError(
+        "permission-denied",
+        "Withdrawals are only available to drivers.",
+      );
+    }
+    const isDriver = true;
 
-    const userDoc = await db.collection("users").doc(uid).get();
-    const userName = isDriver
-      ? (driverDoc.data()?.displayName ?? "Driver")
-      : (userDoc.data()?.displayName ?? "Passenger");
+    // ── Approved, non-suspended drivers only ──────────────────────────────────
+    const dData = driverDoc.data() ?? {};
+    if (dData.isApproved !== true || dData.signupStep === "suspended") {
+      throw new HttpsError(
+        "permission-denied",
+        "Your account is not approved for withdrawals.",
+      );
+    }
+
+    const userName = dData.displayName ?? "Driver";
 
     // ── Idempotency: block if pending withdrawal exists ───────────────────────
     const pending = await db
@@ -544,6 +556,44 @@ exports.initiateBridgePayout = onCall(
     const transactionId = generateTransactionId("CTS-PAYOUT");
     const withdrawalRef = db.collection("withdrawals").doc();
     const txRef = db.collection("transactions").doc();
+
+
+    // ── Daily cap + velocity (anti-laundering throughput limit) ───────────────
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const todays = await db
+      .collection("withdrawals")
+      .where("userId", "==", uid)
+      .where("createdAt", ">=", startOfDay)
+      .get();
+
+    const dailyCap =
+      settingsDoc.data()?.dailyWithdrawalCap ?? 5000;
+    const maxPerDay =
+      settingsDoc.data()?.maxWithdrawalsPerDay ?? 3;
+
+    // Count only non-failed withdrawals toward the caps.
+    const counted = todays.docs.filter(
+      (d) => d.data().status !== "failed",
+    );
+    const todayTotal = counted.reduce(
+      (s, d) => s + (d.data().amount || 0),
+      0,
+    );
+
+    if (counted.length >= maxPerDay) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `Daily withdrawal limit reached (${maxPerDay} per day). Try again tomorrow.`,
+      );
+    }
+    if (todayTotal + amount > dailyCap) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `Daily withdrawal cap reached. Remaining today: GH₵${(dailyCap - todayTotal).toFixed(2)}`,
+      );
+    }
 
     // ── Atomically deduct balance + create records ────────────────────────────
     try {
@@ -596,26 +646,6 @@ exports.initiateBridgePayout = onCall(
               processedAt:    FieldValue.serverTimestamp(),
             });
           }
-        } else {
-          const walletRef = db.collection("wallets").doc(uid);
-          const wallet = await tx.get(walletRef);
-          if (!wallet.exists) {
-            throw new HttpsError(
-              "not-found",
-              "Wallet not found. Please top up first.",
-            );
-          }
-          const balance = wallet.data()?.balance ?? 0;
-          if (balance < amount) {
-            throw new HttpsError(
-              "failed-precondition",
-              `Insufficient balance. Available: GH₵${balance.toFixed(2)}`,
-            );
-          }
-          tx.update(walletRef, {
-            balance:   FieldValue.increment(-amount),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
         }
 
         // Withdrawal record — status:"pending" until callback
@@ -623,7 +653,7 @@ exports.initiateBridgePayout = onCall(
           id: withdrawalRef.id,
           userId: uid,
           userName,
-          role: isDriver ? "driver" : "passenger",
+          role: "driver",
           amount,
           currency: "GHS",
           phone: intlPhone,
@@ -658,117 +688,31 @@ exports.initiateBridgePayout = onCall(
       );
     }
 
-    // ── Create payment tracking doc ───────────────────────────────────────────
-    const paymentRef = db.collection("payments").doc(transactionId);
-    await paymentRef.set({
-      transactionId,
-      userId: uid,
-      userName,
-      role: isDriver ? "driver" : "passenger",
-      phone: intlPhone,
-      network: mappedNetwork,
-      amount,
-      currency: "GHS",
-      type: "payout",
-      status: "pending",
-      withdrawalId: withdrawalRef.id,
-      txId: txRef.id,
-      bridgeStatus: null,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+   // Money is HELD (walletBalance debited, pendingWithdrawal incremented above).
+// Decide: auto-approve and pay now, or queue for admin review.
+const { review, reason } = await _needsManualReview({
+  db, uid, amount, intlPhone, dData, settings: settingsDoc.data(),
+});
 
-    // ── Call Bridge MTC ───────────────────────────────────────────────────────
-    const requestTime = new Date()
-      .toISOString()
-      .replace("T", " ")
-      .split(".")[0];
-    let bridgeResponse;
+if (review) {
+  await withdrawalRef.update({ reviewReason: reason, needsReview: true });
+  return {
+    success: true,
+    status: "pending_review",
+    withdrawalId: withdrawalRef.id,
+    message: "Withdrawal submitted for review. You'll be paid once approved.",
+  };
+}
 
-    try {
-      bridgeResponse = await axios.post(
-        `${BRIDGE_BASE}/make_payment`,
-        {
-          service_id: Number(BRIDGE_SERVICE_ID.value()),
-          reference: userName,
-          customer_number: intlPhone,
-          transaction_id: transactionId,
-          trans_type: "MTC", // Money Transfer to Customer (payout)
-          amount,
-          nw: mappedNetwork,
-          nickname: userName,
-          payment_option: "MOM",
-          currency_code: "GHS",
-          currency_val: amount,
-          callback_url: CALLBACK_PAYOUT,
-          request_time: requestTime,
-        },
-        {
-          headers: getBridgeHeaders(
-            BRIDGE_CLIENT_KEY.value(),
-            BRIDGE_SECRET_KEY.value(),
-          ),
-        },
-      );
-    } catch (bridgeErr) {
-      console.error(
-        "[initiateBridgePayout] Bridge API call failed:",
-        bridgeErr.message,
-      );
-      // Refund atomically — user's money is restored
-      await _refundFailedPayout(
-        db,
-        uid,
-        isDriver,
-        amount,
-        withdrawalRef.id,
-        txRef.id,
-      );
-      await paymentRef.update({
-        status: "failed",
-        failureReason: bridgeErr.message,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      throw new HttpsError(
-        "unavailable",
-        "Could not reach payment service. Your balance has been restored.",
-      );
-    }
-
-    const responseCode = bridgeResponse?.data?.response_code ?? "500";
-    const responseMsg = bridgeResponse?.data?.response_message ?? "Unknown";
-    const accepted = new Set(["000", "202"]).has(responseCode);
-
-    await paymentRef.update({
-      bridgeCode: responseCode,
-      bridgeMessage: responseMsg,
-      status: accepted ? "pending" : "failed",
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-
-    if (!accepted) {
-      // Bridge rejected — refund immediately
-      await _refundFailedPayout(
-        db,
-        uid,
-        isDriver,
-        amount,
-        withdrawalRef.id,
-        txRef.id,
-      );
-      throw new HttpsError(
-        "failed-precondition",
-        `Payout could not be initiated (${responseCode}). Your balance has been restored.`,
-      );
-    }
-
-    console.log(
-      `[initiateBridgePayout] ✅ ${transactionId} | ${responseCode} | GHS${amount} → ${intlPhone}`,
-    );
-
-    return { success: true, transactionId };
+await _sendBridgePayout({
+  db, uid, userName, amount, intlPhone, mappedNetwork,
+  transactionId, withdrawalRef, txRef, isDriver: true,
+});
+await withdrawalRef.update({ autoApproved: true });
+return { success: true, status: "processing", transactionId };
   },
 );
+
 
 // ── bridgePayoutCallback ───────────────────────────────────────────────────────
 // HTTP webhook — Bridge calls this when payout settles
@@ -1040,3 +984,11 @@ async function _refundFailedPayout(
     }
   });
 }
+
+// ── Shared internals for withdrawal_approval.js ──
+exports._bridgeShared = {
+  BRIDGE_CLIENT_KEY, BRIDGE_SECRET_KEY, BRIDGE_SERVICE_ID,
+  BRIDGE_BASE, CALLBACK_PAYOUT,
+  getBridgeHeaders, _refundFailedPayout,
+};
+

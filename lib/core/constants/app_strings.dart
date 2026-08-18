@@ -4,13 +4,13 @@ class AppStrings {
   // ============================================
   // APP BRANDING
   // ============================================
-  static const String appName = 'CTS Transport';
+  static const String appName = 'CTS Go';
   static const String appTagline = 'Your Mobility Solution';
 
   // ============================================
   // SPLASH SCREEN
   // ============================================
-  static const String splashTitle = 'CTS Transport';
+  static const String splashTitle = 'CTS Go';
   static const String splashSubtitle = 'Your Mobility Solution';
 
   // ============================================
@@ -56,7 +56,7 @@ class AppStrings {
   // SIGNUP SCREEN
   // ============================================
   static const String signupTitle = 'Create Account';
-  static const String signupSubtitle = 'Join CTS Transport today';
+  static const String signupSubtitle = 'Join CTS Go today';
   static const String signupFirstName = 'First Name';
   static const String signupLastName = 'Last Name';
   static const String signupEmail = 'Email Address';
@@ -92,7 +92,7 @@ class AppStrings {
   // ============================================
   static const String roleSelectionTitle = 'Select Your Role';
   static const String roleSelectionSubtitle =
-      'Choose how you want to use CTS Transport';
+      'Choose how you want to use CTS Go';
   static const String roleRider = 'Rider';
   static const String roleRiderDescription =
       'Book rides and request deliveries';

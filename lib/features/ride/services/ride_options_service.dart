@@ -44,6 +44,26 @@ class RideOptionsService {
       hasAC: false,
       isInsured: true,
     ),
+    RideOption(
+      serviceType: ServiceType.pragyia,
+      icon: Icons.electric_rickshaw,
+      name: 'Pragyia',
+      badge: 'Eco-friendly',
+      description: 'Electric · 3 seat',
+      eta: '2 min',
+      etaColor: Color(0xFF10B981),
+      basePrice: 15.0,
+      duration: '~16 min',
+      perks: [
+        'Environmentally friendly',
+        'Quiet ride',
+        'Cashless payment',
+        'Real-time tracking'
+      ],
+      maxPassengers: 3,
+      hasAC: false,
+      isInsured: true,
+    ),
   ];
 
   static RideOption getRideOption(ServiceType type) {

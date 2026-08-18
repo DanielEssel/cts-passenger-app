@@ -1,5 +1,5 @@
 name: cts_transport_app
-description: "CTS Transport"
+description: "CTS Go"
 publish_to: 'none'
 
 version: 1.0.0+1

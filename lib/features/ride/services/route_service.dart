@@ -10,8 +10,9 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import '../../../core/constants/app_constants.dart'; // Adjust the import path as needed
 
-const _apiKey = String.fromEnvironment('MAPS_API_KEY');
+final _apiKey = AppConstants.googleMapsApiKey;
 
 class RouteResult {
   final List<LatLng> points;

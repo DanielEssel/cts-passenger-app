@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../widgets/common/shared_widgets.dart';
+import '../../../../core/legal/legal_urls.dart';
 
 class AboutScreen extends StatefulWidget {
   const AboutScreen({super.key});
@@ -37,7 +38,7 @@ class _AboutScreenState extends State<AboutScreen> {
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
-  Future<void> _launch(String url) async {
+  Future<void> launch(String url) async {
     final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (mounted) {
@@ -70,16 +71,16 @@ class _AboutScreenState extends State<AboutScreen> {
 
   void _shareApp() {
     const text =
-        'Try CTS Transport — fast, safe rides and deliveries in Ghana! '
+        'Try CTS Go — fast, safe rides and deliveries in Ghana! '
         'Download: https://play.google.com/store/apps/details?id=com.cts.passenger';
     // Use share_plus API
-    Share.share(text, subject: 'CTS Transport');
+    Share.share(text, subject: 'CTS Go');
   }
 
   void _showLicenses() {
     showLicensePage(
       context: context,
-      applicationName: 'CTSTransport',
+      applicationName: 'CTS Go',
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(12),
@@ -94,7 +95,7 @@ class _AboutScreenState extends State<AboutScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSTransportAppBar(title: 'About CTSTransport'),
+      appBar: const CTSTransportAppBar(title: 'About CTS Go'),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(20),
@@ -214,12 +215,17 @@ class _AboutScreenState extends State<AboutScreen> {
           _LinkTile(
             icon: Icons.description_rounded,
             label: 'Terms of Service',
-            onTap: () => _launch('https://ctstransport.com/terms'),
+            onTap: () => LegalUrls.open(context, LegalUrls.terms),
           ),
           _LinkTile(
             icon: Icons.privacy_tip_rounded,
             label: 'Privacy Policy',
-            onTap: () => _launch('https://ctstransport.com/privacy'),
+            onTap: () => LegalUrls.open(context, LegalUrls.privacy),
+          ),
+          _LinkTile(
+            icon: Icons.assignment_rounded,
+            label: 'Driver Agreement',
+            onTap: () => LegalUrls.open(context, LegalUrls.driverAgreement),
           ),
           _LinkTile(
             icon: Icons.gavel_rounded,

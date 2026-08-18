@@ -27,6 +27,15 @@ class PricingService {
       'surgeMultiplier': 1.5,
       'surgeEnabled': false,
     },
+    'pragyia': {
+      'baseFare': 4.0,
+      'perKmRate': 2.0,
+      'perMinRate': 0.25,
+      'minimumFare': 8.0,
+      'cancellationFee': 2.5,
+      'surgeMultiplier': 1.5,
+      'surgeEnabled': false,
+    },
     'taxi': {
       'baseFare': 5.0,
       'perKmRate': 2.5,

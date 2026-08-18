@@ -38,29 +38,33 @@ async function getPlatformSettings() {
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// ── RIDE (okada / taxi) ──────────────────────────────────────────────────────
+// ── RIDE (okada / taxi / pragyia) ────────────────────────────────────────────
 // fare = (baseFare + perKmRate*km + perMinRate*min), floored at minimumFare,
 //        then × surgeMultiplier if surge enabled. Surge applies AFTER the floor
 //        so a surged minimum is still surged (matches rider expectation).
 function calculateRideFare(serviceType, distanceKm, durationMin, settings) {
-  const type = serviceType?.toLowerCase() === "okada" ? "okada" : "taxi";
+  const raw = serviceType?.toLowerCase() ?? "taxi";
+  const type = ["okada", "taxi", "pragyia"].includes(raw) ? raw : "taxi";
   const p = settings?.[type] || {};
 
-  const base = p.baseFare ?? (type === "okada" ? 3.0 : 5.0);
-  const perKm = p.perKmRate ?? (type === "okada" ? 1.5 : 2.5);
-  const perMin = p.perMinRate ?? (type === "okada" ? 0.2 : 0.3);
-  const minFare = p.minimumFare ?? (type === "okada" ? 5.0 : 10.0);
+  const DEFAULTS = {
+    okada:   { baseFare: 3.0, perKmRate: 1.5, perMinRate: 0.20, minimumFare: 5.0  },
+    pragyia: { baseFare: 4.0, perKmRate: 2.0, perMinRate: 0.25, minimumFare: 8.0  },
+    taxi:    { baseFare: 5.0, perKmRate: 2.5, perMinRate: 0.30, minimumFare: 10.0 },
+  };
+  const def = DEFAULTS[type];
 
-  const km = Math.max(0, Number(distanceKm) || 0);
+  const base    = p.baseFare    ?? def.baseFare;
+  const perKm   = p.perKmRate   ?? def.perKmRate;
+  const perMin  = p.perMinRate  ?? def.perMinRate;
+  const minFare = p.minimumFare ?? def.minimumFare;
+
+  const km  = Math.max(0, Number(distanceKm)  || 0);
   const min = Math.max(0, Number(durationMin) || 0);
 
-  // Match the client PricingService ordering exactly: apply surge to the whole
-  // fare first, THEN floor at the minimum. (Client: (base+perKm·km+perMin·min)*surge,
-  // then max with minFare.) Keeping the order identical guarantees client display
-  // == server hold == completion calc.
-  const surgeOn = !!p.surgeEnabled;
+  const surgeOn  = !!p.surgeEnabled;
   const surgeMul = p.surgeMultiplier ?? p.surgeMutiplier ?? 1.0;
-  const surge = surgeOn && surgeMul > 1 ? surgeMul : 1.0;
+  const surge    = surgeOn && surgeMul > 1 ? surgeMul : 1.0;
 
   let fare = (base + perKm * km) * surge;   // distance-only; perMin reserved for future
   fare = Math.max(fare, minFare);
@@ -177,8 +181,6 @@ exports.onTripCreated = onDocumentCreated(
     }
   },
 );
-
-// REPLACE the existing exports.onTripCompleted in functions/trips.js with this.
 
 // REPLACE the existing exports.onTripCompleted in functions/trips.js with this.
 //

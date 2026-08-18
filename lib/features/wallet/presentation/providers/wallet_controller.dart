@@ -102,33 +102,7 @@ class WalletController {
     await _refreshWallet();
   }
 
-  // ─────────────────────────────────────────────
-  // Bridge — payout (withdrawal)
-  // ─────────────────────────────────────────────
-
-  Future<String> initiateBridgePayout({
-    required double amount,
-    required String phone,
-    required String network,
-  }) async {
-    // _refreshAuthToken already throws if not logged in —
-    // no need for a redundant _requireUser call
-    await _refreshAuthToken();
-
-    try {
-      final remote        = _ref.read(walletRemoteDataSourceProvider);
-      final transactionId = await remote.initiateBridgePayout(
-        amount:  amount,
-        phone:   phone,
-        network: network,
-      );
-      await _refreshWallet();
-      return transactionId;
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception(e.message ?? 'Withdrawal failed');
-    }
-  }
-
+  
   // ─────────────────────────────────────────────
   // Service order deduction (escrow)
   // ─────────────────────────────────────────────
@@ -181,32 +155,6 @@ class WalletController {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Withdraw (legacy — manual queue via admin)
-  // For instant MoMo withdrawal use initiateBridgePayout instead
-  // ─────────────────────────────────────────────
-
-  Future<bool> withdraw({
-    required double amount,
-    required String phoneNumber,
-    required String network,
-  }) async {
-    _requireUser;
-    try {
-      final remote  = _ref.read(walletRemoteDataSourceProvider);
-      final success = await remote.withdrawFunds(
-        amount:      amount,
-        phoneNumber: phoneNumber,
-        network:     network,
-      );
-      if (success) await _refreshWallet();
-      return success;
-    } on FirebaseFunctionsException catch (e) {
-      throw Exception(e.message ?? 'Withdrawal failed');
-    } catch (e) {
-      rethrow;
-    }
-  }
 
   // ─────────────────────────────────────────────
   // Utilities

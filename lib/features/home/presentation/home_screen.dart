@@ -1257,10 +1257,12 @@ class _ServiceCard extends StatelessWidget {
   String _subtitleFor(ServiceType s) => switch (s) {
         ServiceType.taxi => 'Comfortable rides',
         ServiceType.okada => 'Beat the traffic',
+        ServiceType.pragyia => ' Short trips',
         ServiceType.delivery => 'Send a package',
         ServiceType.gas => 'Refill at home',
       };
 }
+
 
 class _PulsingDot extends StatefulWidget {
   final Color color;

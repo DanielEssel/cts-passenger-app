@@ -304,101 +304,102 @@ class RiderApp extends StatelessWidget {
   }
 
   Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
-    debugPrint('🎯 Generating route: ${settings.name}');
+  debugPrint('🎯 Generating route: ${settings.name}');
 
-    switch (settings.name) {
-      case AppRoutes.bookRide:
-        return MaterialPageRoute(
-          builder: (context) => const BookRideScreen(),
-          settings: settings,
-        );
+  final uri = Uri.parse(settings.name ?? '');
+  final path = uri.path;
 
-      case AppRoutes.delivery:
-        return MaterialPageRoute(
-          builder: (context) => const DeliveryScreen(),
-          settings: settings,
-        );
+  switch (path) {
+    case AppRoutes.bookRide:
+      return MaterialPageRoute(
+        builder: (context) => const BookRideScreen(),
+        settings: settings,
+      );
 
-      case AppRoutes.deliveryVehicle:
-        final args = settings.arguments as Map<String, dynamic>? ?? {};
-        return MaterialPageRoute(
-          builder: (context) => DeliveryVehicleScreen(
-            pickup: args['pickup'] ?? '',
-            pickupGeoPoint:
-                args['pickupGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
-            dropoff: args['dropoff'] ?? '',
-            dropoffGeoPoint:
-                args['dropoffGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
-            weightTier: args['weightTier'] ?? '',
-            weightRange: args['weightRange'] ?? '',
-            eligibleVehicles: args['eligibleVehicles'] ?? [],
-            parcelType: args['parcelType'] ?? '',
-            isFragile: args['isFragile'] ?? false,
-            requiresHelpers: args['requiresHelpers'] ?? false,
-            hasPhoto: args['hasPhoto'] ?? false,
-            receiverPhone: args['receiverPhone'] ?? '',
-            receiverName: args['receiverName'] ?? '',
-            notes: args['notes'] ?? '',
-          ),
-          settings: settings,
-        );
+    case AppRoutes.delivery:
+      return MaterialPageRoute(
+        builder: (context) => const DeliveryScreen(),
+        settings: settings,
+      );
 
-      case AppRoutes.rideTracking:
-        final args = settings.arguments;
-        final tripId = args is String
-            ? args
-            : args is Map
-                ? (args['tripId'] ?? args['rideId'] ?? '') as String
-                : '';
-        return MaterialPageRoute(
-          builder: (context) => RideTrackingScreen(tripId: tripId),
-          settings: settings,
-        );
+    case AppRoutes.deliveryVehicle:
+      final args = settings.arguments as Map<String, dynamic>? ?? {};
+      return MaterialPageRoute(
+        builder: (context) => DeliveryVehicleScreen(
+          pickup: args['pickup'] ?? '',
+          pickupGeoPoint:
+              args['pickupGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
+          dropoff: args['dropoff'] ?? '',
+          dropoffGeoPoint:
+              args['dropoffGeoPoint'] ?? const GeoPoint(5.6037, -0.1870),
+          weightTier: args['weightTier'] ?? '',
+          weightRange: args['weightRange'] ?? '',
+          eligibleVehicles: args['eligibleVehicles'] ?? [],
+          parcelType: args['parcelType'] ?? '',
+          isFragile: args['isFragile'] ?? false,
+          requiresHelpers: args['requiresHelpers'] ?? false,
+          hasPhoto: args['hasPhoto'] ?? false,
+          receiverPhone: args['receiverPhone'] ?? '',
+          receiverName: args['receiverName'] ?? '',
+          notes: args['notes'] ?? '',
+        ),
+        settings: settings,
+      );
 
-      case AppRoutes.gasOrder:
-        debugPrint('✅ Creating GasOrderScreen');
-        return MaterialPageRoute(
-          builder: (context) => const GasOrderScreen(),
-          settings: settings,
-        );
+    case AppRoutes.rideTracking:
+      final args = settings.arguments;
+      final tripId = args is String
+          ? args
+          : args is Map
+              ? (args['tripId'] ?? args['rideId'] ?? '') as String
+              : uri.queryParameters['tripId'] ?? '';
+      return MaterialPageRoute(
+        builder: (context) => RideTrackingScreen(tripId: tripId),
+        settings: settings,
+      );
 
-      case AppRoutes.deliveryTracking:
-        final a = settings.arguments;
-        final deliveryId = a is String
-            ? a
-            : a is Map
-                ? (a['deliveryId'] ?? '') as String
-                : '';
-        return MaterialPageRoute(
-          builder: (_) => DeliveryTrackingScreen(deliveryId: deliveryId),
-          settings: settings,
-        );
+    case AppRoutes.gasOrder:
+      debugPrint('✅ Creating GasOrderScreen');
+      return MaterialPageRoute(
+        builder: (context) => const GasOrderScreen(),
+        settings: settings,
+      );
 
-      case AppRoutes.gasTracking:
-        final a = settings.arguments;
-        final orderId = a is String
-            ? a
-            : a is Map
-                ? (a['orderId'] ?? '') as String
-                : '';
-        return MaterialPageRoute(
-          builder: (_) => GasOrderTrackingScreen(orderId: orderId),
-          settings: settings,
-        );
+    case AppRoutes.deliveryTracking:
+      final a = settings.arguments;
+      final deliveryId = a is String
+          ? a
+          : a is Map
+              ? (a['deliveryId'] ?? '') as String
+              : uri.queryParameters['deliveryId'] ?? '';
+      return MaterialPageRoute(
+        builder: (_) => DeliveryTrackingScreen(deliveryId: deliveryId),
+        settings: settings,
+      );
 
-      case '/wallet':
-        // Wallet is a tab in the shell — pop back to shell and switch tab
-        // If we're already in the shell, this is handled by the shell itself
-        return MaterialPageRoute(
-          builder: (context) => const WalletStandaloneScreen(),
-          settings: settings,
-        );
+    case AppRoutes.gasTracking:
+      final a = settings.arguments;
+      final orderId = a is String
+          ? a
+          : a is Map
+              ? (a['orderId'] ?? '') as String
+              : uri.queryParameters['orderId'] ?? '';
+      return MaterialPageRoute(
+        builder: (_) => GasOrderTrackingScreen(orderId: orderId),
+        settings: settings,
+      );
 
-      default:
-        debugPrint('⚠️ Unknown route in onGenerateRoute: ${settings.name}');
-        return null;
-    }
+    case '/wallet':
+      return MaterialPageRoute(
+        builder: (context) => const WalletStandaloneScreen(),
+        settings: settings,
+      );
+
+    default:
+      debugPrint('⚠️ Unknown route in onGenerateRoute: ${settings.name}');
+      return null;
   }
+}
 
   Route<dynamic> _onUnknownRoute(RouteSettings settings) {
     debugPrint('⚠️ Unknown route: ${settings.name}');

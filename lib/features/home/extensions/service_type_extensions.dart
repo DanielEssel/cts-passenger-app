@@ -10,6 +10,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Taxi';
       case ServiceType.okada:
         return 'Okada';
+      case ServiceType.pragyia:
+        return 'Pragyia';
       case ServiceType.delivery:
         return 'Delivery';
       case ServiceType.gas:
@@ -23,6 +25,8 @@ extension ServiceTypeExtension on ServiceType {
         return Icons.local_taxi_rounded;
       case ServiceType.okada:
         return Icons.electric_bike_rounded;
+      case ServiceType.pragyia:
+        return Icons.directions_car_rounded;
       case ServiceType.delivery:
         return Icons.inventory_2_rounded;
       case ServiceType.gas:
@@ -36,6 +40,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Where are you going?';
       case ServiceType.okada:
         return 'Quick ride — where to?';
+      case ServiceType.pragyia:
+        return 'Short trips';
       case ServiceType.delivery:
         return 'Deliver a package';
       case ServiceType.gas:
@@ -47,7 +53,9 @@ extension ServiceTypeExtension on ServiceType {
     switch (this) {
       case ServiceType.taxi:
       case ServiceType.okada:
+      case ServiceType.pragyia:
         return AppRoutes.bookRide; // Uses your existing route
+      // Uses your existing route
       case ServiceType.delivery:
         return AppRoutes.delivery; // Uses your existing route
       case ServiceType.gas:
@@ -59,6 +67,7 @@ extension ServiceTypeExtension on ServiceType {
     switch (this) {
       case ServiceType.taxi:
       case ServiceType.okada:
+      case ServiceType.pragyia:
         return 'driver_hailing';
       case ServiceType.delivery:
       case ServiceType.gas:

@@ -3,7 +3,7 @@
 class AppConstants {
   // API Keys
   static const String googleMapsApiKey =
-      'AIzaSyCgkvDFZo4-bKH7bp1Gp3kH1VcN3Mzuvo0';
+      'AIzaSyBNF_v_4sXtsoWC_kpPoxc0TVj3pkefjBA';
 
   // App Settings
   static const double defaultMapZoom = 14.0;

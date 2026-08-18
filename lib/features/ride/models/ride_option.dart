@@ -12,6 +12,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Taxi';
       case ServiceType.okada:
         return 'Okada';
+      case ServiceType.pragyia:
+        return 'Pragyia';
       case ServiceType.delivery:
         return 'Delivery';
       case ServiceType.gas:
@@ -25,6 +27,8 @@ extension ServiceTypeExtension on ServiceType {
         return Icons.directions_car_rounded;
       case ServiceType.okada:
         return Icons.two_wheeler_rounded;
+      case ServiceType.pragyia:
+        return Icons.electric_bike_rounded;
       case ServiceType.delivery:
         return Icons.local_shipping_rounded;
       case ServiceType.gas:
@@ -38,6 +42,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Where are you going?';
       case ServiceType.okada:
         return 'Quick ride — where to?';
+      case ServiceType.pragyia:
+        return 'Eco-friendly ride — where to?';
       case ServiceType.delivery:
         return 'Deliver a package';
       case ServiceType.gas:
@@ -49,6 +55,7 @@ extension ServiceTypeExtension on ServiceType {
     switch (this) {
       case ServiceType.taxi:
       case ServiceType.okada:
+      case ServiceType.pragyia:
         return '/book-ride';
       case ServiceType.delivery:
         return '/delivery';
@@ -61,6 +68,7 @@ extension ServiceTypeExtension on ServiceType {
     switch (this) {
       case ServiceType.taxi:
       case ServiceType.okada:
+      case ServiceType.pragyia:
         return 'driver_hailing';
       case ServiceType.delivery:
       case ServiceType.gas:
@@ -74,6 +82,8 @@ extension ServiceTypeExtension on ServiceType {
       case ServiceType.taxi:
         return p.taxiBaseFare;
       case ServiceType.okada:
+        return p.okadaBaseFare;
+      case ServiceType.pragyia:
         return p.okadaBaseFare;
       case ServiceType.delivery:
         return p.deliveryBaseFare;
@@ -89,6 +99,8 @@ extension ServiceTypeExtension on ServiceType {
         return p.taxiPerKmRate;
       case ServiceType.okada:
         return p.okadaPerKmRate;
+      case ServiceType.pragyia:
+        return p.okadaPerKmRate;
       case ServiceType.delivery:
         return p.deliveryPerKmRate;
       case ServiceType.gas:
@@ -102,6 +114,8 @@ extension ServiceTypeExtension on ServiceType {
         return 4;
       case ServiceType.okada:
         return 1;
+      case ServiceType.pragyia:
+        return 3;
       case ServiceType.delivery:
         return 0;
       case ServiceType.gas:
@@ -115,6 +129,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Comfortable · 4 seats';
       case ServiceType.okada:
         return 'Agile · 1 seat';
+      case ServiceType.pragyia:
+        return 'Eco-friendly · 3 seats';
       case ServiceType.delivery:
         return 'Small packages';
       case ServiceType.gas:
@@ -128,6 +144,8 @@ extension ServiceTypeExtension on ServiceType {
         return 'Most popular';
       case ServiceType.okada:
         return 'Fastest';
+      case ServiceType.pragyia:
+        return 'Eco-friendly';
       case ServiceType.delivery:
         return 'Logistics';
       case ServiceType.gas:
@@ -141,6 +159,8 @@ extension ServiceTypeExtension on ServiceType {
         return '3 min';
       case ServiceType.okada:
         return '1 min';
+      case ServiceType.pragyia:
+        return '2 min';
       case ServiceType.delivery:
         return '5 min';
       case ServiceType.gas:
@@ -152,6 +172,7 @@ extension ServiceTypeExtension on ServiceType {
     switch (this) {
       case ServiceType.taxi:
       case ServiceType.okada:
+      case ServiceType.pragyia:
         return AppColors.success;
       case ServiceType.delivery:
         return AppColors.info;
@@ -166,6 +187,8 @@ extension ServiceTypeExtension on ServiceType {
         return '~18 min';
       case ServiceType.okada:
         return '~14 min';
+      case ServiceType.pragyia:
+        return '~12 min';
       case ServiceType.delivery:
         return '~25 min';
       case ServiceType.gas:
@@ -189,6 +212,8 @@ extension ServiceTypeExtension on ServiceType {
           'Quick pickup',
           'Cash payment'
         ];
+      case ServiceType.pragyia:
+        return ['Electric', 'Quiet ride', 'Low emission', 'Quick pickup'];
       case ServiceType.delivery:
         return ['Door-to-door', 'Secure handling', 'Live tracking'];
       case ServiceType.gas:
@@ -267,6 +292,7 @@ class RideOptionsService {
   static final List<RideOption> availableRides = [
     RideOption.fromServiceType(ServiceType.taxi),
     RideOption.fromServiceType(ServiceType.okada),
+    RideOption.fromServiceType(ServiceType.pragyia),
     RideOption.fromServiceType(ServiceType.delivery),
   ];
 
@@ -284,6 +310,7 @@ class RideOptionsService {
     return switch (option.serviceType) {
       ServiceType.taxi => pricing.calculateRideFare('taxi', distanceKm),
       ServiceType.okada => pricing.calculateRideFare('okada', distanceKm),
+      ServiceType.pragyia => pricing.calculateRideFare('pragyia', distanceKm),
       ServiceType.delivery =>
         pricing.calculateDeliveryFare(distanceKm, vehicleType: 'okada'),
       ServiceType.gas => pricing.gasDeliveryFee,
@@ -301,6 +328,7 @@ class RideOptionsService {
     final speedPerMinute = switch (option.serviceType) {
       ServiceType.taxi => 0.5, // 500m per minute
       ServiceType.okada => 0.7, // 700m per minute
+      ServiceType.pragyia => 0.6, // 600m per minute
       ServiceType.delivery => 0.4, // 400m per minute
       ServiceType.gas => 0.3, // 300m per minute
     };
@@ -315,6 +343,8 @@ class RideOptionsService {
       case ServiceType.taxi:
         return true; // 24/7
       case ServiceType.okada:
+        return currentHour >= 6 && currentHour <= 22; // 6 AM to 10 PM
+      case ServiceType.pragyia:
         return currentHour >= 6 && currentHour <= 22; // 6 AM to 10 PM
       case ServiceType.delivery:
         return currentHour >= 8 && currentHour <= 20; // 8 AM to 8 PM

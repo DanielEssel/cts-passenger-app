@@ -29,8 +29,31 @@ service cloud.firestore {
 
     // ── Drivers ───────────────────────────────────────────────────────────
     match /drivers/{driverId} {
-      allow read:  if isAuth();
-      allow write: if isOwner(driverId) || isAdmin();
+      // Read: the driver themselves, or an admin. NOT every authenticated user —
+      // driver docs hold phone, email, earnings, and ID/passport document URLs.
+      allow read: if isOwner(driverId) || isAdmin();
+
+      // Create: a driver creates their own doc at signup; admin can too.
+      allow create: if isOwner(driverId) || isAdmin();
+
+      // Update: the OWNER may only touch profile / location / device fields —
+      // never approval, money, or rating. Those are Cloud Functions / admin only.
+      allow update: if isAdmin() || (
+        isOwner(driverId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'email', 'phone', 'photoUrl',
+          'vehicleType', 'vehicleModel', 'vehiclePlate', 'vehicleDetails',
+          'location', 'locationUpdatedAt', 'lastSeen',
+          'isOnline', 'isAvailable', 'currentTripId',
+          'fcmToken', 'updatedAt',
+          'documents', 'documentsUploaded', 'submittedForReviewAt',
+          'signupStep', 'role',
+          'termsAcceptedAt', 'termsVersion'
+        ])
+      );
+
+      // Delete: admin only.
+      allow delete: if isAdmin();
 
       match /notifications/{notifId} {
         allow read, write: if isOwner(driverId) || isAdmin();
@@ -131,7 +154,8 @@ service cloud.firestore {
     // ── Wallets — admin can write for migration; clients cannot ──────────
     match /wallets/{userId} {
       allow read:   if isOwner(userId) || isAdmin();
-      allow write:  if isAdmin(); // Admin panel migration only
+      allow create: if isOwner(userId) && request.resource.data.balance == 0;
+      allow update, delete: if isAdmin(); // balance changes via Cloud Functions only
     }
 
     // ── Transactions ──────────────────────────────────────────────────────
@@ -300,15 +324,17 @@ service cloud.firestore {
     }
 
     // ── Support Tickets ───────────────────────────────────────────────────
-    match /supportTickets/{ticketId} {
-      allow create: if isAuth()
-          && request.resource.data.userId == request.auth.uid;
-      allow read: if (isAuth()
-          && resource.data.userId == request.auth.uid)
-        || isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
-    }
+   match /supportTickets/{ticketId} {
+  allow create: if isAuth()
+    && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+    && request.resource.data.driverId == request.auth.uid;
+
+  allow read: if isAdmin() ||
+    (isAuth() &&
+     resource.data.driverId == request.auth.uid);
+
+  allow update, delete: if isAdmin();
+}
 
     // ── Profile Photos ────────────────────────────────────────────────────
     match /profile_photos/{userId} {

@@ -134,28 +134,52 @@ enum CylinderSize {
 
 enum GasBrand {
   goGas,
-  soilGroup,
-  total,
+  totalEnergies,
+  goil,
+  shell,
+  benab,
+  blueOcean,
+  newGas,
+  louisGas,
+  manbahGas,
+  rootsenaf,
   zola,
   radix,
+  soilGroup,
   any;
 
   String get displayName => switch (this) {
         GasBrand.goGas => 'GoGas',
-        GasBrand.soilGroup => 'Soil Group',
-        GasBrand.total => 'TotalEnergies',
+        GasBrand.totalEnergies => 'TotalEnergies',
+        GasBrand.goil => 'GOIL Gas',
+        GasBrand.shell => 'Shell Gas',
+        GasBrand.benab => 'Benab Gas',
+        GasBrand.blueOcean => 'Blue Ocean Gas',
+        GasBrand.newGas => 'NewGas',
+        GasBrand.louisGas => 'Louis Gas',
+        GasBrand.manbahGas => 'Manbah Gas',
+        GasBrand.rootsenaf => 'Rootsenaf Gas',
         GasBrand.zola => 'Zola',
         GasBrand.radix => 'Radix',
+        GasBrand.soilGroup => 'Soil Group',
         GasBrand.any => 'Any Brand',
       };
 
   double get priceMultiplier => switch (this) {
-        GasBrand.goGas => 1.0,
-        GasBrand.soilGroup => 1.0,
-        GasBrand.total => 1.05,
+        GasBrand.goGas => 1.00,
+        GasBrand.totalEnergies => 1.05,
+        GasBrand.goil => 1.00,
+        GasBrand.shell => 1.04,
+        GasBrand.benab => 1.01,
+        GasBrand.blueOcean => 1.01,
+        GasBrand.newGas => 1.00,
+        GasBrand.louisGas => 1.00,
+        GasBrand.manbahGas => 1.00,
+        GasBrand.rootsenaf => 1.00,
         GasBrand.zola => 1.03,
         GasBrand.radix => 1.02,
-        GasBrand.any => 1.0,
+        GasBrand.soilGroup => 1.00,
+        GasBrand.any => 1.00,
       };
 
   String get firestoreValue => name;

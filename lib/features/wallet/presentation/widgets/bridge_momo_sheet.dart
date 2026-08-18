@@ -277,7 +277,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
   // ── Input stage ───────────────────────────────────────────────────────────
 
   Widget _buildInputStage() {
-    return Column(
+    return SingleChildScrollView(
+       child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -489,7 +490,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
           ],
         ),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 10),
 
         // Submit button
         SizedBox(
@@ -511,6 +512,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
           ),
         ),
       ],
+       )
     );
   }
 
