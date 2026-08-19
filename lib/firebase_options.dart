@@ -60,13 +60,12 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDvOdrbu8YXrdtHwjt9MeBZ9eJk_AMYjOI',
-    appId: '1:67007923864:ios:067c5510a8cc82c4de72ed',
+    appId: '1:67007923864:ios:39c5109ec382d90dde72ed',
     messagingSenderId: '67007923864',
     projectId: 'ctstransportapp',
     storageBucket: 'ctstransportapp.firebasestorage.app',
-    iosBundleId: 'com.example.ctsTransportApp',
+    iosBundleId: 'com.cts.passenger',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyDvOdrbu8YXrdtHwjt9MeBZ9eJk_AMYjOI',
     appId: '1:67007923864:ios:067c5510a8cc82c4de72ed',

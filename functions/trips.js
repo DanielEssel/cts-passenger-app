@@ -48,66 +48,84 @@ function calculateRideFare(serviceType, distanceKm, durationMin, settings) {
   const p = settings?.[type] || {};
 
   const DEFAULTS = {
-    okada:   { baseFare: 3.0, perKmRate: 1.5, perMinRate: 0.20, minimumFare: 5.0  },
-    pragyia: { baseFare: 4.0, perKmRate: 2.0, perMinRate: 0.25, minimumFare: 8.0  },
-    taxi:    { baseFare: 5.0, perKmRate: 2.5, perMinRate: 0.30, minimumFare: 10.0 },
+    okada: { baseFare: 3.0, perKmRate: 1.5, perMinRate: 0.2, minimumFare: 5.0 },
+    pragyia: {
+      baseFare: 4.0,
+      perKmRate: 2.0,
+      perMinRate: 0.25,
+      minimumFare: 8.0,
+    },
+    taxi: { baseFare: 5.0, perKmRate: 2.5, perMinRate: 0.3, minimumFare: 10.0 },
   };
   const def = DEFAULTS[type];
 
-  const base    = p.baseFare    ?? def.baseFare;
-  const perKm   = p.perKmRate   ?? def.perKmRate;
-  const perMin  = p.perMinRate  ?? def.perMinRate;
+  const base = p.baseFare ?? def.baseFare;
+  const perKm = p.perKmRate ?? def.perKmRate;
+  const perMin = p.perMinRate ?? def.perMinRate;
   const minFare = p.minimumFare ?? def.minimumFare;
 
-  const km  = Math.max(0, Number(distanceKm)  || 0);
+  const km = Math.max(0, Number(distanceKm) || 0);
   const min = Math.max(0, Number(durationMin) || 0);
 
-  const surgeOn  = !!p.surgeEnabled;
+  const surgeOn = !!p.surgeEnabled;
   const surgeMul = p.surgeMultiplier ?? p.surgeMutiplier ?? 1.0;
-  const surge    = surgeOn && surgeMul > 1 ? surgeMul : 1.0;
+  const surge = surgeOn && surgeMul > 1 ? surgeMul : 1.0;
 
-  let fare = (base + perKm * km) * surge;   // distance-only; perMin reserved for future
+  let fare = (base + perKm * km) * surge; // distance-only; perMin reserved for future
   fare = Math.max(fare, minFare);
 
   return round2(fare);
 }
 
 // ── DELIVERY ─────────────────────────────────────────────────────────────────
-function calculateDeliveryFare(distanceKm, weightTier, isFragile, settings, vehicleType, requiresHelpers) {
+function calculateDeliveryFare(
+  distanceKm,
+  weightTier,
+  isFragile,
+  settings,
+  vehicleType,
+  requiresHelpers,
+) {
   const d = settings?.delivery || {};
- 
+
   // Normalise vehicle key: "Mini Truck" -> "minitruck", "Okada" -> "okada"
-  const vkeyRaw = String(vehicleType || "okada").toLowerCase().replace(/[^a-z]/g, "");
+  const vkeyRaw = String(vehicleType || "okada")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
   const vkey =
-    vkeyRaw.includes("mini") || vkeyRaw.includes("truck") ? "miniTruck" :
-    vkeyRaw.includes("aboboya")                            ? "aboboya"  :
-                                                             "okada";
- 
+    vkeyRaw.includes("mini") || vkeyRaw.includes("truck")
+      ? "miniTruck"
+      : vkeyRaw.includes("aboboya")
+        ? "aboboya"
+        : "okada";
+
   // Default per-vehicle rates (seeded from prior hardcoded client values).
   const VEH_DEFAULTS = {
-    okada:     { baseFare: 5.0,  perKmRate: 2.5, minimumFare: 10.0 },
-    aboboya:   { baseFare: 15.0, perKmRate: 4.0, minimumFare: 20.0 },
+    okada: { baseFare: 5.0, perKmRate: 2.5, minimumFare: 10.0 },
+    aboboya: { baseFare: 15.0, perKmRate: 4.0, minimumFare: 20.0 },
     miniTruck: { baseFare: 40.0, perKmRate: 7.0, minimumFare: 50.0 },
   };
- 
+
   const veh = d[vkey] || {};
   const def = VEH_DEFAULTS[vkey];
- 
+
   // Per-vehicle block first, then legacy flat delivery.*, then hard default.
-  const base    = veh.baseFare    ?? d.baseFare    ?? def.baseFare;
-  const perKm   = veh.perKmRate   ?? d.perKmRate   ?? def.perKmRate;
+  const base = veh.baseFare ?? d.baseFare ?? def.baseFare;
+  const perKm = veh.perKmRate ?? d.perKmRate ?? def.perKmRate;
   const minFare = veh.minimumFare ?? d.minimumFare ?? def.minimumFare;
- 
+
   const tier = String(weightTier || "small").toLowerCase();
   const weightSurcharge =
-    tier === "large"  ? (d.weightSurchargeLarge  ?? 15.0) :
-    tier === "medium" ? (d.weightSurchargeMedium ??  5.0) :
-                        (d.weightSurchargeSmall  ??  0.0);
- 
-  const fragile = isFragile      ? (d.fragileItemSurcharge ?? 5.0)  : 0.0;
-  const helpers = requiresHelpers ? (d.helperSurcharge      ?? 10.0) : 0.0;
+    tier === "large"
+      ? (d.weightSurchargeLarge ?? 15.0)
+      : tier === "medium"
+        ? (d.weightSurchargeMedium ?? 5.0)
+        : (d.weightSurchargeSmall ?? 0.0);
+
+  const fragile = isFragile ? (d.fragileItemSurcharge ?? 5.0) : 0.0;
+  const helpers = requiresHelpers ? (d.helperSurcharge ?? 10.0) : 0.0;
   const km = Math.max(0, Number(distanceKm) || 0);
- 
+
   let fare = base + perKm * km + weightSurcharge + fragile + helpers;
   fare = Math.max(fare, minFare);
   return round2(fare);
@@ -128,7 +146,6 @@ function calculateGasFare(cylinderSize, quantity, settings) {
 
   return round2(unitPrice * qty + deliveryFee);
 }
-
 
 // ── onTripCreated: validate & correct fare ────────────────────────────────────
 exports.onTripCreated = onDocumentCreated(
@@ -155,7 +172,6 @@ exports.onTripCreated = onDocumentCreated(
             settings,
           ) * 100,
         ) / 100;
-      
 
       const deviation = Math.abs(clientFare - serverFare) / serverFare;
 
@@ -238,7 +254,7 @@ exports.onTripCompleted = onDocumentUpdated(
     // NOTE: skipped while testing — test trips have distanceKm=0 (no real
     // driving) and complete in <1 min, which would always trip this guard.
     // Flip TEST_MODE to false for production to re-enable fraud flagging.
-    const TEST_MODE = true;
+    const TEST_MODE = false;
     if (!TEST_MODE && distanceKm < 0.3 && tripMinutes < 1) {
       console.warn(
         `Trip ${tripId}: suspicious completion — distance=${distanceKm}km time=${tripMinutes}min`,
@@ -422,183 +438,432 @@ exports.onTripCompleted = onDocumentUpdated(
 //
 // Requires (already present at top of trips.js): const { releaseEscrow } = require("./escrow");
 
-exports.onDeliveryCompleted = onDocumentUpdated(
-  { region: "europe-west2", document: "deliveries/{deliveryId}" },
+exports.onTripCompleted = onDocumentUpdated(
+  {
+    region: "europe-west2",
+    document: "trips/{tripId}",
+  },
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
-    const deliveryId = event.params.deliveryId;
+    const tripId = event.params.tripId;
 
+    if (!after) return;
+
+    // Only completed trips enter settlement.
     if (after.status !== "completed") return;
-    if (after.walletProcessed === true) return; // idempotency
 
-    // ── OTP validation (delivery's completion gate) ─────────────────────────
-    const storedOtp = after.deliveryOtp;
-    const submittedOtp = after.otpSubmitted;
+    // Already successfully settled.
+    if (after.walletProcessed === true) return;
 
-    if (storedOtp && !submittedOtp) {
-      console.warn(`Delivery ${deliveryId}: completed without OTP submission`);
-      await db().collection("deliveries").doc(deliveryId).update({
-        status: "pendingOtp",
-        flagReason: "Completed without OTP verification",
-        flaggedAt: admin.firestore.FieldValue.serverTimestamp(),
+    const tripRef = db().collection("trips").doc(tripId);
+
+    const now = new Date();
+
+    // ─────────────────────────────────────────────
+    // PASSENGER CONFIRMATION
+    // ─────────────────────────────────────────────
+
+    if (!after.passengerConfirmed) {
+      const completedAt = after.completedAt?.toDate?.() ?? now;
+
+      const waitMinutes = (now - completedAt) / 60000;
+
+      if (waitMinutes < 3) {
+        console.log(
+          `Trip ${tripId}: waiting for passenger confirmation ` +
+            `(${waitMinutes.toFixed(1)} min)`,
+        );
+
+        return;
+      }
+
+      console.log(`Trip ${tripId}: auto-confirming after 3 minutes`);
+
+      await tripRef.update({
+        passengerConfirmed: true,
+        passengerConfirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+        autoConfirmed: true,
       });
+
+      // The update above triggers this function again.
+      // Do not continue processing in this invocation.
       return;
     }
 
-    if (storedOtp && submittedOtp && storedOtp !== submittedOtp) {
-      console.error(`Delivery ${deliveryId}: OTP mismatch`);
-      await db().collection("deliveries").doc(deliveryId).update({
-        status: "flagged",
-        flagReason: "OTP mismatch — possible fraud",
-        flaggedAt: admin.firestore.FieldValue.serverTimestamp(),
+    // ─────────────────────────────────────────────
+    // ACQUIRE SETTLEMENT LOCK
+    // ─────────────────────────────────────────────
+
+    const lockAcquired = await db().runTransaction(async (tx) => {
+      const snap = await tx.get(tripRef);
+
+      if (!snap.exists) {
+        return false;
+      }
+
+      const trip = snap.data();
+
+      // Another invocation already completed settlement.
+      if (trip.walletProcessed === true) {
+        return false;
+      }
+
+      const settlementStatus = trip.settlementStatus ?? "pending";
+
+      // Another invocation is currently processing.
+      if (settlementStatus === "processing") {
+        console.log(`Trip ${tripId}: settlement already processing`);
+
+        return false;
+      }
+
+      tx.update(tripRef, {
+        settlementStatus: "processing",
+        settlementStartedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      await db().collection("admin_alerts").add({
-        type: "otp_mismatch",
-        deliveryId,
-        driverId: after.driverId,
-        reason: "Driver submitted wrong OTP for delivery",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+
+      return true;
+    });
+
+    if (!lockAcquired) {
       return;
     }
+
+    console.log(`🔒 Trip ${tripId}: settlement lock acquired`);
+
+    // ─────────────────────────────────────────────
+    // VALIDATE REQUIRED IDS
+    // ─────────────────────────────────────────────
 
     const passengerId = after.passengerId;
     const driverId = after.driverId;
+
     if (!passengerId || !driverId) {
-      console.error(`Delivery ${deliveryId}: missing passengerId or driverId`);
+      console.error(`Trip ${tripId}: missing passengerId or driverId`);
+
+      await tripRef.update({
+        settlementStatus: "failed",
+        walletProcessError: "Missing passengerId or driverId",
+        walletProcessedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
       return;
     }
 
     try {
+      // ───────────────────────────────────────────
+      // DISTANCE / DURATION
+      // ───────────────────────────────────────────
+
+      const distanceKm = after.actualDistanceKm ?? after.distanceKm ?? 0;
+
+      const startedAt = after.startedAt?.toDate?.() ?? null;
+
+      const tripMinutes = startedAt ? (now - startedAt) / 60000 : 999;
+
+      // ───────────────────────────────────────────
+      // FRAUD CHECK
+      // ───────────────────────────────────────────
+
+      const TEST_MODE = true;
+
+      if (!TEST_MODE && distanceKm < 0.3 && tripMinutes < 1) {
+        console.warn(
+          `Trip ${tripId}: suspicious completion — ` +
+            `distance=${distanceKm}km ` +
+            `time=${tripMinutes}min`,
+        );
+
+        await tripRef.update({
+          status: "flagged",
+          flagReason: "Suspicious completion — insufficient distance and time",
+          flaggedAt: admin.firestore.FieldValue.serverTimestamp(),
+          settlementStatus: "failed",
+        });
+
+        await db()
+          .collection("admin_alerts")
+          .add({
+            type: "suspicious_trip",
+            tripId,
+            driverId,
+            reason:
+              `Trip completed with only ` +
+              `${distanceKm.toFixed(1)}km in ` +
+              `${tripMinutes.toFixed(1)} minutes`,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+        return;
+      }
+
+      // ───────────────────────────────────────────
+      // SETTINGS
+      // ───────────────────────────────────────────
+
       const settings = await getPlatformSettings();
+
       const feePercent = (settings?.platformFeePercent ?? 15) / 100;
 
-      const distanceKm = after.distanceKm ?? 0;
-      const weightTier = after.weightTier ?? "small";
-      const isFragile = after.isFragile ?? false;
+      const serviceType = after.serviceType ?? "taxi";
+
+      const paymentMethod = after.paymentMethod ?? "wallet";
+
+      // ───────────────────────────────────────────
+      // SERVER-AUTHORITATIVE FARE
+      // ───────────────────────────────────────────
 
       let actualFare = after.actualFare ?? after.estimatedFare ?? 0;
+
       if (distanceKm > 0) {
         actualFare =
           Math.round(
-            calculateDeliveryFare(distanceKm, weightTier, isFragile, settings, after.vehicleType, after.requiresHelpers) * 100
+            calculateRideFare(
+              serviceType,
+              distanceKm,
+              after.actualDuration ?? after.estimatedDuration ?? 0,
+              settings,
+            ) * 100,
           ) / 100;
       }
 
       let platformFee = Math.round(actualFare * feePercent * 100) / 100;
+
       let driverEarnings = Math.round((actualFare - platformFee) * 100) / 100;
 
       const escrowId = after.escrowId;
-      const paymentMethod = after.paymentMethod ?? "wallet";
+
+      // ───────────────────────────────────────────
+      // WALLET / ESCROW
+      // ───────────────────────────────────────────
 
       if (escrowId) {
-        // ── WALLET via escrow — the canonical path ──────────────────────────
-        // Record the escrow's actual split (what was really held), then release.
-        const eSnap = await db().collection("escrows").doc(escrowId).get();
-        if (eSnap.exists) {
-          const e = eSnap.data();
-          if (typeof e.platformFee === "number") platformFee = e.platformFee;
-          if (typeof e.driverNet === "number") driverEarnings = e.driverNet;
+        console.log(`💳 Trip ${tripId}: releasing escrow ${escrowId}`);
+
+        const escrowSnap = await db().collection("escrows").doc(escrowId).get();
+
+        if (escrowSnap.exists) {
+          const escrow = escrowSnap.data();
+
+          if (typeof escrow.platformFee === "number") {
+            platformFee = escrow.platformFee;
+          }
+
+          if (typeof escrow.driverNet === "number") {
+            driverEarnings = escrow.driverNet;
+          }
+
+          if (typeof escrow.amount === "number") {
+            actualFare = escrow.amount;
+          }
         }
-        await releaseEscrow(escrowId, driverId, "delivery_completed");
-      } else if (paymentMethod === "cash") {
-        // ── CASH — driver collected the fare physically ─────────────────────
-        // Credit driver full fare; record the commission they owe. Never touch wallet.
+
+        await releaseEscrow(escrowId, driverId, "trip_completed");
+      }
+
+      // ───────────────────────────────────────────
+      // CASH
+      // ───────────────────────────────────────────
+      else if (paymentMethod === "cash") {
+        console.log(`💵 Trip ${tripId}: processing cash settlement`);
+
         const commissionDebt = platformFee;
+
+        const ledgerRef = db().collection("ledger").doc(`commission_${tripId}`);
+
         await db().runTransaction(async (tx) => {
+          const existingLedger = await tx.get(ledgerRef);
+
           const driverRef = db().collection("drivers").doc(driverId);
+
           const summaryRef = driverRef.collection("earnings").doc("summary");
+
+          // Idempotent recovery:
+          // if this ledger already exists, the cash settlement
+          // was already applied.
+          if (existingLedger.exists) {
+            return;
+          }
 
           tx.update(driverRef, {
             totalEarnings: admin.firestore.FieldValue.increment(actualFare),
+
             todayEarnings: admin.firestore.FieldValue.increment(actualFare),
+
             commissionOwed:
               admin.firestore.FieldValue.increment(commissionDebt),
-            totalDeliveries: admin.firestore.FieldValue.increment(1),
+
+            completedTrips: admin.firestore.FieldValue.increment(1),
+
             isAvailable: true,
+
             currentTripId: admin.firestore.FieldValue.delete(),
           });
+
           tx.set(
             summaryRef,
             {
               todayEarnings: admin.firestore.FieldValue.increment(actualFare),
+
               weekEarnings: admin.firestore.FieldValue.increment(actualFare),
+
               lifetimeEarnings:
                 admin.firestore.FieldValue.increment(actualFare),
+
               commissionOwed:
                 admin.firestore.FieldValue.increment(commissionDebt),
+
               lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
             },
             { merge: true },
           );
 
-          const ledgerRef = db().collection("ledger").doc();
           tx.set(ledgerRef, {
             type: "COMMISSION_DEBT",
             status: "OWED",
+
             fromUserId: driverId,
             fromType: "driver",
             toType: "platform",
+
             amount: commissionDebt,
             currency: "GHS",
+
             grossFare: actualFare,
             platformFee: commissionDebt,
             driverNet: actualFare,
-            referenceType: "delivery",
-            referenceId: deliveryId,
+
+            referenceType: "trip",
+            referenceId: tripId,
+
             paymentMethod: "cash",
-            idempotencyKey: `commission_${deliveryId}`,
+
+            idempotencyKey: `commission_${tripId}`,
+
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        });
-      } else {
-        // ── WALLET but no escrowId (legacy/safety) — guarded single deduction ─
-        console.warn(
-          `Delivery ${deliveryId}: wallet payment without escrowId — direct deduction`,
-        );
-        await db().runTransaction(async (tx) => {
-          const walletRef = db().collection("wallets").doc(passengerId);
-          const driverRef = db().collection("drivers").doc(driverId);
-          const wdoc = await tx.get(walletRef);
-          const balance = wdoc.exists ? (wdoc.data()?.balance ?? 0) : 0;
-          if (balance >= actualFare) {
-            tx.update(walletRef, {
-              balance: admin.firestore.FieldValue.increment(-actualFare),
-              lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          } else {
-            console.error(
-              `Delivery ${deliveryId}: insufficient wallet balance for direct deduction`,
-            );
-          }
-          tx.update(driverRef, {
-            totalEarnings: admin.firestore.FieldValue.increment(driverEarnings),
-            todayEarnings: admin.firestore.FieldValue.increment(driverEarnings),
-            walletBalance: admin.firestore.FieldValue.increment(driverEarnings),
-            totalDeliveries: admin.firestore.FieldValue.increment(1),
-            isAvailable: true,
-            currentTripId: admin.firestore.FieldValue.delete(),
           });
         });
       }
 
-      // ── Mark processed ONCE, all paths ───────────────────────────────────
-      await db().collection("deliveries").doc(deliveryId).update({
+      // ───────────────────────────────────────────
+      // LEGACY WALLET WITHOUT ESCROW
+      // ───────────────────────────────────────────
+      else {
+        console.warn(
+          `Trip ${tripId}: wallet payment without escrowId — ` +
+            `using guarded legacy deduction`,
+        );
+
+        const ledgerRef = db()
+          .collection("ledger")
+          .doc(`wallet_trip_${tripId}`);
+
+        await db().runTransaction(async (tx) => {
+          const existingLedger = await tx.get(ledgerRef);
+
+          if (existingLedger.exists) {
+            return;
+          }
+
+          const walletRef = db().collection("wallets").doc(passengerId);
+
+          const driverRef = db().collection("drivers").doc(driverId);
+
+          const walletSnap = await tx.get(walletRef);
+
+          const balance = walletSnap.exists
+            ? (walletSnap.data()?.balance ?? 0)
+            : 0;
+
+          if (balance < actualFare) {
+            throw new Error(
+              `Insufficient wallet balance: ` + `${balance} < ${actualFare}`,
+            );
+          }
+
+          tx.update(walletRef, {
+            balance: admin.firestore.FieldValue.increment(-actualFare),
+
+            lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          tx.update(driverRef, {
+            totalEarnings: admin.firestore.FieldValue.increment(driverEarnings),
+
+            todayEarnings: admin.firestore.FieldValue.increment(driverEarnings),
+
+            completedTrips: admin.firestore.FieldValue.increment(1),
+
+            isAvailable: true,
+
+            currentTripId: admin.firestore.FieldValue.delete(),
+          });
+
+          tx.set(ledgerRef, {
+            type: "TRIP_WALLET_PAYMENT",
+            status: "COMPLETED",
+
+            fromUserId: passengerId,
+            fromType: "passenger",
+
+            toUserId: driverId,
+            toType: "driver",
+
+            amount: actualFare,
+            currency: "GHS",
+
+            grossFare: actualFare,
+            platformFee,
+            driverNet: driverEarnings,
+
+            referenceType: "trip",
+            referenceId: tripId,
+
+            paymentMethod: "wallet",
+
+            idempotencyKey: `wallet_trip_${tripId}`,
+
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        });
+      }
+
+      // ───────────────────────────────────────────
+      // FINAL SUCCESS STATE
+      // ───────────────────────────────────────────
+
+      await tripRef.update({
         actualFare,
         platformFee,
         driverEarnings,
+
         walletProcessed: true,
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+
+        settlementStatus: "completed",
+
+        walletProcessedAt: admin.firestore.FieldValue.serverTimestamp(),
+
+        settlementCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       console.log(
-        `✅ Delivery ${deliveryId} completed via ${escrowId ? "escrow" : paymentMethod}: fare=${actualFare} driver=${driverEarnings} fee=${platformFee}`,
+        `✅ Trip ${tripId} settled successfully: ` +
+          `payment=${escrowId ? "escrow" : paymentMethod}, ` +
+          `fare=${actualFare}, ` +
+          `driver=${driverEarnings}, ` +
+          `fee=${platformFee}`,
       );
     } catch (e) {
-      console.error(`Delivery ${deliveryId} completion error:`, e.message);
-      await db().collection("deliveries").doc(deliveryId).update({
-        walletProcessError: e.message,
+      const message = e instanceof Error ? e.message : String(e);
+
+      console.error(`❌ Trip ${tripId} settlement error:`, message);
+
+      await tripRef.update({
+        settlementStatus: "failed",
+
+        walletProcessError: message,
+
         walletProcessedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
@@ -863,7 +1128,8 @@ exports.onTripCancelled = onDocumentUpdated(
       const reason =
         after.status === "cancelledByDriver"
           ? "driver_cancelled"
-          : (after.status === "noDrivers" || after.status === "noDriversAvailable")
+          : after.status === "noDrivers" ||
+              after.status === "noDriversAvailable"
             ? "no_drivers_found"
             : "passenger_cancelled";
 

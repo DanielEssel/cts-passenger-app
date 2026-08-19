@@ -36,7 +36,7 @@ android {
     defaultConfig {
         applicationId = "com.cts.passenger"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
