@@ -50,3 +50,5 @@ env.json
 
 android/key.properties
 *.jks
+env.json
+android/app/google-services.json
