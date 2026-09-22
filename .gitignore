@@ -52,3 +52,4 @@ android/key.properties
 *.jks
 env.json
 android/app/google-services.json
+ios/Flutter/Secrets.xcconfig
