@@ -80,6 +80,8 @@ class GooglePlacesRepository implements PlaceRepository {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': _apiKey,
+          'X-Android-Package': 'com.cts.passenger',
+          'X-Android-Cert': '617F3ECC7E5A4FBC64603AA0374AD58B263B7A3F',
         },
         body: body,
       );
@@ -122,6 +124,8 @@ class GooglePlacesRepository implements PlaceRepository {
         uri,
         headers: {
           'X-Goog-Api-Key': _apiKey,
+          'X-Android-Package': 'com.cts.passenger',
+          'X-Android-Cert': '617F3ECC7E5A4FBC64603AA0374AD58B263B7A3F',
           'X-Goog-FieldMask': 'location', // only fetch what we need → cheaper
         },
       );

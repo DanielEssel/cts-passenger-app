@@ -76,29 +76,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     await ref.read(authProvider.notifier).sendOtp(
           phone: phone,
           onCodeSent: () {
-            if (!mounted) return;
             Navigator.pushNamed(
               context,
               AppRoutes.otpVerification,
-              arguments: {'phone': phone},
+              arguments: {
+                'phone': phone,
+                'isSignUp': false,
+              },
+            );
+          },
+          onAuthenticated: () {
+            if (!context.mounted) return;
+
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.shell,
+              (_) => false,
             );
           },
           onError: (msg) {
-            if (mounted) _showError(msg);
+            if (!context.mounted) return;
+
+            // Keep your existing error UI here.
+            // For example:
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(msg)),
+            );
           },
         );
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      ),
-    );
   }
 
   String? _validatePhone(String? value) {
@@ -158,7 +162,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       children: [
                         const SizedBox(height: 12),
                         // Premium Back Button - larger touch target
-                        
+
                         const SizedBox(height: 28),
                         // Premium Logo - refined icon card
                         const Center(
@@ -178,7 +182,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           ),
                         ),
                         const SizedBox(height: 16),
-                        
+
                         Text(
                           'Enter your phone number to continue',
                           style: AppTextStyles.bodyMedium.copyWith(
@@ -278,7 +282,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 }
-
 
 class _PremiumLogo extends StatelessWidget {
   const _PremiumLogo();

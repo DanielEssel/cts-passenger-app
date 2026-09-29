@@ -21,6 +21,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
 
+    // ── Public app configuration ──────────────────────────────────────────
+// Read-only configuration needed before authentication during startup.
+match /app_config/mobile {
+  allow read: if true;
+  allow write: if false;
+}
+
     // ── Admins ────────────────────────────────────────────────────────────
     match /admins/{uid} {
       allow read:  if isAuth() && request.auth.uid == uid;
@@ -39,18 +46,23 @@ service cloud.firestore {
       // Update: the OWNER may only touch profile / location / device fields —
       // never approval, money, or rating. Those are Cloud Functions / admin only.
       allow update: if isAdmin() || (
-        isOwner(driverId) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'email', 'phone', 'photoUrl',
-          'vehicleType', 'vehicleModel', 'vehiclePlate', 'vehicleDetails',
-          'location', 'locationUpdatedAt', 'lastSeen',
-          'isOnline', 'isAvailable', 'currentTripId',
-          'fcmToken', 'updatedAt',
-          'documents', 'documentsUploaded', 'submittedForReviewAt',
-          'signupStep', 'role',
-          'termsAcceptedAt', 'termsVersion'
-        ])
-      );
+  isOwner(driverId) &&
+  request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+    'displayName', 'email', 'phone', 'photoUrl',
+    'vehicleType', 'vehicleModel', 'vehiclePlate', 'vehicleDetails',
+    'vehicleSetupComplete',
+    'serviceType',
+    'location', 'currentLocation',
+    'locationUpdatedAt', 'lastLocationUpdate', 'lastSeen',
+    'isOnline', 'isAvailable', 'currentTripId',
+    'lastStatusChange',
+    'fcmToken', 'fcmTokenUpdatedAt', 'platform', 'updatedAt',
+    'documents', 'documentsUploaded', 'submittedForReviewAt',
+    'accountSetupComplete',
+    'signupStep', 'role',
+    'termsAcceptedAt', 'termsVersion'
+  ])
+);
 
       // Delete: admin only.
       allow delete: if isAdmin();

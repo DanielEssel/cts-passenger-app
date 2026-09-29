@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/startup/startup_resolver.dart';
 import '../../core/startup/route_destination.dart';
+import '../../core/services/app_update_service.dart';
+import '../../core/services/update_required_dialog.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -17,8 +19,8 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double>   _fadeAnim;
-  late final Animation<double>   _scaleAnim;
+  late final Animation<double> _fadeAnim;
+  late final Animation<double> _scaleAnim;
 
   @override
   void initState() {
@@ -29,12 +31,12 @@ class _SplashScreenState extends State<SplashScreen>
 
   void _initAnimations() {
     _controller = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 1400),
     );
     _fadeAnim = CurvedAnimation(
       parent: _controller,
-      curve:  const Interval(0.0, 0.7, curve: Curves.easeIn),
+      curve: const Interval(0.0, 0.7, curve: Curves.easeIn),
     );
     _scaleAnim = Tween<double>(begin: 0.92, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
@@ -45,12 +47,19 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _boot() async {
     final results = await Future.wait([
       StartupResolver.resolve(),
+      AppUpdateService.check(),
       Future.delayed(const Duration(milliseconds: 1800)),
     ]);
 
     if (!mounted) return;
 
     final destination = results[0] as RouteDestination;
+    final updateInfo = results[1] as AppUpdateInfo;
+
+    if (updateInfo.updateRequired) {
+      await UpdateRequiredDialog.show(context, updateInfo);
+      if (!mounted) return;
+    }
 
     Navigator.pushReplacementNamed(
       context,
@@ -72,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final topPadding = MediaQuery.of(context).padding.top;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light
           .copyWith(statusBarColor: Colors.transparent),
@@ -130,7 +139,7 @@ class _SplashScreenState extends State<SplashScreen>
                     filterQuality: FilterQuality.high,
                     errorBuilder: (_, __, ___) => const Icon(
                       Icons.local_taxi_rounded,
-                      size:  60,
+                      size: 60,
                       color: AppColors.primary,
                     ),
                   ),
@@ -141,9 +150,9 @@ class _SplashScreenState extends State<SplashScreen>
               Text(
                 'CTS TRANSPORT',
                 style: TextStyle(
-                  color:         Colors.white.withValues(alpha: 0.95),
-                  fontSize:      18,
-                  fontWeight:    FontWeight.w600,
+                  color: Colors.white.withValues(alpha: 0.95),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 8,
                   fontFamily: 'Poppins',
                 ),
@@ -151,7 +160,7 @@ class _SplashScreenState extends State<SplashScreen>
               const SizedBox(height: 16),
               // Decorative line with animation
               Container(
-                width:  60,
+                width: 60,
                 height: 2,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -168,9 +177,9 @@ class _SplashScreenState extends State<SplashScreen>
               Text(
                 'Safe • Fast • Reliable',
                 style: TextStyle(
-                  color:         Colors.white.withValues(alpha: 0.5),
-                  fontSize:      12,
-                  fontWeight:    FontWeight.w400,
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
                   letterSpacing: 2,
                   fontFamily: 'Inter',
                 ),
@@ -189,9 +198,9 @@ class _SplashScreenState extends State<SplashScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(
-            width:  24,
+            width: 24,
             height: 24,
-            child:  CircularProgressIndicator(
+            child: CircularProgressIndicator(
               strokeWidth: 1.5,
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white24),
             ),
@@ -200,8 +209,8 @@ class _SplashScreenState extends State<SplashScreen>
           const Text(
             "GHANA'S CHOICE FOR LOGISTICS",
             style: TextStyle(
-              color:         Colors.white24,
-              fontSize:      10,
+              color: Colors.white24,
+              fontSize: 10,
               letterSpacing: 2,
               fontWeight: FontWeight.w500,
             ),
@@ -210,8 +219,8 @@ class _SplashScreenState extends State<SplashScreen>
           Text(
             'Version ${_getAppVersion()}',
             style: const TextStyle(
-              color:         Colors.white12,
-              fontSize:      8,
+              color: Colors.white12,
+              fontSize: 8,
               letterSpacing: 1,
             ),
           ),
@@ -219,7 +228,7 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
   }
-  
+
   String _getAppVersion() {
     // You can get this from pubspec.yaml or build.gradle
     return '1.0.0';

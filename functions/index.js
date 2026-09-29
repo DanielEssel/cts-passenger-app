@@ -284,7 +284,6 @@ exports.onGasOrderStatusChanged = notifications.onGasOrderStatusChanged;
 exports.onGasOrderCreated       = notifications.onGasOrderCreated;
 exports.onDeliveryStatusChanged = notifications.onDeliveryStatusChanged;
 exports.onWalletChanged         = notifications.onWalletChanged;
-exports.onDeliveryNotification  = notifications.onDeliveryCompleted;
 exports.checkDocumentExpiry     = notifications.checkDocumentExpiry;
 exports.onTripCreatedNotify = notifications.onTripCreatedNotify;
 

@@ -1,5 +1,4 @@
 // lib/features/delivery/delivery_tracking_screen_refactored.dart
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -198,16 +197,11 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
 
         // Status header
         Positioned(
-  top: MediaQuery.of(context).padding.top + 12,
-  left: 16,
-  right: 16,
-  child: _buildStatusHeader(delivery),
-),
-
-
-
-
-
+          top: MediaQuery.of(context).padding.top + 12,
+          left: 16,
+          right: 16,
+          child: _buildStatusHeader(delivery),
+        ),
 
         // Draggable bottom sheet
         DraggableScrollableSheet(
@@ -259,10 +253,10 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
                           const SizedBox(height: 12),
                           PrimaryButton(
                             label: 'Back to home',
-                            onTap: () => Navigator.of(context,
-                                    rootNavigator: true)
-                                .pushNamedAndRemoveUntil(
-                                    AppRoutes.shell, (_) => false),
+                            onTap: () =>
+                                Navigator.of(context, rootNavigator: true)
+                                    .pushNamedAndRemoveUntil(
+                                        AppRoutes.shell, (_) => false),
                           ),
                         ],
                         const SizedBox(height: 16),
@@ -280,24 +274,24 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
 
   // In delivery_tracking_screen.dart - update the map usage
 
-Widget _buildTrackingMap(
-  LatLng pickup,
-  LatLng dropoff,
-  LatLng? driverLocation,
-) {
-  return TrackingMap(
-    pickup: pickup,
-    dropoff: dropoff,
-    driverLocation: driverLocation,
-    driverHeading: widget.delivery.driverHeading ?? 0,
-    polylines: _polylines,
-    additionalMarkers: _buildMarkers(),
-    padding: const EdgeInsets.only(bottom: 160),
-    controlsBottomOffset: 180, // Controls above bottom sheet
-    myLocationEnabled: true,
-    showControls: true,
-  );
-}
+  Widget _buildTrackingMap(
+    LatLng pickup,
+    LatLng dropoff,
+    LatLng? driverLocation,
+  ) {
+    return TrackingMap(
+      pickup: pickup,
+      dropoff: dropoff,
+      driverLocation: driverLocation,
+      driverHeading: widget.delivery.driverHeading ?? 0,
+      polylines: _polylines,
+      additionalMarkers: _buildMarkers(),
+      padding: const EdgeInsets.only(bottom: 160),
+      controlsBottomOffset: 180, // Controls above bottom sheet
+      myLocationEnabled: true,
+      showControls: true,
+    );
+  }
 
   Set<Marker> _buildMarkers() {
     final markerService = MarkerService.instance;
@@ -323,54 +317,67 @@ Widget _buildTrackingMap(
         icon: markerService.dropoff(),
         anchor: const Offset(0.5, 1.0),
       ),
+      if (widget.delivery.driverLocation != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: LatLng(
+            widget.delivery.driverLocation!.latitude,
+            widget.delivery.driverLocation!.longitude,
+          ),
+          icon: markerService.vehicle('delivery'),
+          anchor: const Offset(0.5, 0.5),
+          rotation: widget.delivery.driverHeading ?? 0,
+          flat: true,
+          infoWindow: const InfoWindow(title: 'Driver'),
+        ),
     };
   }
 
   Widget _buildStatusHeader(DeliveryRequest delivery) {
-    return ClipRRect(
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: AppColors.darkNavy,
       borderRadius: BorderRadius.circular(12),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.green,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.amber.withValues(alpha: 0.2)),
-          ),
-          child: Row(
-            children: [
-          const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              delivery.status.passengerDisplayName,
-              style: AppTextStyles.labelLarge.copyWith(color: Colors.white),
-            ),
-          ),
-          if (delivery.status.isActive &&
-              delivery.status != DeliveryStatus.completed)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Text(
-                'Live',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-        ],
-      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.15),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
     ),
-  ),
-);
-  }
+    child: Row(
+      children: [
+        const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            delivery.status.passengerDisplayName,
+            style: AppTextStyles.labelLarge.copyWith(color: Colors.white),
+          ),
+        ),
+        if (delivery.status.isActive &&
+            delivery.status != DeliveryStatus.completed)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Text(
+              'Live',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 
   Widget _buildTimeline(DeliveryRequest delivery) {
     final currentIndex = _steps.indexOf(delivery.status);
@@ -479,7 +486,8 @@ Widget _buildTrackingMap(
             decoration: BoxDecoration(
               color: AppColors.surfaceAlt,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+              border:
+                  Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -527,7 +535,8 @@ Widget _buildTrackingMap(
               Expanded(
                 child: Text(
                   'The rider will ask $receiverName for this code to complete delivery.',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                  style:
+                      const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
                 ),
               ),
             ]),
@@ -709,7 +718,8 @@ Widget _buildTrackingMap(
                     child: Row(
                       children: [
                         Expanded(
-                            child: Text(issue, style: AppTextStyles.bodyMedium)),
+                            child:
+                                Text(issue, style: AppTextStyles.bodyMedium)),
                         const Icon(Icons.chevron_right_rounded,
                             color: AppColors.textTertiary, size: 16),
                       ],

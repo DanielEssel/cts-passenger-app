@@ -90,10 +90,11 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
   }
 
   void _goToTracking() {
-    if (_navigating) return;
+    if (_navigating || !mounted) return;
+
     _navigating = true;
-    Navigator.pushReplacement(
-      context,
+
+    Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => DeliveryTrackingScreen(
           deliveryId: widget.deliveryId,
@@ -103,15 +104,21 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
   }
 
   Future<void> _cancel() async {
-    if (_cancelling) return;
+    if (_cancelling || _navigating) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel request?',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text(
+          'Cancel request?',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
         content: const Text(
-            'Are you sure you want to cancel this delivery request?'),
+          'Are you sure you want to cancel this delivery request?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -119,7 +126,9 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.error,
+            ),
             child: const Text('Cancel'),
           ),
         ],
@@ -127,25 +136,41 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
     );
 
     if (confirmed != true || !mounted) return;
+
     setState(() => _cancelling = true);
 
     try {
-      await ref
-          .read(deliveryRepositoryProvider)
-          .cancelDelivery(widget.deliveryId, reason: 'Cancelled by passenger');
-      if (mounted) Navigator.pop(context);
+      await ref.read(deliveryRepositoryProvider).cancelDelivery(
+            widget.deliveryId,
+            reason: 'Cancelled by passenger',
+          );
+
+      if (!mounted) return;
+
+      // Prevent the Firestore listener from navigating a second time.
+      _navigating = true;
+
+      final navigator = Navigator.of(context);
+
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
     } catch (e) {
-      if (mounted) {
-        setState(() => _cancelling = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (!mounted) return;
+
+      setState(() => _cancelling = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text('Could not cancel: $e'),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           margin: const EdgeInsets.all(16),
-        ));
-      }
+        ),
+      );
     }
   }
 
@@ -164,7 +189,19 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
         if (d == null) return;
         if (d.status == DeliveryStatus.cancelled) {
           _timeoutTimer?.cancel();
-          if (mounted) Navigator.pop(context);
+
+          // If this screen initiated the cancellation, _cancel()
+          // is responsible for navigating home.
+          if (!_navigating && mounted) {
+            _navigating = true;
+
+            final navigator = Navigator.of(context);
+
+            if (navigator.canPop()) {
+              navigator.pop();
+            }
+          }
+
           return;
         }
         if (d.status != DeliveryStatus.pending) {

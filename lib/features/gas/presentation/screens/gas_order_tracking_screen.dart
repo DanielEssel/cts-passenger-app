@@ -308,7 +308,7 @@ class GasOrderTrackingScreen extends ConsumerWidget {
               serviceType: 'gas',
               driverId: order.driverId ?? '',
               driverName: order.driverName ?? 'Your driver',
-              destination: order.deliveryAddress ?? '',
+              destination: order.deliveryAddress,
               fare: 'GHS ${order.totalPrice.toStringAsFixed(2)}',
               rideType: 'Gas Delivery',
               driverRating: 5.0,
@@ -602,6 +602,19 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
         icon: markerService.dropoff(),
         anchor: const Offset(0.5, 1.0),
       ),
+      if (widget.order.driverLocation != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: LatLng(
+            widget.order.driverLocation!.latitude,
+            widget.order.driverLocation!.longitude,
+          ),
+          icon: markerService.vehicle('gas'),
+          anchor: const Offset(0.5, 0.5),
+          rotation: widget.order.driverHeading ?? 0,
+          flat: true,
+          infoWindow: const InfoWindow(title: 'Driver'),
+        ),
     };
   }
 
@@ -648,8 +661,7 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
       icon: Icons.check_circle_rounded,
       color: AppColors.success,
       title: 'Gas delivered!',
-      subtitle:
-          'Delivered to ${widget.order.deliveryAddress ?? 'your location'}',
+      subtitle: 'Delivered to ${widget.order.deliveryAddress}',
     );
   }
 

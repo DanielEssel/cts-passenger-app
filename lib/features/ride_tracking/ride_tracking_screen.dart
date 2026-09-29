@@ -555,83 +555,110 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator(color: _kPrimary)));
-    }
+Widget build(BuildContext context) {
+  if (_isLoading) {
+    return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: _kPrimary)));
+  }
 
-    return PopScope(
-      canPop: _status.isTerminal,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _snack('Please wait for your trip to complete.');
-      },
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF8FAF9),
-        body: Column(
-          children: [
-            Expanded(
-              flex: 55,
-              child: Stack(
-                children: [
-                  GoogleMap(
-                    style: _mapStyle,
-                    onMapCreated: (c) {
-                      _mapController = c;
-                      setState(() => _mapReady = true);
-                      WidgetsBinding.instance
-                          .addPostFrameCallback((_) => _refitMap());
-                    },
-                    initialCameraPosition: CameraPosition(
-                        target: _pickupLatLng ?? _kAccra, zoom: 14),
-                    markers: _buildMarkers(),
-                    polylines: _routePolyline,
-                    myLocationEnabled: true,
-                    myLocationButtonEnabled: false,
-                    zoomControlsEnabled: false,
-                    mapToolbarEnabled: false,
-                    compassEnabled: false,
-                  ),
-                  Positioned(
-                    top: MediaQuery.of(context).padding.top + 12,
-                    right: 16,
-                    child: _MapBtn(
-                        icon: Icons.my_location_rounded,
-                        color: _kPrimary,
-                        onTap: _refitMap),
-                  ),
-                  Positioned(
-                      bottom: 0, left: 0, right: 0, child: _buildStatusBar()),
-                ],
+  return PopScope(
+    canPop: _status.isTerminal,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) _snack('Please wait for your trip to complete.');
+    },
+    child: Stack(
+      children: [
+        Scaffold(
+          backgroundColor: const Color(0xFFF8FAF9),
+          body: Column(
+            children: [
+              Expanded(
+                flex: 55,
+                child: Stack(
+                  children: [
+                    GoogleMap(
+                      style: _mapStyle,
+                      onMapCreated: (c) {
+                        _mapController = c;
+                        setState(() => _mapReady = true);
+                        WidgetsBinding.instance
+                            .addPostFrameCallback((_) => _refitMap());
+                      },
+                      initialCameraPosition: CameraPosition(
+                          target: _pickupLatLng ?? _kAccra, zoom: 14),
+                      markers: _buildMarkers(),
+                      polylines: _routePolyline,
+                      myLocationEnabled: true,
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: false,
+                      mapToolbarEnabled: false,
+                      compassEnabled: false,
+                    ),
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + 12,
+                      right: 16,
+                      child: _MapBtn(
+                          icon: Icons.my_location_rounded,
+                          color: _kPrimary,
+                          onTap: _refitMap),
+                    ),
+                    Positioned(
+                        bottom: 0, left: 0, right: 0, child: _buildStatusBar()),
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              flex: 45,
-              child: Container(
-                color: Colors.white,
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                      20, 0, 20, MediaQuery.of(context).padding.bottom + 16),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      _buildStepper(),
-                      const SizedBox(height: 16),
-                      _buildDriverCard(),
-                      const SizedBox(height: 12),
-                      _buildActionRow(),
-                      const SizedBox(height: 12),
-                      _buildSOSButton(),
-                    ],
+              Expanded(
+                flex: 45,
+                child: Container(
+                  color: Colors.white,
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                        20, 0, 20, MediaQuery.of(context).padding.bottom + 16),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 8),
+                        _buildStepper(),
+                        const SizedBox(height: 16),
+                        _buildDriverCard(),
+                        const SizedBox(height: 12),
+                        _buildActionRow(),
+                        const SizedBox(height: 12),
+                        _buildSOSButton(),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
+        if (_isCancelling)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.45),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 12),
+                    Text(
+                      'Cancelling ride...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 
   Widget _buildStatusBar() {
     final (color, icon, label) = switch (_status) {

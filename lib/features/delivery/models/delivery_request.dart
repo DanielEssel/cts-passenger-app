@@ -12,7 +12,9 @@ enum DeliveryStatus {
   deliveryEnroute,
   arrivedAtDropoff,
   completed,
-  cancelled;
+  cancelled,
+  cancelledByDriver,
+  cancelledByPassenger;
 
   String get firestoreValue => name;
 
@@ -32,12 +34,17 @@ enum DeliveryStatus {
         DeliveryStatus.arrivedAtDropoff => 'Driver at drop-off',
         DeliveryStatus.completed        => 'Delivery completed',
         DeliveryStatus.cancelled        => 'Delivery cancelled',
+        DeliveryStatus.cancelledByDriver    => 'Delivery cancelled by driver',
+        DeliveryStatus.cancelledByPassenger => 'Delivery cancelled by you',
       };
 
   bool get isActive => switch (this) {
         DeliveryStatus.completed  => false,
         DeliveryStatus.cancelled  => false,
+        DeliveryStatus.cancelledByDriver    => false,
+        DeliveryStatus.cancelledByPassenger => false,
         _                         => true,
+
       };
 }
 

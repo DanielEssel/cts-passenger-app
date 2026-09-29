@@ -30,23 +30,24 @@ class DriverMatchingScreen extends ConsumerStatefulWidget {
 class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
-  late final Timer               _dotsTimer;
-  Timer?                         _timeoutTimer;
+  late final Timer _dotsTimer;
+  Timer? _timeoutTimer;
   StreamSubscription<DocumentSnapshot>? _tripSub;
 
-  int    _dotsCount    = 1;
-  bool   _isCancelling = false;
-  bool   _isNavigating = false;
+  int _dotsCount = 1;
+  bool _isCancelling = false;
+  bool _isNavigating = false;
+  bool _isTerminalDialogShowing = false;
 
-  static const _timeoutSeconds = 60;   
-  int    _secondsLeft  = _timeoutSeconds;
+  static const _timeoutSeconds = 60;
+  int _secondsLeft = _timeoutSeconds;
 
   @override
   void initState() {
     super.initState();
 
     _pulseController = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
 
@@ -77,7 +78,7 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
         .listen((snap) {
       if (!mounted || !snap.exists) return;
 
-      final data   = snap.data()!;
+      final data = snap.data()!;
       final status = data['status'] as String? ?? '';
 
       switch (status) {
@@ -85,12 +86,12 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
         case 'driverArrived':
           _timeoutTimer?.cancel();
           _navigateToTracking(
-            driverName:   data['driverName']   as String? ?? 'Your driver',
+            driverName: data['driverName'] as String? ?? 'Your driver',
             driverRating: (data['driverRating'] as num?)?.toDouble() ?? 5.0,
-            driverPlate:  data['driverPlate']  as String? ?? '',
-            driverPhoto:  data['driverPhoto']  as String? ?? '',
+            driverPlate: data['driverPlate'] as String? ?? '',
+            driverPhoto: data['driverPhoto'] as String? ?? '',
             vehicleModel: data['vehicleModel'] as String? ?? '',
-            eta:          data['eta']          as String? ?? '5 min',
+            eta: data['eta'] as String? ?? '5 min',
           );
 
         case 'noDriversAvailable':
@@ -138,12 +139,11 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
           .collection('trips')
           .doc(widget.tripId)
           .update({
-        'status':      'noDriversAvailable',
-        'expiredAt':   FieldValue.serverTimestamp(),
-        'expiredBy':   'passenger_timeout',
+        'status': 'noDriversAvailable',
+        'expiredAt': FieldValue.serverTimestamp(),
+        'expiredBy': 'passenger_timeout',
       });
     } catch (_) {}
-    if (mounted) _showNoDriversDialog();
   }
 
   // ── Cancellation ──────────────────────────────────────────────────────────
@@ -158,8 +158,8 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
           .collection('trips')
           .doc(widget.tripId)
           .update({
-        'status':             'cancelledByPassenger',
-        'cancelledAt':        FieldValue.serverTimestamp(),
+        'status': 'cancelledByPassenger',
+        'cancelledAt': FieldValue.serverTimestamp(),
         'cancellationReason': 'User cancelled while searching',
       });
       if (mounted) Navigator.pop(context);
@@ -176,50 +176,67 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
   // ── Dialogs ───────────────────────────────────────────────────────────────
 
   void _showNoDriversDialog() {
-    if (!mounted) return;
+    if (!mounted || _isTerminalDialogShowing) return;
+
+    _isTerminalDialogShowing = true;
+
     showDialog<void>(
-      context:           context,
+      context: context,
       barrierDismissible: false,
       builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+          borderRadius: BorderRadius.circular(20),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 64, height: 64,
+              width: 64,
+              height: 64,
               decoration: BoxDecoration(
-                color:        AppColors.warningLight,
+                color: AppColors.warningLight,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Icon(Icons.person_search_rounded,
-                  color: AppColors.warning, size: 32),
+              child: const Icon(
+                Icons.person_search_rounded,
+                color: AppColors.warning,
+                size: 32,
+              ),
             ),
             const SizedBox(height: 16),
-            const Text('No drivers found',
-                style: TextStyle(
-                  fontSize:   18,
-                  fontWeight: FontWeight.w700,
-                )),
+            const Text(
+              'No drivers found',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 8),
             const Text(
               'No drivers are available near you right now. '
               'Please try again in a few minutes.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              style: TextStyle(
+                fontSize: 13,
+                color: Color(0xFF6B7280),
+              ),
             ),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: () {
-                  Navigator.pop(dialogCtx); // close dialog
-                  if (context.mounted) Navigator.pop(context);
+                  Navigator.pop(dialogCtx);
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                  }
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: const Text('Try Again'),
               ),
@@ -227,24 +244,26 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
           ],
         ),
       ),
-    );
+    ).whenComplete(() {
+      _isTerminalDialogShowing = false;
+    });
   }
 
   void _showDriverCancelledDialog() {
     if (!mounted) return;
     showDialog<void>(
-      context:           context,
+      context: context,
       barrierDismissible: false,
       builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 64, height: 64,
+              width: 64,
+              height: 64,
               decoration: BoxDecoration(
-                color:        AppColors.errorLight,
+                color: AppColors.errorLight,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: const Icon(Icons.cancel_rounded,
@@ -253,7 +272,7 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
             const SizedBox(height: 16),
             const Text('Driver cancelled',
                 style: TextStyle(
-                  fontSize:   18,
+                  fontSize: 18,
                   fontWeight: FontWeight.w700,
                 )),
             const SizedBox(height: 8),
@@ -316,11 +335,12 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
                   GestureDetector(
                     onTap: _isCancelling ? null : _cancelTripRequest,
                     child: Container(
-                      width: 36, height: 36,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
-                        color:        AppColors.surfaceAlt,
+                        color: AppColors.surfaceAlt,
                         borderRadius: BorderRadius.circular(10),
-                        border:       Border.all(color: AppColors.border),
+                        border: Border.all(color: AppColors.border),
                       ),
                       child: _isCancelling
                           ? const Padding(
@@ -334,10 +354,10 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
                   Text(widget.rideType, style: AppTextStyles.heading4),
                   // Timeout countdown
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color:        _secondsLeft <= 30
+                      color: _secondsLeft <= 30
                           ? AppColors.errorLight
                           : AppColors.surfaceAlt,
                       borderRadius: BorderRadius.circular(20),
@@ -345,9 +365,9 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
                     child: Text(
                       '${_secondsLeft ~/ 60}:${(_secondsLeft % 60).toString().padLeft(2, '0')}',
                       style: TextStyle(
-                        fontSize:   12,
+                        fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color:      _secondsLeft <= 30
+                        color: _secondsLeft <= 30
                             ? AppColors.error
                             : AppColors.textSecondary,
                       ),
@@ -359,7 +379,8 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               const Spacer(),
 
               // ── Pulsing ring ──
-              _PulsingRing(controller: _pulseController, rideType: widget.rideType),
+              _PulsingRing(
+                  controller: _pulseController, rideType: widget.rideType),
 
               const SizedBox(height: 32),
 
@@ -382,13 +403,11 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
-                  value:           progress,
-                  minHeight:       4,
+                  value: progress,
+                  minHeight: 4,
                   backgroundColor: AppColors.border,
-                  valueColor:      AlwaysStoppedAnimation<Color>(
-                    _secondsLeft <= 30
-                        ? AppColors.error
-                        : AppColors.primary,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    _secondsLeft <= 30 ? AppColors.error : AppColors.primary,
                   ),
                 ),
               ),
@@ -399,27 +418,27 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color:        AppColors.surface,
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(16),
-                  border:       Border.all(color: AppColors.border),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Column(
                   children: [
                     _SummaryRow(
-                      icon:      Icons.location_on_rounded,
+                      icon: Icons.location_on_rounded,
                       iconColor: AppColors.primary,
-                      label:     'Going to',
-                      value:     widget.destination,
+                      label: 'Going to',
+                      value: widget.destination,
                     ),
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
                       child: Divider(height: 0.5, color: AppColors.border),
                     ),
                     _SummaryRow(
-                      icon:      Icons.account_balance_wallet_rounded,
+                      icon: Icons.account_balance_wallet_rounded,
                       iconColor: AppColors.success,
-                      label:     'Estimated fare',
-                      value:     widget.fare,
+                      label: 'Estimated fare',
+                      value: widget.fare,
                     ),
                   ],
                 ),
@@ -431,30 +450,31 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               GestureDetector(
                 onTap: _isCancelling ? null : _cancelTripRequest,
                 child: Container(
-                  width:   double.infinity,
+                  width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   decoration: BoxDecoration(
-                    color:        AppColors.errorLight,
+                    color: AppColors.errorLight,
                     borderRadius: BorderRadius.circular(14),
-                    border:       Border.all(
+                    border: Border.all(
                         color: AppColors.error.withValues(alpha: 0.2)),
                   ),
                   child: _isCancelling
                       ? const Center(
                           child: SizedBox(
-                            width: 20, height: 20,
+                            width: 20,
+                            height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color:       AppColors.error,
+                              color: AppColors.error,
                             ),
                           ),
                         )
                       : const Text(
                           'Cancel request',
                           style: TextStyle(
-                            fontSize:   15,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color:      AppColors.error,
+                            color: AppColors.error,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -478,21 +498,21 @@ class _PulsingRing extends StatelessWidget {
   const _PulsingRing({required this.controller, required this.rideType});
 
   IconData get _icon => switch (rideType.toLowerCase()) {
-    'okada'        => Icons.two_wheeler_rounded,
-    'motorcycle'   => Icons.two_wheeler_rounded,
-    'aboboya'      => Icons.electric_rickshaw_rounded,
-    'mini truck'   => Icons.local_shipping_rounded,
-    'delivery'     => Icons.inventory_2_rounded,
-    _              => Icons.directions_car_rounded,
-  };
+        'okada' => Icons.two_wheeler_rounded,
+        'motorcycle' => Icons.two_wheeler_rounded,
+        'aboboya' => Icons.electric_rickshaw_rounded,
+        'mini truck' => Icons.local_shipping_rounded,
+        'delivery' => Icons.inventory_2_rounded,
+        _ => Icons.directions_car_rounded,
+      };
 
   String get _label => switch (rideType.toLowerCase()) {
-    'okada'        => 'Okada',
-    'motorcycle'   => 'Motorcycle',
-    'aboboya'      => 'Aboboya',
-    'mini truck'   => 'Mini Truck',
-    _              => 'Taxi',
-  };
+        'okada' => 'Okada',
+        'motorcycle' => 'Motorcycle',
+        'aboboya' => 'Aboboya',
+        'mini truck' => 'Mini Truck',
+        _ => 'Taxi',
+      };
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -507,7 +527,8 @@ class _PulsingRing extends StatelessWidget {
                 Transform.scale(
                   scale: 1.0 + (controller.value * 0.5),
                   child: Container(
-                    width: 150, height: 150,
+                    width: 150,
+                    height: 150,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.primary.withValues(
@@ -520,7 +541,8 @@ class _PulsingRing extends StatelessWidget {
                 Transform.scale(
                   scale: 1.0 + (controller.value * 0.3),
                   child: Container(
-                    width: 120, height: 120,
+                    width: 120,
+                    height: 120,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.primary.withValues(
@@ -533,7 +555,8 @@ class _PulsingRing extends StatelessWidget {
                 Transform.scale(
                   scale: 1.0 + (controller.value * 0.15),
                   child: Container(
-                    width: 96, height: 96,
+                    width: 96,
+                    height: 96,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.primary.withValues(
@@ -544,19 +567,20 @@ class _PulsingRing extends StatelessWidget {
                 ),
                 // Vehicle icon circle
                 Container(
-                  width: 80, height: 80,
+                  width: 80,
+                  height: 80,
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       colors: [Color(0xFF16A34A), Color(0xFF15803D)],
-                      begin:  Alignment.topLeft,
-                      end:    Alignment.bottomRight,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color:      Color(0x4416A34A),
+                        color: Color(0x4416A34A),
                         blurRadius: 16,
-                        offset:     Offset(0, 6),
+                        offset: Offset(0, 6),
                       ),
                     ],
                   ),
@@ -569,17 +593,17 @@ class _PulsingRing extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
               decoration: BoxDecoration(
-                color:        AppColors.primaryDim,
+                color: AppColors.primaryDim,
                 borderRadius: BorderRadius.circular(20),
-                border:       Border.all(
-                    color: AppColors.primary.withValues(alpha: 0.3)),
+                border:
+                    Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
               ),
               child: Text(
                 _label,
                 style: const TextStyle(
-                  fontSize:   12,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color:      AppColors.primary,
+                  color: AppColors.primary,
                 ),
               ),
             ),
@@ -592,9 +616,9 @@ class _PulsingRing extends StatelessWidget {
 
 class _SummaryRow extends StatelessWidget {
   final IconData icon;
-  final Color    iconColor;
-  final String   label;
-  final String   value;
+  final Color iconColor;
+  final String label;
+  final String value;
 
   const _SummaryRow({
     required this.icon,
@@ -610,7 +634,7 @@ class _SummaryRow extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: Text(label, style: AppTextStyles.bodySmall)),
           Text(value,
-              style:    AppTextStyles.labelLarge,
+              style: AppTextStyles.labelLarge,
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
         ],

@@ -111,28 +111,43 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
   }
 
     await ref.read(authProvider.notifier).signUp(
-      firstName: firstName,
-      lastName: lastName,
-      phone: phone,
-      email: email,
-      onCodeSent: () {
-        if (!mounted) return;
-        Navigator.pushNamed(
-          context,
-          AppRoutes.otpVerification,
-          arguments: {
-            'phone': phone,
-            'isSignUp': true,
-            'firstName': firstName,
-            'lastName': lastName,
-            'email': email,
-          },
-        );
-      },
-      onError: (msg) {
-        if (mounted) _showError(msg);
+  firstName: firstName,
+  lastName: lastName,
+  phone: phone,
+  email: email,
+
+  onCodeSent: () {
+    Navigator.pushNamed(
+      context,
+      AppRoutes.otpVerification,
+      arguments: {
+        'phone': phone,
+        'isSignUp': true,
+        'firstName': firstName,
+        'lastName': lastName,
+        'email': email,
       },
     );
+  },
+
+  onAuthenticated: () {
+    if (!context.mounted) return;
+
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.welcome,
+      (_) => false,
+    );
+  },
+
+  onError: (msg) {
+    if (!context.mounted) return;
+
+    // Keep your existing error UI.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  },
+);
   }
 
   void _showError(String message) {

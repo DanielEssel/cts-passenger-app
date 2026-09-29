@@ -540,60 +540,6 @@ exports.onDeliveryCreated = onDocumentCreated(
     const deliveryId = event.params.deliveryId;
     const uid = data.passengerId;
 
-    // ── Enrich delivery with passenger contact details ─────────────────────
-    // Drivers are allowed to read the assigned delivery, but not arbitrary
-    // passenger user documents. Copy only the contact fields needed for
-    // delivery communication.
-    if (uid) {
-      try {
-        const passengerSnap = await getDb().collection("users").doc(uid).get();
-
-        if (passengerSnap.exists) {
-          const passenger = passengerSnap.data() || {};
-
-          const displayName =
-            typeof passenger.displayName === "string"
-              ? passenger.displayName.trim()
-              : "";
-
-          const firstName =
-            typeof passenger.firstName === "string"
-              ? passenger.firstName.trim()
-              : "";
-
-          const lastName =
-            typeof passenger.lastName === "string"
-              ? passenger.lastName.trim()
-              : "";
-
-          const passengerName =
-            displayName || `${firstName} ${lastName}`.trim();
-
-          const passengerPhone =
-            typeof passenger.phoneNumber === "string"
-              ? passenger.phoneNumber.trim()
-              : "";
-
-          await getDb()
-            .collection("deliveries")
-            .doc(deliveryId)
-            .update({
-              passengerName: passengerName || null,
-              passengerPhone: passengerPhone || null,
-            });
-
-          console.log(
-            `Delivery ${deliveryId}: passenger contact details attached`,
-          );
-        }
-      } catch (e) {
-        console.error(
-          `Delivery ${deliveryId}: failed to attach passenger contact:`,
-          e.message,
-        );
-      }
-    }
-
     // ── 1. Notify passenger ───────────────────────────────────────────────
     await notifyPassenger(uid, {
       type: "delivery",
@@ -955,29 +901,7 @@ exports.onDeliveryStatusChanged = onDocumentUpdated(
         break;
 
       case "cancelledByPassenger":
-      case "cancelledByPassenger":
-        await (driverId
-          ? notifyDriver(driverId, {
-              type: "delivery",
-              title: "Delivery cancelled",
-              body: "The delivery was cancelled by the passenger.",
-              route: "/driver-shell",
-              metadata: meta,
-            })
-          : Promise.resolve());
-        break;
-
-      case "cancelledByDriver":
-        await notifyPassenger(passengerId, {
-          type: "delivery",
-          title: "Delivery cancelled",
-          body: "Your driver cancelled the delivery. Please book again.",
-          route: "/shell",
-          metadata: meta,
-        });
-        break;
-
-      case "cancelled": // legacy — status with no recorded actor
+      case "cancelled":
         await Promise.all([
           notifyPassenger(passengerId, {
             type: "delivery",
@@ -990,7 +914,7 @@ exports.onDeliveryStatusChanged = onDocumentUpdated(
             ? notifyDriver(driverId, {
                 type: "delivery",
                 title: "Delivery cancelled",
-                body: "The delivery was cancelled.",
+                body: "The delivery was cancelled by the passenger.",
                 route: "/driver-shell",
                 metadata: meta,
               })
@@ -1040,6 +964,8 @@ exports.onWalletChanged = onDocumentUpdated(
     }
   },
 );
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DOCUMENT EXPIRY CHECK — daily at 8am Ghana time

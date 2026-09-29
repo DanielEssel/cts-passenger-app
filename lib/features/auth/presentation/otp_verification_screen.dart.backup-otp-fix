@@ -1,6 +1,9 @@
 // features/auth/presentation/otp_verification_screen.dart
 
 import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,7 +26,6 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   // Firebase phone OTP is always 6 digits
   static const int _otpLength = 6;
   static const int _resendSeconds = 60;
-  bool _verificationSubmitted = false;
 
   final List<TextEditingController> _controllers =
       List.generate(_otpLength, (_) => TextEditingController());
@@ -128,109 +130,104 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   String get _currentOtp => _controllers.map((c) => c.text).join();
 
   Future<void> _verifyOtp() async {
-  if (_verificationSubmitted) {
-    debugPrint('⚠️ OTP SCREEN: duplicate verification prevented');
-    return;
-  }
-
-  final code = _currentOtp;
-
-  if (code.length < _otpLength) {
-    _showError('Please enter the complete $_otpLength-digit code');
-    return;
-  }
-
-  _verificationSubmitted = true;
-
-  HapticFeedback.mediumImpact();
-
-  final success = await ref.read(authProvider.notifier).verifyOtp(
-        smsCode: code,
-        pendingProfile: _pendingProfile,
-        onAuthenticated: () {
-          if (!mounted) return;
-
-          HapticFeedback.heavyImpact();
-
-          if (_isSignUp) {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.welcome,
-              (_) => false,
-            );
-          } else {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.shell,
-              (_) => false,
-            );
-          }
-        },
-        onError: (msg) {
-          if (mounted) {
-            _showError(msg);
-          }
-        },
-      );
-
-  if (!mounted) return;
-
-  if (!success) {
-    // Allow the user to try the same current session again if the
-    // authentication attempt itself did not complete.
-    _verificationSubmitted = false;
-  }
-}
-
-  Future<void> _resendOtp() async {
-    if (_countdown > 0) return;
-
-    final authState = ref.read(authProvider);
-
-    if (authState.isLoading) {
+    final code = _currentOtp;
+    if (code.length < _otpLength) {
+      _showError('Please enter the complete $_otpLength-digit code');
       return;
     }
 
+    HapticFeedback.mediumImpact();
+
+    final success = await ref.read(authProvider.notifier).verifyOtp(
+          smsCode: code,
+          pendingProfile: _pendingProfile,
+          onError: (msg) {
+            if (mounted) _showError(msg);
+          },
+        );
+
+    if (!success || !mounted) return;
+
+    HapticFeedback.heavyImpact();
+
+    // ── If sign-up flow → always go to shell (profile was just created) ──
+    if (_isSignUp) {
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.welcome,
+        (_) => false,
+      );
+      return;
+    }
+    // ── Login flow → check if user document exists ──
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      _showError('Authentication failed. Please try again.');
+      return;
+    }
+
+    try {
+      // Check users collection (where AuthNotifier writes)
+      final userDoc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+
+      if (!mounted) return;
+
+      if (!userDoc.exists) {
+         if (!context.mounted) return;
+        // No account found — redirect to signup
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No account found. Please sign up first.'),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          ),
+        );
+        // Sign out the Firebase Auth session
+        await FirebaseAuth.instance.signOut();
+        // Go back to login
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.login,
+          (_) => false,
+        );
+        return;
+      }
+
+      // User exists → go to shell
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.shell,
+        (_) => false,
+      );
+    } catch (e) {
+      if (mounted) _showError('Something went wrong. Please try again.');
+    }
+  }
+
+  Future<void> _resendOtp() async {
+    if (_countdown > 0) return;
     HapticFeedback.selectionClick();
 
-    await ref.read(authProvider.notifier).resendOtp(
+    await ref.read(authProvider.notifier).sendOtp(
           phone: _phone,
-          pendingProfile: _isSignUp ? _pendingProfile : null,
           onCodeSent: () {
             if (!mounted) return;
-
-            _verificationSubmitted = false;
-
             _startResendTimer();
             _clearFields();
-
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: const Text('A new code has been sent'),
                 backgroundColor: AppColors.success,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    borderRadius: BorderRadius.circular(12)),
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               ),
             );
           },
-          onAuthenticated: () {
-            if (!mounted) return;
-
-            _verificationSubmitted = true;
-
-            HapticFeedback.heavyImpact();
-
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              _isSignUp ? AppRoutes.welcome : AppRoutes.shell,
-              (_) => false,
-            );
-          },
           onError: (msg) {
-            if (!mounted) return;
-
-            _verificationSubmitted = false;
-            _showError(msg);
+            if (mounted) _showError(msg);
           },
         );
   }
