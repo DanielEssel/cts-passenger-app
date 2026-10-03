@@ -958,3 +958,26 @@ The major business options are:
 The technical implementation should follow the selected business model.
 
 Until that decision is made, changing the distance formula alone risks producing a technically different calculation while preserving the underlying business problem.
+
+
+
+To complete the Gas service quickly, I don't necessarily need to build a separate supplier app at this stage.
+
+What I need from CTSGo is the list of **approved gas suppliers/refill stations** that we will work with, together with their:
+
+• Station/supplier name
+• Exact location/address
+• GPS coordinates
+• Contact details
+• Gas brands available
+• Cylinder sizes available
+• Order/refill types supported
+• Current prices
+• Operating hours
+• Any specific refill procedure the driver must follow
+
+Once CTSGo provides the approved supplier/station information and confirms the commercial arrangement, I can configure the stations in the backend and finish wiring the Gas order flow around them.
+
+For the initial launch, CTSGo can manage the suppliers/stations internally rather than requiring suppliers to create accounts in the app.
+
+A supplier portal or supplier app can be added later if the business grows and automated supplier management becomes necessary.

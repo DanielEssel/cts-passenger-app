@@ -335,3 +335,7 @@ exports.onDriverSubmittedForReview = adminAlerts.onDriverSubmittedForReview;
 const withdrawalApproval = require("./withdrawal_approval");
 exports.approveWithdrawal = withdrawalApproval.approveWithdrawal;
 exports.rejectWithdrawal = withdrawalApproval.rejectWithdrawal;
+
+// ─────────gas dispatch policy ─────────────────────────────────────────────
+const gasAcceptance = require("./accept_gas_order");
+exports.acceptGasOrder = gasAcceptance.acceptGasOrder;

@@ -12,7 +12,7 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> 
+class _OnboardingScreenState extends State<OnboardingScreen>
     with TickerProviderStateMixin {
   late final PageController _pageController;
   late final AnimationController _floatController;
@@ -28,7 +28,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           _pageOffset = _pageController.page ?? 0;
         });
       });
-    
+
     // Continuous floating animation for illustrations
     _floatController = AnimationController(
       duration: const Duration(seconds: 3),
@@ -43,9 +43,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         curve: Curves.easeOutCubic,
       );
     } else {
-      OnboardingLocalService.markCompleted();
-      Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+      _finish();
     }
+  }
+
+  Future<void> _finish() async {
+    await OnboardingLocalService.markCompleted();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacementNamed(AppRoutes.signup);
   }
 
   @override
@@ -79,7 +84,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               final isActive = index == _currentPage;
               final isNext = index == _currentPage + 1;
               final isPrev = index == _currentPage - 1;
-              
+
               // Calculate smooth transition progress
               double progress = 1.0;
               if (isActive) {
@@ -90,7 +95,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 progress = 1 - (_currentPage - _pageOffset);
               }
               progress = progress.clamp(0.0, 1.0);
-              
+
               return _HeroIllustration(
                 imagePath: onboardingPages[index].imagePath,
                 isActive: isActive,
@@ -111,16 +116,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 child: Padding(
                   padding: const EdgeInsets.only(right: 20, top: 8),
                   child: TextButton(
-                    onPressed: isLastPage 
-                        ? null 
-                        : () async {
-                          await OnboardingLocalService.markCompleted();
-                          if (context.mounted) Navigator.of(context).pushReplacementNamed(AppRoutes.login);
-                        },
+                    onPressed: isLastPage ? null : _finish,
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white.withValues(alpha: 0.9),
                       backgroundColor: Colors.white.withValues(alpha: 0.1),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),
@@ -176,11 +177,11 @@ class _AnimatedBackground extends StatelessWidget {
     // Blend colors between pages during transition
     final currentColors = onboardingPages[currentPage].backgroundGradient;
     final nextIndex = currentPage + 1;
-    
+
     if (nextIndex < onboardingPages.length && pageOffset > currentPage) {
       final nextColors = onboardingPages[nextIndex].backgroundGradient;
       final t = (pageOffset - currentPage).clamp(0.0, 1.0);
-      
+
       return Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -194,7 +195,7 @@ class _AnimatedBackground extends StatelessWidget {
         ),
       );
     }
-    
+
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -206,6 +207,7 @@ class _AnimatedBackground extends StatelessWidget {
     );
   }
 }
+
 class _HeroIllustration extends StatelessWidget {
   final String imagePath;
   final bool isActive;
@@ -223,38 +225,26 @@ class _HeroIllustration extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-
-    final scale = isActive
-        ? 1.05
-        : 1.0 + (progress * 0.05);
+    final scale = isActive ? 1.05 : 1.0 + (progress * 0.05);
 
     final opacity = isActive ? 1.0 : progress;
 
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 400),
       opacity: opacity.clamp(0.0, 1.0),
-
       child: Transform.scale(
         scale: scale,
-
         child: AnimatedBuilder(
           animation: floatController,
-
           builder: (context, child) {
-
-            final floatY =
-                (floatController.value * 8) - 4;
+            final floatY = (floatController.value * 8) - 4;
 
             return Transform.translate(
               offset: Offset(0, floatY),
-
               child: SizedBox.expand(
-
                 child: Stack(
                   fit: StackFit.expand,
-
                   children: [
-
                     /// FULL SCREEN IMAGE
                     Image.asset(
                       imagePath,
@@ -262,21 +252,17 @@ class _HeroIllustration extends StatelessWidget {
                       alignment: Alignment.center,
                     ),
 
-
                     /// PREMIUM DARK GRADIENT BLEND
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-
                           colors: [
                             Colors.black.withValues(alpha: 0.05),
                             Colors.black.withValues(alpha: 0.15),
                             Colors.black.withValues(alpha: 0.65),
                           ],
-
                           stops: const [
                             0.0,
                             0.55,
@@ -285,7 +271,6 @@ class _HeroIllustration extends StatelessWidget {
                         ),
                       ),
                     ),
-
                   ],
                 ),
               ),
@@ -327,14 +312,15 @@ class _BottomGlassPanel extends StatelessWidget {
           filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
             padding: EdgeInsets.fromLTRB(
-              24, 
-              32, 
-              24, 
+              24,
+              32,
+              24,
               32 + MediaQuery.of(context).padding.bottom,
             ),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(40)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(40)),
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.15),
                 width: 1,
@@ -462,17 +448,17 @@ class _MorphingIndicator extends StatelessWidget {
       height: 8,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: isActive 
-            ? Colors.white 
-            : Colors.white.withValues(alpha: 0.3),
+        color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(4),
-        boxShadow: isActive ? [
-          BoxShadow(
-            color: Colors.white.withValues(alpha: 0.5),
-            blurRadius: 8,
-            spreadRadius: 0,
-          ),
-        ] : null,
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  blurRadius: 8,
+                  spreadRadius: 0,
+                ),
+              ]
+            : null,
       ),
     );
   }
@@ -508,21 +494,21 @@ class _GlassButton extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         height: 56,
         decoration: BoxDecoration(
-          color: isPrimary
-              ? Colors.white
-              : Colors.white.withValues(alpha: 0.1),
+          color: isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(28),
           border: isPrimary
               ? null
               : Border.all(color: Colors.white.withValues(alpha: 0.3)),
-          boxShadow: isPrimary ? [
-            BoxShadow(
-              color: Colors.white.withValues(alpha: 0.3),
-              blurRadius: 20,
-              spreadRadius: 0,
-              offset: const Offset(0, 8),
-            ),
-          ] : null,
+          boxShadow: isPrimary
+              ? [
+                  BoxShadow(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    blurRadius: 20,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: Center(
           child: Text(

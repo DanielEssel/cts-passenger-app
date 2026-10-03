@@ -5,6 +5,7 @@ const {
 } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+const { canHandleGasOrder } = require("./gas_dispatch_policy");
 
 // Lazy getters — avoids calling before admin.initializeApp()
 const getDb = () => admin.firestore();
@@ -458,8 +459,17 @@ exports.onGasOrderCreated = onDocumentCreated(
       }
 
       const nearby = driversSnap.docs.filter((doc) => {
-        const loc = doc.data().location;
+        const driver = doc.data();
+        const loc = driver.location;
+
         if (!loc) return false;
+
+        // Gas capability is evaluated independently of the delivery radius.
+        // Unknown/missing vehicle types fail closed.
+        if (!canHandleGasOrder(driver.vehicleType, data.refillType)) {
+          return false;
+        }
+
         return (
           haversineKm(deliveryLat, deliveryLng, loc.latitude, loc.longitude) <=
           10.0
@@ -467,7 +477,28 @@ exports.onGasOrderCreated = onDocumentCreated(
       });
 
       if (nearby.length === 0) {
-        console.log(`Gas order ${orderId}: no drivers within 10km`);
+        const radiusEligible = driversSnap.docs.filter((doc) => {
+          const loc = doc.data().location;
+          if (!loc) return false;
+
+          return (
+            haversineKm(
+              deliveryLat,
+              deliveryLng,
+              loc.latitude,
+              loc.longitude,
+            ) <= 10.0
+          );
+        });
+
+        if (radiusEligible.length === 0) {
+          console.log(`Gas order ${orderId}: no drivers within 10km`);
+        } else {
+          console.log(
+            `Gas order ${orderId}: ${radiusEligible.length} nearby driver(s) failed gas vehicle eligibility for ${data.refillType ?? "unknown refill type"}`,
+          );
+        }
+
         return;
       }
 
@@ -508,15 +539,16 @@ exports.onGasOrderCreated = onDocumentCreated(
         },
         apns: { payload: { aps: { sound: "default" } } },
         data: {
-          type: "NEW_GAS_REQUEST",
-          orderId,
-          pickupAddress: data.pickupAddress ?? "",
-          deliveryAddress: data.deliveryAddress ?? "",
-          cylinderSize: data.cylinderSize ?? "",
-          totalPrice: String(data.totalPrice ?? 0),
-          title: "🔥 New Gas Order",
-          body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
-        },
+  type: "NEW_GAS_REQUEST",
+  orderId,
+  pickupAddress: data.pickupAddress ?? "",
+  deliveryAddress: data.deliveryAddress ?? "",
+  cylinderSize: data.cylinderSize ?? "",
+  totalPrice: String(data.totalPrice ?? 0),
+  title: "🔥 New Gas Order",
+  body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
+  route: `/driver/active-gas?orderId=${orderId}`,
+},
       });
       console.log(`Gas order ${orderId}: FCM sent to ${tokens.length} drivers`);
     } catch (e) {

@@ -284,28 +284,33 @@ match /app_config/mobile {
     }
 
     // ── Gas Orders ────────────────────────────────────────────────────────
-    match /gas_orders/{orderId} {
-      allow create: if (isAuth()
-          && request.resource.data.passengerId == request.auth.uid)
+match /gas_orders/{orderId} {
+  allow create: if (isAuth()
+      && request.resource.data.passengerId == request.auth.uid)
+    || isAdmin();
+
+  allow read: if isParty(
+          resource.data.passengerId,
+          resource.data.driverId
+        )
+        || (isAuth()
+            && resource.data.status == "pendingApproval"
+            && resource.data.driverId == null)
         || isAdmin();
-      allow read: if isParty(
-              resource.data.passengerId,
-              resource.data.driverId
-            )
-            || (isAuth()
-                && resource.data.status   == "pendingApproval"
-                && resource.data.driverId == null)
-            || isAdmin();
-      allow update: if isParty(
-              resource.data.passengerId,
-              resource.data.driverId
-            )
-            || (isAuth()
-                && resource.data.driverId == null
-                && request.resource.data.driverId == request.auth.uid)
-            || isAdmin();
-      allow delete: if isAdmin();
-    }
+
+  // Driver assignment is server-authoritative through acceptGasOrder.
+  // A client may update an order only if it cannot change driverId.
+  allow update: if (
+          isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          && request.resource.data.driverId == resource.data.driverId
+        )
+        || isAdmin();
+
+  allow delete: if isAdmin();
+}
 
     // ── Withdrawals (top-level) ───────────────────────────────────────────
     match /withdrawals/{withdrawalId} {

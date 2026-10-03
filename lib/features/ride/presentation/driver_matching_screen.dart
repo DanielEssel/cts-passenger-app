@@ -46,6 +46,8 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
   void initState() {
     super.initState();
 
+    debugPrint('DriverMatching rideType="${widget.rideType}"');
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -392,7 +394,7 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'Looking for nearby ${widget.rideType} drivers',
+                'Looking for nearby ${_VehicleInfo.from(widget.rideType).label} drivers',
                 style: AppTextStyles.bodySmall,
                 textAlign: TextAlign.center,
               ),
@@ -490,6 +492,48 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
   }
 }
 
+// ── Vehicle resolver ──────────────────────────────────────────────────────────
+
+class _VehicleInfo {
+  final IconData icon;
+  final String label;
+  const _VehicleInfo(this.icon, this.label);
+
+  static _VehicleInfo from(String raw) {
+    final t = raw.toLowerCase().trim();
+    bool has(List<String> keys) => keys.any(t.contains);
+
+    // Order matters: "tricycle" must be checked before "cycle"/"motor"
+    if (has([
+      'pragya',
+      'pragyia',
+      'pragia',
+      'aboboya',
+      'aboboyaa',
+      'tricycle',
+      'tuk',
+      'rickshaw'
+    ])) {
+      return const _VehicleInfo(Icons.electric_rickshaw_rounded, 'Pragya');
+    }
+    if (has(['okada', 'motor', 'bike', 'moto'])) {
+      return const _VehicleInfo(Icons.two_wheeler_rounded, 'Okada');
+    }
+    if (has(['truck', 'pickup', 'pick-up', 'van'])) {
+      return const _VehicleInfo(Icons.local_shipping_rounded, 'Mini Truck');
+    }
+    if (has(['deliver', 'parcel', 'package', 'courier'])) {
+      return const _VehicleInfo(Icons.inventory_2_rounded, 'Delivery');
+    }
+    if (has(['taxi', 'car', 'cab', 'ride', 'standard', 'comfort'])) {
+      return const _VehicleInfo(Icons.directions_car_rounded, 'Taxi');
+    }
+    // Unknown type: show what was actually passed instead of lying with "Taxi"
+    return _VehicleInfo(
+        Icons.directions_car_rounded, raw.isEmpty ? 'Ride' : raw);
+  }
+}
+
 // ── Pulsing ring ──────────────────────────────────────────────────────────────
 
 class _PulsingRing extends StatelessWidget {
@@ -497,22 +541,7 @@ class _PulsingRing extends StatelessWidget {
   final String rideType;
   const _PulsingRing({required this.controller, required this.rideType});
 
-  IconData get _icon => switch (rideType.toLowerCase()) {
-        'okada' => Icons.two_wheeler_rounded,
-        'motorcycle' => Icons.two_wheeler_rounded,
-        'aboboya' => Icons.electric_rickshaw_rounded,
-        'mini truck' => Icons.local_shipping_rounded,
-        'delivery' => Icons.inventory_2_rounded,
-        _ => Icons.directions_car_rounded,
-      };
-
-  String get _label => switch (rideType.toLowerCase()) {
-        'okada' => 'Okada',
-        'motorcycle' => 'Motorcycle',
-        'aboboya' => 'Aboboya',
-        'mini truck' => 'Mini Truck',
-        _ => 'Taxi',
-      };
+  _VehicleInfo get _v => _VehicleInfo.from(rideType);
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -584,7 +613,8 @@ class _PulsingRing extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: Icon(_icon, color: Colors.white, size: 38),
+                  // vehicle icon circle
+                  child: Icon(_v.icon, color: Colors.white, size: 38),
                 ),
               ],
             ),
@@ -599,7 +629,7 @@ class _PulsingRing extends StatelessWidget {
                     Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
               ),
               child: Text(
-                _label,
+                _v.label,
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
