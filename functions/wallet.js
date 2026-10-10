@@ -3,6 +3,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret }       = require("firebase-functions/params");
 const admin                  = require("firebase-admin");
 const axios                  = require("axios");
+const { PaymentConfigError, assertPaystackRequestAllowed } = require("./config");
 
 const getDb          = () => admin.firestore();
 const PAYSTACK_BASE  = "https://api.paystack.co";
@@ -27,6 +28,20 @@ async function getRole(uid) {
   if (userDoc.exists) return { role: "passenger", data: userDoc.data() };
 
   return { role: "unknown", data: {} };
+}
+
+// Paystack is retired. Production behaviour is unchanged until a separate
+// removal change; every other environment refuses before any write.
+function requirePaystackAllowed() {
+  try {
+    assertPaystackRequestAllowed();
+  } catch (err) {
+    if (err instanceof PaymentConfigError) {
+      console.error("[paystack] Blocked by config guard:", err.message);
+      throw new HttpsError("failed-precondition", "This payment method is not available.");
+    }
+    throw err;
+  }
 }
 
 function validateAmount(amount, min = 1) {
@@ -98,6 +113,7 @@ exports.initializePaystackPayment = onCall(
   { region: "europe-west2", minInstances: 0, secrets: [paystackSecret] },
   async (request) => {
     const uid    = requireAuth(request);
+    requirePaystackAllowed();
     const secret = paystackSecret.value();
     const { amount, email, paymentMethod } = request.data;
 
@@ -193,6 +209,7 @@ exports.verifyPaystackPayment = onCall(
     // This callable is kept for backwards compatibility but does
     // NOT credit the wallet — it only returns the payment status.
     const uid       = requireAuth(request);
+    requirePaystackAllowed();
     const secret    = paystackSecret.value();
     const { reference } = request.data;
 

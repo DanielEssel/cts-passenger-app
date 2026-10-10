@@ -6,8 +6,9 @@
     "shell": "firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
-  },
+    "logs": "firebase functions:log",
+    "test:payments:smoke": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/smoke.test.js\"",
+"test:payments:security": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/security.test.js\""  },
   "engines": {
     "node": "22"
   },

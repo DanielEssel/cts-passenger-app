@@ -13,25 +13,43 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const axios = require("axios");
 
+const {
+  PaymentConfigError,
+  bridgeApiBase,
+  bridgeCallbackUrl,
+} = require("./config");
+
 const getDb = () => admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 // ── Bridge secrets ─────────────────────────────────────────────────────────────
-// Set these before first deploy:
-//   firebase functions:secrets:set BRIDGE_CLIENT_KEY --project ctstransportapp
-//   firebase functions:secrets:set BRIDGE_SECRET_KEY --project ctstransportapp
-//   firebase functions:secrets:set BRIDGE_SERVICE_ID --project ctstransportapp
+// Set per project (Secret Manager is project-scoped); see PAYMENTS-STAGING.md:
+//   firebase functions:secrets:set BRIDGE_CLIENT_KEY --project <projectId>
+//   firebase functions:secrets:set BRIDGE_SECRET_KEY --project <projectId>
+//   firebase functions:secrets:set BRIDGE_SERVICE_ID --project <projectId>
 const BRIDGE_CLIENT_KEY = defineSecret("BRIDGE_CLIENT_KEY");
 const BRIDGE_SECRET_KEY = defineSecret("BRIDGE_SECRET_KEY");
 const BRIDGE_SERVICE_ID = defineSecret("BRIDGE_SERVICE_ID");
 
-const BRIDGE_BASE = "https://api.bridgeagw.com";
-// Update after first deploy — run: firebase functions:log --project ctstransportapp
-// to get the exact Cloud Run URLs for the two webhook functions
-const CALLBACK_TOP_UP =
-  "https://europe-west2-ctstransportapp.cloudfunctions.net/bridgeTopUpCallback";
-const CALLBACK_PAYOUT =
-  "https://europe-west2-ctstransportapp.cloudfunctions.net/bridgePayoutCallback";
+// Gateway host and callback URLs come from per-environment config
+// (functions/.env.<projectId>), checked by the guard in config.js.
+
+// Resolves where a Bridge request may go, before anything is written.
+// Misconfiguration fails closed with a generic message to the caller.
+function resolveBridgeTarget(callbackFunctionName) {
+  try {
+    return {
+      apiBase: bridgeApiBase(),
+      callbackUrl: bridgeCallbackUrl(callbackFunctionName),
+    };
+  } catch (err) {
+    if (err instanceof PaymentConfigError) {
+      console.error("[bridge] Payment request blocked by config guard:", err.message);
+      throw new HttpsError("failed-precondition", "Payments are temporarily unavailable.");
+    }
+    throw err;
+  }
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +145,9 @@ exports.initiateBridgeTopUp = onCall(
       throw new HttpsError("invalid-argument", "Invalid Ghana mobile number");
     }
 
+    // ── Where this environment may send the request (fails closed) ──────────
+    const target = resolveBridgeTarget("bridgeTopUpCallback");
+
     // ── Ensure wallet exists ──────────────────────────────────────────────────
     const walletRef = getDb().collection("wallets").doc(uid);
     const walletDoc = await walletRef.get();
@@ -182,7 +203,7 @@ exports.initiateBridgeTopUp = onCall(
 
     try {
       bridgeResponse = await axios.post(
-        `${BRIDGE_BASE}/make_payment`,
+        `${target.apiBase}/make_payment`,
         {
           service_id: Number(BRIDGE_SERVICE_ID.value()),
           reference: userName,
@@ -195,7 +216,7 @@ exports.initiateBridgeTopUp = onCall(
           payment_option: "MOM",
           currency_code: "GHS",
           currency_val: amount,
-          callback_url: CALLBACK_TOP_UP,
+          callback_url: target.callbackUrl,
           request_time: requestTime,
         },
         {
@@ -496,6 +517,11 @@ exports.initiateBridgePayout = onCall(
     if (!intlPhone) {
       throw new HttpsError("invalid-argument", "Invalid Ghana mobile number");
     }
+
+    // ── Where this environment may send the payout (fails closed) ───────────
+    // Checked before any read-modify-write: a refused environment must never
+    // hold funds it cannot pay out. _sendBridgePayout checks again at send.
+    resolveBridgeTarget("bridgePayoutCallback");
 
     const db = getDb();
 
@@ -988,7 +1014,7 @@ async function _refundFailedPayout(
 // ── Shared internals for withdrawal_approval.js ──
 exports._bridgeShared = {
   BRIDGE_CLIENT_KEY, BRIDGE_SECRET_KEY, BRIDGE_SERVICE_ID,
-  BRIDGE_BASE, CALLBACK_PAYOUT,
+  resolveBridgeTarget,
   getBridgeHeaders, _refundFailedPayout,
 };
 

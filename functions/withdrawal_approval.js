@@ -28,7 +28,7 @@ const FieldValue = admin.firestore.FieldValue;
 
 const {
   BRIDGE_CLIENT_KEY, BRIDGE_SECRET_KEY, BRIDGE_SERVICE_ID,
-  BRIDGE_BASE, CALLBACK_PAYOUT,
+  resolveBridgeTarget,
   getBridgeHeaders, _refundFailedPayout,
 } = require("./bridge")._bridgeShared;
 
@@ -38,6 +38,9 @@ async function _sendBridgePayout({
   db, uid, userName, amount, intlPhone, mappedNetwork,
   transactionId, withdrawalRef, txRef, isDriver,
 }) {
+  // Where this environment may send the payout (fails closed, before any write).
+  const target = resolveBridgeTarget("bridgePayoutCallback");
+
   const paymentRef = db.collection("payments").doc(transactionId);
   await paymentRef.set({
     transactionId, userId: uid, userName,
@@ -56,14 +59,14 @@ async function _sendBridgePayout({
   let bridgeResponse;
   try {
     bridgeResponse = await axios.post(
-      `${BRIDGE_BASE}/make_payment`,
+      `${target.apiBase}/make_payment`,
       {
         service_id: Number(BRIDGE_SERVICE_ID.value()),
         reference: userName, customer_number: intlPhone,
         transaction_id: transactionId, trans_type: "MTC",
         amount, nw: mappedNetwork, nickname: userName,
         payment_option: "MOM", currency_code: "GHS", currency_val: amount,
-        callback_url: CALLBACK_PAYOUT, request_time: requestTime,
+        callback_url: target.callbackUrl, request_time: requestTime,
       },
       { headers: getBridgeHeaders(BRIDGE_CLIENT_KEY.value(), BRIDGE_SECRET_KEY.value()) },
     );
