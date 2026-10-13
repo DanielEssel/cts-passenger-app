@@ -8,6 +8,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'push_token_cleanup.dart';
+import 'push_token_store.dart';
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -31,19 +34,22 @@ class NotificationService {
   StreamSubscription<User?>?         _authSub;
 
   static const _rideChannel = AndroidNotificationChannel(
-    'ctsride_rides', 'Ride Updates',
+    'ctsride_rides',
+    'Ride Updates',
     description: 'Ride requests and trip updates',
     importance:  Importance.max,
     playSound:   true,
   );
   static const _generalChannel = AndroidNotificationChannel(
-    'ctsride_general', 'General Notifications',
+    'ctsride_general',
+    'General Notifications',
     description: 'General app notifications',
     importance:  Importance.high,
     playSound:   true,
   );
   static const _paymentChannel = AndroidNotificationChannel(
-    'ctsride_payments', 'Payment Notifications',
+    'ctsride_payments',
+    'Payment Notifications',
     description: 'Wallet and payment updates',
     importance:  Importance.high,
     playSound:   true,
@@ -55,10 +61,15 @@ class NotificationService {
     try {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
       await _fcm.requestPermission(
-        alert: true, badge: true, sound: true, provisional: false,
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
       );
       await _fcm.setForegroundNotificationPresentationOptions(
-        alert: true, badge: true, sound: true,
+        alert: true,
+        badge: true,
+        sound: true,
       );
       await _initLocalNotifications(navigatorKey);
       _listenForeground();
@@ -77,7 +88,8 @@ class NotificationService {
     }
   }
 
-  Future<void> _initLocalNotifications(GlobalKey<NavigatorState> navigatorKey) async {
+  Future<void> _initLocalNotifications(
+      GlobalKey<NavigatorState> navigatorKey) async {
     await _local.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -94,7 +106,8 @@ class NotificationService {
         }
       },
     );
-    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _local.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     if (android != null) {
       await android.createNotificationChannel(_rideChannel);
       await android.createNotificationChannel(_generalChannel);
@@ -138,7 +151,8 @@ class NotificationService {
     });
   }
 
-  Future<void> _handleInitialMessage(GlobalKey<NavigatorState> navigatorKey) async {
+  Future<void> _handleInitialMessage(
+      GlobalKey<NavigatorState> navigatorKey) async {
     final msg = await _fcm.getInitialMessage();
     if (msg == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -178,29 +192,60 @@ class NotificationService {
     }
   }
 
+  /// Saves this device's token on the signed-in passenger's profile. Call
+  /// after sign-up creates users/{uid}; before that there is nothing to save to.
+  Future<void> saveCurrentToken() => _saveToken();
+
+  // Never creates users/{uid} (see push_token_store.dart); no uid in logs.
   Future<void> _persistToken(String token) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
-    await _firestore.collection('users').doc(uid).set({
-      'fcmToken': token,
-      'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-      'platform': defaultTargetPlatform.name,
-    }, SetOptions(merge: true));
-    debugPrint('FCM token saved for uid: $uid');
+    try {
+      final saved = await saveTokenToExistingProfile(
+        update: (fields) =>
+            _firestore.collection('users').doc(uid).update(fields),
+        token: token,
+        platform: defaultTargetPlatform.name,
+        serverTimestamp: FieldValue.serverTimestamp(),
+      );
+      debugPrint(saved
+          ? 'FCM token saved'
+          : 'FCM token not saved: no passenger profile yet');
+    } catch (e) {
+      debugPrint('FCM token save failed: $e');
+    }
   }
 
-  Future<void> clearToken() async {
-    try {
-      final uid = _auth.currentUser?.uid;
-      if (uid != null) {
-        await _firestore.collection('users').doc(uid).update({
+  /// Detaches this device from the signed-in user's pushes. Call BEFORE
+  /// FirebaseAuth.signOut(), while the user can still write their profile.
+  /// Never throws. See push_token_cleanup.dart for the rules it follows.
+  /// [stepTimeout] bounds each of its three steps.
+  Future<PushTokenCleanupResult> clearToken({
+    Duration stepTimeout = const Duration(seconds: 5),
+  }) async {
+    final cleanup = PushTokenCleanup(
+      readDeviceToken: () => _fcm.getToken(),
+      clearProfileTokenIfMatches: _clearProfileTokenIfMatches,
+      deleteDeviceToken: () => _fcm.deleteToken(),
+      stepTimeout: stepTimeout,
+    );
+    final result = await cleanup.run(_auth.currentUser?.uid);
+    // No token or uid in logs.
+    debugPrint('Push token cleanup: $result');
+    return result;
+  }
+
+  Future<bool> _clearProfileTokenIfMatches(String uid, String token) {
+    final ref = _firestore.collection('users').doc(uid);
+    return _firestore.runTransaction<bool>((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists || snap.data()?['fcmToken'] != token) return false;
+      tx.update(ref, {
           'fcmToken': FieldValue.delete(),
+        'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
         });
-      }
-      await _fcm.deleteToken();
-    } catch (e) {
-      debugPrint('Token clear failed: $e');
-    }
   }
 
   AndroidNotificationChannel _channelForType(String type) {

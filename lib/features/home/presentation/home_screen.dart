@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../core/services/marker_service.dart';
 import '../../../core/utils/vehicle_icons.dart';
 import '../../ride/providers/drivers_nearby_provider.dart';
 import '../../ride/providers/wallet_provider.dart';
@@ -22,6 +23,8 @@ import '../../home/services/location_services.dart';
 import '../../home/theme/home_theme.dart';
 import '../../ride/models/service_type.dart';
 import '../services/driver_availability_service.dart';
+import '../widgets/home_promo_card.dart';
+import '../widgets/service_tile.dart';
 
 // ─────────────────────────────────────────────────
 // PROVIDERS
@@ -66,28 +69,6 @@ final promoBannerProvider = StreamProvider.autoDispose<_PromoBanner?>((ref) {
 });
 
 // ─────────────────────────────────────────────────
-// PER-SERVICE ACCENT (premium, image-ready)
-// Each service card uses its own accent gradient. To swap in artwork later,
-// replace the gradient tile in _ServiceCard with an Image.asset — one widget.
-// ─────────────────────────────────────────────────
-
-class _ServiceAccent {
-  final Color start;
-  final Color end;
-  const _ServiceAccent(this.start, this.end);
-}
-
-const Map<ServiceType, _ServiceAccent> _serviceAccents = {
-  ServiceType.taxi:     _ServiceAccent(Color(0xFF00A86B), Color(0xFF00C97E)), // emerald
-  ServiceType.okada:    _ServiceAccent(Color(0xFF0EA5A5), Color(0xFF14C2B8)), // teal
-  ServiceType.delivery: _ServiceAccent(Color(0xFF2563EB), Color(0xFF3B82F6)), // blue
-  ServiceType.gas:      _ServiceAccent(Color(0xFFF59E0B), Color(0xFFF97316)), // warm amber
-};
-
-_ServiceAccent _accentFor(ServiceType s) =>
-    _serviceAccents[s] ?? const _ServiceAccent(Color(0xFF00A86B), Color(0xFF00C97E));
-
-// ─────────────────────────────────────────────────
 // HOME SCREEN
 // ─────────────────────────────────────────────────
 
@@ -112,12 +93,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _usingFallbackLocation = false; // allow retry
 
   bool _isLocating = true;
+
+  // True while a service screen is open, so rapid taps can't push twice.
+  bool _openingService = false;
   String _locationLabel = 'Locating...';
 
   static const LatLng _accra = LatLng(5.6037, -0.1870);
 
   /// A confirmed pickup is required before booking can start.
   bool get _hasPickup => _userLocation != null && !_isLocating;
+
+  /// A real GPS fix (not the Accra fallback used to centre the map). Only
+  /// this is ever passed to a service as the pickup: a fallback point would
+  /// send a driver somewhere the customer never chose.
+  bool get _hasRealLocation => _hasPickup && !_usingFallbackLocation;
+
+  /// Services open once the location lookup has finished, even if it
+  /// failed: Gas and Delivery ask for their own address, and Ride retries
+  /// GPS itself.
+  bool get _servicesReady => !_isLocating;
 
   String get _greeting {
     final h = DateTime.now().hour;
@@ -204,11 +198,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _locationInitialized = true;
         _usingFallbackLocation = false; // real fix obtained
       });
+      // Centre of the 5 km driver-marker search (driversNearbyProvider).
+      ref.read(rideRequestProvider.notifier).setOrigin(
+            _locationLabel,
+            GeoPoint(ll.latitude, ll.longitude),
+          );
 
       if (_isMapReady) {
         _mapController?.animateCamera(
-          CameraUpdate.newCameraPosition(
-              CameraPosition(target: ll, zoom: 15)),
+          CameraUpdate.newCameraPosition(CameraPosition(target: ll, zoom: 15)),
         );
       }
       _updateUserMarker(ll);
@@ -267,16 +265,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!mounted) return;
     setState(() {
       _markers.removeWhere((m) => m.markerId.value.startsWith('driver_'));
+      final ms = MarkerService.instance;
       for (final d in drivers) {
         _markers.add(Marker(
-          markerId: MarkerId(
-              'driver_${d.location.latitude}_${d.location.longitude}'),
+          markerId: MarkerId('driver_${d.id}'),
           position: d.location,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            d.serviceType == 'okada'
-                ? BitmapDescriptor.hueGreen
-                : BitmapDescriptor.hueAzure,
-          ),
+          icon: ms.vehicle(d.serviceType),
           infoWindow: InfoWindow(
             title: vehicleLabel(d.serviceType),
             snippet: 'Available nearby',
@@ -309,7 +303,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
@@ -321,12 +315,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogCtx),
             child: const Text('Dismiss'),
           ),
           FilledButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogCtx);
               Geolocator.openLocationSettings();
             },
             child: const Text('Open Settings'),
@@ -344,25 +338,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     String? destinationAddress,
     ServiceType? service,
   }) {
-    if (!_hasPickup) {
-      _snack('Getting your location — one moment…');
+    if (_openingService) return;
+    if (!_servicesReady) {
+      _snack('Finding your location — one moment…');
       return;
     }
     HapticFeedback.lightImpact();
 
     final ServiceType svc = service ?? ServiceType.taxi;
 
-
+    _openingService = true;
     Navigator.pushNamed(
       context,
       svc.route,
       arguments: {
         'service': svc,
-        'pickup': _userLocation,
+        if (_hasRealLocation) 'pickup': _userLocation,
         if (destinationLabel != null) 'destinationLabel': destinationLabel,
-        if (destinationAddress != null) 'destinationAddress': destinationAddress,
+        if (destinationAddress != null)
+          'destinationAddress': destinationAddress,
       },
-    );
+    ).whenComplete(() => _openingService = false);
   }
 
   void _snack(String msg) {
@@ -396,7 +392,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   // ─────────────────────────────────────────────
-  // BUILD — scrollable dashboard (NOT a map+sheet clone of booking)
+  // BUILD — header, search, services, map, promo, recent trips
   // ─────────────────────────────────────────────
 
   @override
@@ -422,10 +418,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   parent: BouncingScrollPhysics()),
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader()),
-                SliverToBoxAdapter(child: _buildWhereTo()),
-                SliverToBoxAdapter(child: _buildServiceGrid()),
+                SliverToBoxAdapter(child: _buildSearchCard()),
+                SliverToBoxAdapter(child: _buildServices()),
                 SliverToBoxAdapter(child: _buildMapCard()),
-                SliverToBoxAdapter(child: _buildSavedPlaces()),
                 SliverToBoxAdapter(child: _buildPromoBanner()),
                 SliverToBoxAdapter(child: _buildRecentTrips()),
                 SliverToBoxAdapter(
@@ -442,7 +437,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   // ─────────────────────────────────────────────
-  // HEADER — greeting + location + wallet balance + bell + avatar
+  // HEADER — greeting + name, wallet, bell, avatar
   // ─────────────────────────────────────────────
 
   Widget _buildHeader() {
@@ -451,121 +446,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final photoUrl = user?.photoURL;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(20, 10, 16, 0),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_greeting,
-                        style: const TextStyle(
-                          color: HomeTheme.textSecondary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        )),
-                    const SizedBox(height: 2),
-                    Text(firstName,
-                        style: const TextStyle(
-                          fontFamily: 'Inter',
-                          color: HomeTheme.textPrimary,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                        )),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Consumer(
-                builder: (_, ref, __) {
-                  final count = ref.watch(unreadNotifCountProvider).value ?? 0;
-                  return _TopIconButton(
-                    icon: Icons.notifications_outlined,
-                    badge: count > 0,
-                    badgeCount: count,
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.notifications),
-                  );
-                },
-              ),
-              const SizedBox(width: 10),
-              GestureDetector(
-                onTap: () => Navigator.pushNamed(context, AppRoutes.profile),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: HomeTheme.surface, width: 2),
-                    boxShadow: HomeTheme.cardShadow,
-                  ),
-                  child: ClipOval(
-                    child: photoUrl != null && photoUrl.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: photoUrl,
-                            fit: BoxFit.cover,
-                            placeholder: (_, __) =>
-                                Container(color: Colors.grey[200]),
-                            errorWidget: (_, __, ___) =>
-                                _avatarFallback(firstName),
-                          )
-                        : _avatarFallback(firstName),
-                  ),
-                ),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_greeting,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: HomeTheme.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                    )),
+                const SizedBox(height: 1),
+                Text(firstName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      color: HomeTheme.textPrimary,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                    )),
+              ],
+            ),
           ),
-          const SizedBox(height: 14),
-          // Location + wallet row
-          Row(
-            children: [
-              Expanded(child: _buildLocationPill()),
-              const SizedBox(width: 10),
-              _buildWalletChip(),
-            ],
+          const SizedBox(width: 8),
+          _buildWalletChip(),
+          const SizedBox(width: 8),
+          Consumer(
+            builder: (_, ref, __) {
+              final count = ref.watch(unreadNotifCountProvider).value ?? 0;
+              return _TopIconButton(
+                icon: Icons.notifications_outlined,
+                semanticLabel: count > 0
+                    ? 'Notifications, $count unread'
+                    : 'Notifications',
+                badge: count > 0,
+                badgeCount: count,
+                onTap: () =>
+                    Navigator.pushNamed(context, AppRoutes.notifications),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+          Semantics(
+            button: true,
+            label: 'Profile',
+            child: GestureDetector(
+              onTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: HomeTheme.border),
+                ),
+                padding: const EdgeInsets.all(2),
+                child: ClipOval(
+                  child: photoUrl != null && photoUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: photoUrl,
+                          fit: BoxFit.cover,
+                          memCacheWidth: 128,
+                          placeholder: (_, __) =>
+                              Container(color: HomeTheme.surfaceAlt),
+                          errorWidget: (_, __, ___) =>
+                              _avatarFallback(firstName),
+                        )
+                      : _avatarFallback(firstName),
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
-
-  Widget _buildLocationPill() => GestureDetector(
-        onTap: _recenterMap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          decoration: BoxDecoration(
-            color: HomeTheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: HomeTheme.border),
-            boxShadow: HomeTheme.cardShadow,
-          ),
-          child: Row(
-            children: [
-              _PulsingDot(color: HomeTheme.primary),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  _locationLabel,
-                  style: const TextStyle(
-                    color: HomeTheme.textPrimary,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.1,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Icon(Icons.my_location_rounded,
-                  color: HomeTheme.textSecondary, size: 16),
-            ],
-          ),
-        ),
-      );
 
   Widget _buildWalletChip() {
     final balanceAsync = ref.watch(walletBalanceProvider);
@@ -574,111 +535,190 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       AsyncLoading() => '₵—',
       _ => '₵0.00',
     };
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: 'Wallet balance $label',
+      excludeSemantics: true,
       onTap: widget.onWalletTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        decoration: BoxDecoration(
-          color: HomeTheme.primary.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: HomeTheme.primary.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.account_balance_wallet_rounded,
-                color: HomeTheme.primary, size: 16),
-            const SizedBox(width: 7),
-            Text(label,
-                style: const TextStyle(
-                  fontFamily: 'Inter',
-                  color: HomeTheme.primary,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                )),
-          ],
+      child: GestureDetector(
+        onTap: widget.onWalletTap,
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: HomeTheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(21),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.account_balance_wallet_rounded,
+                  color: HomeTheme.primaryDeep, size: 16),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    color: HomeTheme.primaryDeep,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  )),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _avatarFallback(String name) => Container(
-        color: HomeTheme.primary.withValues(alpha: 0.15),
+        color: HomeTheme.primary.withValues(alpha: 0.12),
         alignment: Alignment.center,
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : 'U',
           style: const TextStyle(
-            color: HomeTheme.primary,
+            color: HomeTheme.primaryDeep,
             fontWeight: FontWeight.w800,
-            fontSize: 17,
+            fontSize: 16,
           ),
         ),
       );
 
-  // ── HERO: "Where to?" — strongest CTA ─────────────────────────────────────
-  Widget _buildWhereTo() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-        child: GestureDetector(
-          onTap: _hasPickup ? () => _openBooking(service: ServiceType.taxi) : null,
-          child: Opacity(
-            opacity: _hasPickup ? 1 : 0.6,
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: HomeTheme.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: HomeTheme.border),
-                boxShadow: HomeTheme.cardShadow,
+  Widget _sectionTitle(String title,
+          {String? action, VoidCallback? onAction}) =>
+      Row(
+        children: [
+          Expanded(
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  color: HomeTheme.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                )),
+          ),
+          if (action != null)
+            InkWell(
+              onTap: onAction,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                child: Text(action,
+                    style: const TextStyle(
+                      color: HomeTheme.primaryDeep,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    )),
               ),
+            ),
+        ],
+      );
+
+  // ── SEARCH: "Where to?" + pickup + saved places — the primary action ─────
+  Widget _buildSearchCard() {
+    final placesAsync = ref.watch(savedPlacesProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: HomeTheme.surface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: HomeTheme.borderLight),
+          boxShadow: HomeTheme.cardShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildWhereToField(),
+            _buildPickupRow(),
+            SizedBox(
+              height: 40,
+              child: placesAsync.when(
+                data: (places) => _placesList(_placeChipsFor(places)),
+                loading: () => _placesList(_defaultPlaces),
+                error: (_, __) => _placesList(_defaultPlaces),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWhereToField() => Semantics(
+        button: true,
+        enabled: _servicesReady,
+        label: _servicesReady
+            ? 'Where to? Search your destination'
+            : 'Getting your location',
+        excludeSemantics: true,
+        onTap: _servicesReady
+            ? () => _openBooking(service: ServiceType.taxi)
+            : null,
+        child: Material(
+          color: HomeTheme.surfaceAlt,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _servicesReady
+                ? () => _openBooking(service: ServiceType.taxi)
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
               child: Row(
                 children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      gradient: HomeTheme.primaryGradient,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: HomeTheme.primaryGlow,
-                    ),
-                    child: const Icon(Icons.search_rounded,
-                        color: Colors.white, size: 26),
-                  ),
-                  const SizedBox(width: 14),
+                  const Icon(Icons.search_rounded,
+                      color: HomeTheme.textPrimary, size: 24),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _hasPickup ? 'Where to?' : 'Getting your location…',
+                          _servicesReady
+                              ? 'Where to?'
+                              : 'Finding your location…',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontFamily: 'Inter',
                             color: HomeTheme.textPrimary,
-                            fontSize: 18,
+                            fontSize: 17,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: 1),
                         Text(
-                          _hasPickup
-                              ? 'Set your destination to see options'
-                              : 'We need your pickup first',
+                          _servicesReady
+                              ? 'Search your destination'
+                              : 'This takes a few seconds',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: HomeTheme.textTertiary,
+                            color: HomeTheme.textSecondary,
                             fontSize: 12.5,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: HomeTheme.surfaceAlt,
-                      borderRadius: BorderRadius.circular(11),
+                  const SizedBox(width: 8),
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: _servicesReady ? 1 : 0.4,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        color: HomeTheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_forward_rounded,
+                          color: Colors.white, size: 20),
                     ),
-                    child: const Icon(Icons.arrow_forward_rounded,
-                        color: HomeTheme.textSecondary, size: 18),
                   ),
                 ],
               ),
@@ -687,107 +727,172 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
-  // ── Service launcher grid (2×2) ───────────────────────────────────────────
-  Widget _buildServiceGrid() {
-    final services = ServiceType.values;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: services.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.55,
-        ),
-        itemBuilder: (_, i) {
-          final svc = services[i];
-          return _ServiceCard(
-            service: svc,
-            accent: _accentFor(svc),
-            onTap: () => _openBooking(service: svc),
-          );
-        },
-      ),
-    );
-  }
+  // Tapping the pickup line recentres the map on it; when there is no real
+  // GPS fix it retries the location lookup instead.
+  void _onPickupRowTap() =>
+      _hasRealLocation || _isLocating ? _recenterMap() : _initLocation();
 
-  // ── Compact live-drivers map card (~190px) ────────────────────────────────
+  Widget _buildPickupRow() => Semantics(
+        button: true,
+        label: _hasRealLocation || _isLocating
+            ? 'Pickup, $_locationLabel. Recentre map'
+            : 'Pickup, $_locationLabel. Try again',
+        excludeSemantics: true,
+        onTap: _onPickupRowTap,
+        child: InkWell(
+          onTap: _onPickupRowTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 12, 6, 10),
+            child: Row(
+              children: [
+                _PulsingDot(color: HomeTheme.primary),
+                const SizedBox(width: 10),
+                const Text('Pickup',
+                    style: TextStyle(
+                      color: HomeTheme.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                    )),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _locationLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: HomeTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                    _hasRealLocation || _isLocating
+                        ? Icons.my_location_rounded
+                        : Icons.refresh_rounded,
+                    color: HomeTheme.textSecondary,
+                    size: 16),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  // ── Services: image-led tiles ─────────────────────────────────────────────
+  Widget _buildServices() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: _sectionTitle('What do you need today?'),
+            ),
+            const SizedBox(height: 10),
+            HomeServicesSection(
+              onSelect: (svc) => _openBooking(service: svc),
+            ),
+          ],
+        ),
+      );
+
+  // ── Live drivers map — a launcher, not a canvas ───────────────────────────
   Widget _buildMapCard() {
+    final mapHeight =
+        (MediaQuery.sizeOf(context).height * 0.2).clamp(150.0, 210.0);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: SizedBox(
-          height: 190,
-          child: Stack(
-            children: [
-              Positioned.fill(child: _buildMap()),
-              // subtle top gradient for the pill legibility
-              Positioned(
-                top: 0, left: 0, right: 0,
-                child: IgnorePointer(
-                  child: Container(
-                    height: 60,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.18),
-                          Colors.transparent,
-                        ],
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: _sectionTitle('Drivers around you'),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            height: mapHeight,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: HomeTheme.border),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(19),
+              child: Stack(
+                children: [
+                  Positioned.fill(child: _buildMap()),
+                  // subtle top gradient for the pill legibility
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(
+                      child: Container(
+                        height: 60,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.18),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-              // "N drivers nearby" pill (real count, no fake ETA)
-              Positioned(
-                top: 12,
-                left: 12,
-                child: _buildDriversPill(),
-              ),
-              // recenter button
-              Positioned(
-                bottom: 12,
-                right: 12,
-                child: GestureDetector(
-                  onTap: _recenterMap,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: HomeTheme.surface,
-                      shape: BoxShape.circle,
-                      boxShadow: HomeTheme.cardShadow,
+                  // tap → opens booking; below the pill and recentre button
+                  Positioned.fill(
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _servicesReady
+                            ? () => _openBooking(service: ServiceType.taxi)
+                            : null,
+                      ),
                     ),
-                    child: const Icon(Icons.my_location_rounded,
-                        color: HomeTheme.primary, size: 20),
                   ),
-                ),
-              ),
-              // tap-to-expand → opens booking (map is a launcher, not a canvas)
-              Positioned.fill(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _hasPickup ? () => _openBooking(service: ServiceType.taxi) : null,
+                  // "N drivers nearby" pill (real count, no fake ETA)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: _buildDriversPill(),
                   ),
-                ),
+                  // recenter button
+                  Positioned(
+                    bottom: 12,
+                    right: 12,
+                    child: GestureDetector(
+                      onTap: _recenterMap,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: HomeTheme.surface,
+                          shape: BoxShape.circle,
+                          boxShadow: HomeTheme.cardShadow,
+                        ),
+                        child: const Icon(Icons.my_location_rounded,
+                            color: HomeTheme.primary, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildDriversPill() {
     // Count the live driver markers currently rendered.
-    final count = _markers.where((m) => m.markerId.value.startsWith('driver_')).length;
+    final count =
+        _markers.where((m) => m.markerId.value.startsWith('driver_')).length;
     final text = count == 0
         ? 'Looking for drivers…'
         : '$count driver${count == 1 ? '' : 's'} nearby';
@@ -844,6 +949,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       onMapCreated: (c) async {
         _mapController = c;
         setState(() => _isMapReady = true);
+        // Load the vehicle icons, then redraw any drivers already received.
+        await MarkerService.instance.warmUp(context);
+        if (!mounted) return;
+        ref.read(driversNearbyProvider).whenData(_updateDriverMarkers);
         if (_userLocation != null) {
           await c.animateCamera(CameraUpdate.newCameraPosition(
             CameraPosition(target: _userLocation!, zoom: 15),
@@ -863,89 +972,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ── Quick destinations (saved places) ─────────────────────────────────────
-  Widget _buildSavedPlaces() {
-    final placesAsync = ref.watch(savedPlacesProvider);
-    final defaults = [
-      _SavedPlace(
-          id: 'home',
-          label: 'Home',
-          address: 'Set home address',
-          icon: Icons.home_rounded),
-      _SavedPlace(
-          id: 'work',
-          label: 'Work',
-          address: 'Set work address',
-          icon: Icons.work_rounded),
-    ];
+  // ── Saved places (chips inside the search card) ───────────────────────────
+  static const List<_SavedPlace> _defaultPlaces = [
+    _SavedPlace(
+        id: 'home',
+        label: 'Home',
+        address: 'Set home address',
+        icon: Icons.home_rounded),
+    _SavedPlace(
+        id: 'work',
+        label: 'Work',
+        address: 'Set work address',
+        icon: Icons.work_rounded),
+  ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 26, 20, 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Quick destinations',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: HomeTheme.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.2,
-                  )),
-              GestureDetector(
-                onTap: () =>
-                    Navigator.pushNamed(context, AppRoutes.savedPlaces),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text('View all',
-                        style: TextStyle(
-                          color: HomeTheme.primary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        )),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_rounded,
-                        size: 16, color: HomeTheme.primary),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 76,
-          child: placesAsync.when(
-            data: (places) {
-              final saved = places.take(4).toList(); // home strip shows ≤4
-              final all = [
-                ...defaults.where((d) => !saved.any(
-                    (p) => p.label.toLowerCase() == d.label.toLowerCase())),
-                ...saved,
-                _SavedPlace(
-                    id: 'add',
-                    label: 'Add',
-                    address: '',
-                    icon: Icons.add_rounded),
-              ];
-              return _placesList(all);
-            },
-            loading: () => _placesList(defaults),
-            error: (_, __) => _placesList(defaults),
-          ),
-        ),
-      ],
-    );
+  List<_SavedPlace> _placeChipsFor(List<_SavedPlace> places) {
+    final saved = places.take(4).toList(); // home strip shows ≤4
+    return [
+      ..._defaultPlaces.where((d) =>
+          !saved.any((p) => p.label.toLowerCase() == d.label.toLowerCase())),
+      ...saved,
+      _SavedPlace(
+          id: 'add',
+          label: saved.isEmpty ? 'Add place' : 'All places',
+          address: '',
+          icon: saved.isEmpty ? Icons.add_rounded : Icons.bookmarks_rounded),
+    ];
   }
 
   Widget _placesList(List<_SavedPlace> places) => ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 2),
         itemCount: places.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) => _PlaceChip(
           place: places[i],
           onTap: () => _onSavedPlaceTap(places[i]),
@@ -985,29 +1044,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 26, 20, 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Recent trips',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      )),
-                  GestureDetector(
-                onTap: widget.onHistoryTap ??
+              padding: const EdgeInsets.fromLTRB(20, 24, 16, 6),
+              child: _sectionTitle(
+                'Recent trips',
+                action: 'See all',
+                onAction: widget.onHistoryTap ??
                     () => Navigator.pushNamed(context, AppRoutes.tripHistory),
-                child: const Text('See all',
-                    style: TextStyle(
-                      color: HomeTheme.primary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    )),
-              ),
-                ],
               ),
             ),
             ...docs.map((doc) {
@@ -1034,14 +1076,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  ServiceType _serviceFromString(String? v) =>
-      ServiceType.values.firstWhere(
+  ServiceType _serviceFromString(String? v) => ServiceType.values.firstWhere(
         (e) => e.name == v,
         orElse: () => ServiceType.taxi,
       );
 
   Widget _buildEmptyState() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 26, 20, 0),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
@@ -1088,82 +1129,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
 
   // ── Promotions ────────────────────────────────────────────────────────────
+  // An active admin promotion (Firestore) wins; otherwise an editorial card for
+  // an existing service. The fallback states no discount or reward.
   Widget _buildPromoBanner() {
     final promoAsync = ref.watch(promoBannerProvider);
-    return promoAsync.when(
-      data: (p) => p == null ? _buildDefaultPromo() : _PromoCard(promo: p),
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => _buildDefaultPromo(),
+    final Widget card = switch (promoAsync) {
+      AsyncLoading() when !promoAsync.hasValue => const SizedBox.shrink(),
+      AsyncData(:final value?) => _promoCardFor(value),
+      _ => _buildDefaultPromo(),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+      child: card,
     );
   }
 
-  Widget _buildDefaultPromo() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: HomeTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: HomeTheme.primaryGlow,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text('FIRST RIDE',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.5,
-                          )),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('50% off\nyour first ride',
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          height: 1.15,
-                          letterSpacing: -0.5,
-                        )),
-                    const SizedBox(height: 14),
-                    GestureDetector(
-                      onTap: () =>
-                          Navigator.pushNamed(context, AppRoutes.promotions),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text('Use code CTS50',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              color: HomeTheme.primary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            )),
-                      ),
-                    ),
-                  ],
+  Widget _promoCardFor(_PromoBanner promo) => HomePromoCard(
+        title: promo.title,
+        subtitle: promo.subtitle,
+        background:
+            _parseHexColor(promo.backgroundColor, HomeTheme.primaryDeep),
+        trailing: promo.imageUrl.isEmpty
+            ? null
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: CachedNetworkImage(
+                  imageUrl: promo.imageUrl,
+                  width: 84,
+                  height: 84,
+                  fit: BoxFit.cover,
+                  memCacheWidth: 256,
+                  placeholder: (_, __) => const SizedBox(width: 84, height: 84),
+                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(Icons.local_offer_rounded,
-                  color: Colors.white.withValues(alpha: 0.15), size: 90),
-            ],
+      );
+
+  Widget _buildDefaultPromo() => HomePromoCard(
+        eyebrow: 'CTS Gas',
+        title: 'Cooking gas, delivered',
+        subtitle: 'Order a refill and track it to your door.',
+        ctaLabel: 'Order gas',
+        onTap: () => _openBooking(service: ServiceType.gas),
+        trailing: SizedBox(
+          width: 100,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child:
+                const ServiceImage(service: ServiceType.gas, aspectRatio: 0.85),
           ),
         ),
       );
@@ -1172,97 +1185,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // ═══════════════════════════════════════════════
 // SHARED WIDGETS
 // ═══════════════════════════════════════════════
-
-/// Premium service card with a per-service accent gradient tile.
-/// IMAGE UPGRADE LATER: replace the gradient `Container` holding the icon with
-///   ClipRRect(borderRadius: ..., child: Image.asset('assets/services/${service.name}.png', ...))
-/// keeping the rest of the card identical.
-class _ServiceCard extends StatelessWidget {
-  final ServiceType service;
-  final _ServiceAccent accent;
-  final VoidCallback onTap;
-  const _ServiceCard({
-    required this.service,
-    required this.accent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: HomeTheme.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: HomeTheme.border),
-          boxShadow: HomeTheme.cardShadow,
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            // Accent tile (swap for Image.asset later)
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [accent.start, accent.end],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: accent.start.withValues(alpha: 0.28),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(service.icon, color: Colors.white, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(service.displayName,
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        color: HomeTheme.textPrimary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      )),
-                  const SizedBox(height: 2),
-                  Text(_subtitleFor(service),
-                      style: const TextStyle(
-                        color: HomeTheme.textTertiary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _subtitleFor(ServiceType s) => switch (s) {
-        ServiceType.taxi => 'Comfortable rides',
-        ServiceType.okada => 'Beat the traffic',
-        ServiceType.pragyia => ' Short trips',
-        ServiceType.delivery => 'Send a package',
-        ServiceType.gas => 'Refill at home',
-      };
-}
-
 
 class _PulsingDot extends StatefulWidget {
   final Color color;
@@ -1310,60 +1232,68 @@ class _PulsingDotState extends State<_PulsingDot>
 
 class _TopIconButton extends StatelessWidget {
   final IconData icon;
+  final String semanticLabel;
   final bool badge;
   final int badgeCount;
   final VoidCallback onTap;
 
   const _TopIconButton({
     required this.icon,
+    required this.semanticLabel,
     this.badge = false,
     this.badgeCount = 0,
     required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: semanticLabel,
+        excludeSemantics: true,
         onTap: onTap,
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: HomeTheme.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: HomeTheme.border),
-            boxShadow: HomeTheme.cardShadow,
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(icon, color: HomeTheme.textPrimary, size: 22),
-              if (badge)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 3, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: AppColors.error,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: HomeTheme.surface, width: 1.5),
-                    ),
-                    constraints:
-                        const BoxConstraints(minWidth: 14, minHeight: 14),
-                    child: Text(
-                      badgeCount > 9 ? '9+' : '$badgeCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w700,
-                        height: 1,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: HomeTheme.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: HomeTheme.border),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(icon, color: HomeTheme.textPrimary, size: 22),
+                if (badge)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 3, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppColors.error,
+                        borderRadius: BorderRadius.circular(10),
+                        border:
+                            Border.all(color: HomeTheme.surface, width: 1.5),
                       ),
-                      textAlign: TextAlign.center,
+                      constraints:
+                          const BoxConstraints(minWidth: 14, minHeight: 14),
+                      child: Text(
+                        badgeCount > 9 ? '9+' : '$badgeCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -1375,41 +1305,33 @@ class _PlaceChip extends StatelessWidget {
   const _PlaceChip({required this.place, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 100,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: HomeTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: HomeTheme.border),
-            boxShadow: HomeTheme.cardShadow,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: HomeTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(9),
+  Widget build(BuildContext context) => Material(
+        color: HomeTheme.surface,
+        shape: const StadiumBorder(side: BorderSide(color: HomeTheme.border)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(place.icon, color: HomeTheme.primaryDeep, size: 16),
+                const SizedBox(width: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: Text(place.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        color: HomeTheme.textPrimary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      )),
                 ),
-                child: Icon(place.icon, color: HomeTheme.primary, size: 16),
-              ),
-              const SizedBox(height: 7),
-              Text(place.label,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    color: HomeTheme.textPrimary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -1430,7 +1352,7 @@ class _RecentTripTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: HomeTheme.surface,
@@ -1514,8 +1436,8 @@ class _RecentTripTile extends StatelessWidget {
                 GestureDetector(
                   onTap: onRebook,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: HomeTheme.primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
@@ -1539,96 +1461,15 @@ class _RecentTripTile extends StatelessWidget {
       );
 }
 
-class _PromoCard extends StatelessWidget {
-  final _PromoBanner promo;
-  const _PromoCard({required this.promo});
-
-  // Parse a hex string ('#RRGGBB' or 'RRGGBB', 6 or 8 digits) to a Color,
-  // falling back to the theme colour if it's malformed.
-  Color _parseColor(String hex, Color fallback) {
-    try {
-      final cleaned = hex.replaceAll('#', '').trim();
-      final value = cleaned.length == 6 ? 'FF$cleaned' : cleaned;
-      return Color(int.parse(value, radix: 16));
-    } catch (_) {
-      return fallback;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = _parseColor(promo.backgroundColor, HomeTheme.primary);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-      child: Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Row(
-          children: [
-            Expanded(child: _text()),
-            const SizedBox(width: 12),
-            _trailing(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _text() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            promo.title,
-            style: const TextStyle(
-              fontFamily: 'Inter',
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              height: 1.2,
-              letterSpacing: -0.4,
-            ),
-          ),
-          if (promo.subtitle.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              promo.subtitle,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                color: Colors.white.withValues(alpha: 0.92),
-                fontSize: 13,
-                height: 1.3,
-              ),
-            ),
-          ],
-        ],
-      );
-
-  // The admin's image if provided, otherwise the decorative offer glyph.
-  Widget _trailing() {
-    if (promo.imageUrl.isEmpty) {
-      return Icon(
-        Icons.local_offer_rounded,
-        color: Colors.white.withValues(alpha: 0.15),
-        size: 80,
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: Image.network(
-        promo.imageUrl,
-        width: 64,
-        height: 64,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Icon(
-          Icons.local_offer_rounded,
-          color: Colors.white.withValues(alpha: 0.15),
-          size: 64,
-        ),
-      ),
-    );
+// Parse a hex string ('#RRGGBB' or 'RRGGBB', 6 or 8 digits) to a Color,
+// falling back to [fallback] if it's malformed.
+Color _parseHexColor(String hex, Color fallback) {
+  try {
+    final cleaned = hex.replaceAll('#', '').trim();
+    final value = cleaned.length == 6 ? 'FF$cleaned' : cleaned;
+    return Color(int.parse(value, radix: 16));
+  } catch (_) {
+    return fallback;
   }
 }
 
@@ -1637,7 +1478,8 @@ class _PromoCard extends StatelessWidget {
 // ─────────────────────────────────────────────────
 
 // Map saved-place icon keys (from Firestore) to IconData.
-IconData _homeIconFor(String key) => const {
+IconData _homeIconFor(String key) =>
+    const {
       'home': Icons.home_rounded,
       'work': Icons.business_rounded,
       'gym': Icons.fitness_center_rounded,
@@ -1645,7 +1487,8 @@ IconData _homeIconFor(String key) => const {
       'school': Icons.school_rounded,
       'food': Icons.restaurant_rounded,
       'place': Icons.place_rounded,
-    }[key] ?? Icons.place_rounded;
+    }[key] ??
+    Icons.place_rounded;
 
 class _SavedPlace {
   final String id;

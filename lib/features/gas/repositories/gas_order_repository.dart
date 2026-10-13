@@ -128,6 +128,33 @@ Stream<GasRefillRequest?> watchOrder(String orderId) {
     }
   }
 
+  /// Cancels an order only while no driver has accepted it. Runs as a
+  /// transaction so a cancel can't race a driver's acceptance. Writes the
+  /// same fields as [cancelOrder], so the escrow-refund trigger still runs.
+  /// Throws [GasOrderException] with code `not-pending` if it is too late.
+  Future<void> cancelPendingOrder(String orderId, {String? reason}) async {
+    try {
+      await _db.runTransaction((tx) async {
+        final ref = _col.doc(orderId);
+        final snap = await tx.get(ref);
+        final status = snap.data()?['status'];
+        if (status != GasOrderStatus.pendingApproval.firestoreValue) {
+          throw const GasOrderException(
+              'A driver has already accepted this order.',
+              code: 'not-pending');
+        }
+        tx.update(ref, {
+          'status': GasOrderStatus.cancelled.firestoreValue,
+          'cancelledAt': FieldValue.serverTimestamp(),
+          if (reason != null) 'metadata.cancellationReason': reason,
+        });
+      });
+    } on FirebaseException catch (e) {
+      throw GasOrderException('Failed to cancel order: ${e.message}',
+          code: e.code);
+    }
+  }
+
   Future<void> rateOrder(String orderId, double rating) async {
     try {
       await _col.doc(orderId).update({'passengerRating': rating});

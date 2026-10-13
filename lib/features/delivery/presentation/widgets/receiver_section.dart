@@ -7,7 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../../core/constants/app_colors.dart';
+import '../../../../core/widgets/cts_ui.dart';
 
 class ReceiverSection extends StatelessWidget {
   final TextEditingController phoneController;
@@ -30,12 +30,17 @@ class ReceiverSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _DeliveryInputField(
+        CtsTextField(
           controller: phoneController,
-          hint: '024XXXXXXX — Receiver phone number',
+          label: 'Receiver phone number',
+          hint: 'e.g. 024 123 4567',
+          helperText: 'The rider calls this number at drop-off.',
           icon: Icons.phone_rounded,
           keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.telephoneNumber],
           maxLength: 13, // room for a +233 paste before normalization
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[\d+]')),
@@ -43,90 +48,20 @@ class ReceiverSection extends StatelessWidget {
           errorText: phoneError,
           onChanged: onPhoneChanged,
         ),
-        const SizedBox(height: 10),
-        _DeliveryInputField(
+        const SizedBox(height: 14),
+        CtsTextField(
           controller: nameController,
-          hint: "Receiver's name (optional)",
+          label: 'Receiver name',
+          optional: true,
+          hint: 'Who is receiving the parcel?',
           icon: Icons.person_rounded,
+          textInputAction: TextInputAction.next,
+          textCapitalization: TextCapitalization.words,
+          autofillHints: const [AutofillHints.name],
           maxLength: 50,
           errorText: nameError,
           onChanged: onNameChanged,
         ),
-      ],
-    );
-  }
-}
-
-/// Shared input with inline error support. Kept private to this file so the
-/// receiver section is self-contained; the screen keeps its own `_inputField`
-/// for the note field so nothing else changes.
-class _DeliveryInputField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hint;
-  final IconData icon;
-  final TextInputType? keyboardType;
-  final int? maxLength;
-  final List<TextInputFormatter>? inputFormatters;
-  final String? errorText;
-  final ValueChanged<String>? onChanged;
-
-  const _DeliveryInputField({
-    required this.controller,
-    required this.hint,
-    required this.icon,
-    this.keyboardType,
-    this.maxLength,
-    this.inputFormatters,
-    this.errorText,
-    this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: errorText != null ? AppColors.error : AppColors.border,
-              width: errorText != null ? 1.2 : 1,
-            ),
-          ),
-          child: TextField(
-            controller: controller,
-            keyboardType: keyboardType,
-            maxLength: maxLength,
-            inputFormatters: inputFormatters,
-            onChanged: onChanged,
-            style: const TextStyle(
-                fontSize: 13, color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              hintText: hint,
-              counterText: '', // hide the default maxLength counter
-              hintStyle: const TextStyle(
-                fontSize: 13,
-                color: AppColors.textTertiary,
-                fontStyle: FontStyle.italic,
-              ),
-              prefixIcon:
-                  Icon(icon, color: AppColors.textSecondary, size: 18),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 12),
-            ),
-          ),
-        ),
-        if (errorText != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4, left: 4),
-            child: Text(
-              errorText!,
-              style: const TextStyle(fontSize: 11, color: AppColors.error),
-            ),
-          ),
       ],
     );
   }

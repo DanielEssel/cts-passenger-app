@@ -1,14 +1,16 @@
 // lib/features/gas/presentation/screens/gas_order_tracking_screen.dart
 // Refactored to use shared tracking widgets (no TrackingStatusHeader yet)
 
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../../../core/utils/phone_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../repositories/gas_order_repository.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/services/marker_service.dart';
@@ -322,10 +324,23 @@ class GasOrderTrackingScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       body: orderAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => CtsErrorState(
+          title: "Can't load your gas order",
+          message: 'Check your connection. Your order is not affected.',
+          onRetry: () => ref.invalidate(gasOrderStreamProvider(orderId)),
+          onBack: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+        ),
         data: (order) {
           if (order == null) {
-            return const Center(child: Text('Order not found'));
+            return CtsErrorState(
+              icon: Icons.search_off_rounded,
+              title: 'Order not found',
+              message: 'This order may have been removed. You can check '
+                  'your past orders in History.',
+              onBack: () =>
+                  Navigator.of(context).popUntil((route) => route.isFirst),
+            );
           }
           return _GasTrackingBody(order: order, orderId: orderId);
         },
@@ -534,6 +549,10 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
                         const SizedBox(height: 12),
                         if (!isCompleted && !isCancelled)
                           _buildActionRow(context),
+                        if (order.status == GasOrderStatus.pendingApproval) ...[
+                          const SizedBox(height: 8),
+                          _buildCancelPending(),
+                        ],
                         if (isCompleted || isCancelled) ...[
                           const SizedBox(height: 12),
                           PrimaryButton(
@@ -663,6 +682,80 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
       title: 'Gas delivered!',
       subtitle: 'Delivered to ${widget.order.deliveryAddress}',
     );
+  }
+
+  // Cancel is offered only while no driver has accepted (pendingApproval).
+  // The backend refunds any wallet hold when the order becomes cancelled.
+  bool _cancelling = false;
+
+  Widget _buildCancelPending() => SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: TextButton.icon(
+          onPressed: _cancelling ? null : _confirmCancel,
+          icon: _cancelling
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.error),
+                )
+              : const Icon(Icons.close_rounded, color: AppColors.error),
+          label: Text(_cancelling ? 'Cancelling…' : 'Cancel order',
+              style: const TextStyle(
+                color: AppColors.error,
+                fontWeight: FontWeight.w700,
+              )),
+        ),
+      );
+
+  Future<void> _confirmCancel() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Cancel this gas order?',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        content: const Text('No driver has accepted it yet. Any amount held '
+            'from your wallet for this order is returned.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Keep order'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Cancel order'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _cancelling = true);
+    try {
+      await ref.read(gasOrderRepositoryProvider).cancelPendingOrder(
+            widget.orderId,
+            reason: 'Cancelled by customer before a driver accepted',
+          );
+      // The order stream switches this screen to its cancelled state.
+    } on GasOrderException catch (e) {
+      debugPrint('Gas cancel failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.code == 'not-pending'
+            ? 'A driver has already accepted this order, so it can no longer be cancelled here.'
+            : "Couldn't cancel. Check your connection and try again."),
+      ));
+    } catch (e) {
+      debugPrint('Gas cancel failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Couldn't cancel. Check your connection and try again."),
+      ));
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
+    }
   }
 
   Widget _buildCancelledBanner() {
@@ -850,12 +943,12 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
       vehiclePlate: null,
       price: 'GHS ${order.totalPrice.toStringAsFixed(2)}',
       vehicleIcon: vehicleIcon,
-      onCall: () async {
-        final phone = order.driverPhone;
-        if (phone == null || phone.isEmpty) return;
-        final uri = Uri(scheme: 'tel', path: phone);
-        if (await canLaunchUrl(uri)) launchUrl(uri);
-      },
+      onCall: () => openPhoneAction(
+        action: PhoneAction.call,
+        number: order.driverPhone,
+        label: 'your driver',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      ),
       onChat: () {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -964,12 +1057,12 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
         TrackingActionButton(
           icon: Icons.phone_rounded,
           label: 'Call driver',
-          onTap: () async {
-            final phone = widget.order.driverPhone;
-            if (phone == null || phone.isEmpty) return;
-            final uri = Uri(scheme: 'tel', path: phone);
-            if (await canLaunchUrl(uri)) launchUrl(uri);
-          },
+          onTap: () => openPhoneAction(
+            action: PhoneAction.call,
+            number: widget.order.driverPhone,
+            label: 'your driver',
+            messenger: ScaffoldMessenger.maybeOf(context),
+          ),
         ),
         const SizedBox(width: 10),
         TrackingActionButton(

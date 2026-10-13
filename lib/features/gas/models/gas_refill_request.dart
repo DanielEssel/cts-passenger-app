@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/utils/otp_utils.dart';
+import '../../../core/utils/driver_location.dart';
 import '../../../core/services/pricing_service.dart';
 import 'package:flutter/material.dart';
 
@@ -283,6 +284,28 @@ enum GasOrderStatus {
 
   String get firestoreValue => name;
 
+  /// Statuses of a gas order that is still in progress, as actually written:
+  /// `pendingApproval` by the passenger app at creation, `driverAssigned` by
+  /// the acceptGasOrder function, the rest by the Driver App's step flow.
+  /// `confirmed` and `outForDelivery` are never written, so they are omitted.
+  /// SINGLE source of truth for "active gas order" queries.
+  static const List<GasOrderStatus> activeStatuses = [
+    GasOrderStatus.pendingApproval,
+    GasOrderStatus.driverAssigned,
+    GasOrderStatus.driverEnRoute,
+    GasOrderStatus.driverArrived,
+    GasOrderStatus.pickedUp,
+    GasOrderStatus.atStation,
+    GasOrderStatus.refilling,
+    GasOrderStatus.returning,
+  ];
+
+  /// Convenience for Firestore `whereIn` clauses.
+  static List<String> get activeStatusNames =>
+      activeStatuses.map((s) => s.firestoreValue).toList(growable: false);
+
+  bool get isActive => activeStatuses.contains(this);
+
   static GasOrderStatus fromFirestore(String value) =>
       GasOrderStatus.values.firstWhere(
         (e) => e.name == value,
@@ -487,7 +510,7 @@ class GasRefillRequest {
       driverName:     d['driverName']     as String?,
       driverPhone:    d['driverPhone']    as String?,
       driverVehicle:  d['driverVehicle']  as String?,
-      driverLocation: d['driverLocation'] as GeoPoint?,
+      driverLocation: readDriverLocation(d),
       refillType: GasRefillType.fromFirestore(d['refillType'] as String),
       cylinderSize: CylinderSize.fromFirestore(d['cylinderSize'] as String),
       preferredBrand: d['preferredBrand'] != null

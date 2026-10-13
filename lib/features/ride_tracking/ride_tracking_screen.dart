@@ -2,13 +2,14 @@
 import 'dart:async';
 import 'dart:math';
 
+import '../../core/utils/smooth_marker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/utils/phone_launcher.dart';
 
 import '../ride/presentation/trip_complete_screen.dart';
 import '../ride/services/route_service.dart';
@@ -62,19 +63,37 @@ class RideTrackingScreen extends StatefulWidget {
 }
 
 class _RideTrackingScreenState extends State<RideTrackingScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   Map<String, dynamic> _tripData = {};
   _TripStatus _status = _TripStatus.tripAccepted;
   bool _isLoading = true;
 
   GoogleMapController? _mapController;
-  LatLng? _driverLatLng;
+  LatLng? _driverLatLng; // current (animated) driver position
   LatLng? _pickupLatLng;
   LatLng? _dropoffLatLng;
 
+  // ── Live driver marker ─────────────────────────
+  late final SmoothMarker _driverAnim;
+  final ValueNotifier<({LatLng pos, double bearing})?> _driverPose =
+      ValueNotifier(null);
+  LatLng? _driverTarget; // latest raw position from Firestore
+  bool _follow = true; // camera follows until the user touches the map
+  DateTime _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Fallback source so the driver appears as soon as the trip is accepted,
+  // before the trip doc carries a live location.
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _driverDocSub;
+  String? _driverDocId;
+  bool _tripHasLiveLoc = false;
+
+  // ── Route ──────────────────────────────────────
   final _routeService = RouteService();
   Set<Polyline> _routePolyline = {};
-  bool _routeFetched = false;
+  String? _routeKey; // 'pickup' | 'dropoff' for the drawn route
+  LatLng? _routeOrigin;
+  bool _routeBusy = false;
+  DateTime _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   bool _mapReady = false;
 
@@ -118,17 +137,35 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+
+    _driverAnim = SmoothMarker(
+      vsync: this,
+      onFrame: (pos, bearing) {
+        _driverLatLng = pos;
+        _driverPose.value = (pos: pos, bearing: bearing);
+        _followCamera();
+      },
+    );
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadMarkers());
     _subscribeToTrip();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refitMap();
+    if (state == AppLifecycleState.resumed) {
+      _follow = true;
+      _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+      _fitTrip();
+    }
   }
 
   Future<void> _loadMarkers() async {
-    await MarkerService.instance.warmUp(context);
+    try {
+      await MarkerService.instance.warmUp(context);
+    } catch (e, st) {
+      debugPrint('MarkerService.warmUp failed: $e\n$st');
+    }
     if (mounted) setState(() {});
   }
 
@@ -140,6 +177,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         .listen((snap) {
       if (!snap.exists || !mounted) return;
       final data = snap.data()!;
+      final prevStatus = _status;
       final newStatus = _TripStatus.fromString(data['status'] as String?);
       final geo = data['driverCurrentLocation'] as GeoPoint?;
       final pickup = data['pickupLocation'] as GeoPoint?;
@@ -149,7 +187,6 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         _tripData = data;
         _status = newStatus;
         _isLoading = false;
-        if (geo != null) _driverLatLng = LatLng(geo.latitude, geo.longitude);
         if (pickup != null) {
           _pickupLatLng = LatLng(pickup.latitude, pickup.longitude);
         }
@@ -158,11 +195,21 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         }
       });
 
-      _fetchRoute();
-
-      if (_driverLatLng != null && _mapReady) {
-        _mapController?.animateCamera(CameraUpdate.newLatLng(_driverLatLng!));
+      if (newStatus != prevStatus) {
+        _follow = true;
+        _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
       }
+
+      _tripHasLiveLoc = geo != null;
+      if (geo != null) {
+        _applyDriverLocation(
+          LatLng(geo.latitude, geo.longitude),
+          heading: (data['driverHeading'] as num?)?.toDouble(),
+        );
+      }
+
+      _listenDriverDoc(data['driverId'] as String?);
+      _syncRoute();
 
       if (newStatus == _TripStatus.completed) _navigateToComplete(data);
       if (newStatus == _TripStatus.cancelledByDriver) {
@@ -171,38 +218,130 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     });
   }
 
-  void _refitMap() {
-    if (!_mapReady || _pickupLatLng == null || _dropoffLatLng == null) return;
-    final sw = LatLng(
-      min(_pickupLatLng!.latitude, _dropoffLatLng!.latitude),
-      min(_pickupLatLng!.longitude, _dropoffLatLng!.longitude),
-    );
-    final ne = LatLng(
-      max(_pickupLatLng!.latitude, _dropoffLatLng!.latitude),
-      max(_pickupLatLng!.longitude, _dropoffLatLng!.longitude),
-    );
-    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
-        LatLngBounds(southwest: sw, northeast: ne), 80));
+  void _applyDriverLocation(LatLng p, {double? heading}) {
+    _driverTarget = p;
+    _driverAnim.moveTo(p, heading: heading);
   }
 
-  Future<void> _fetchRoute() async {
-    if (_routeFetched || _pickupLatLng == null || _dropoffLatLng == null) {
+  // Fallback: until the trip doc carries a live location, use the driver's
+  // own document so the marker appears as soon as the trip is accepted.
+  void _listenDriverDoc(String? driverId) {
+    if (driverId == null || driverId.isEmpty || driverId == _driverDocId) {
       return;
     }
-    _routeFetched = true;
-    final result =
-        await _routeService.getRoute(_pickupLatLng!, _dropoffLatLng!);
-    if (result != null && result.points.isNotEmpty && mounted) {
-      setState(() {
-        _routePolyline = {
-          Polyline(
-            polylineId: const PolylineId('route'),
-            points: result.points,
-            color: _kPrimary,
-            width: 4,
+    _driverDocId = driverId;
+    _driverDocSub?.cancel();
+    _driverDocSub = FirebaseFirestore.instance
+        .collection('drivers')
+        .doc(driverId)
+        .snapshots()
+        .listen((s) {
+      if (!mounted || _tripHasLiveLoc) return;
+      final d = s.data();
+      final g = (d?['location'] ?? d?['currentLocation']) as GeoPoint?;
+      if (g == null) return;
+      _applyDriverLocation(LatLng(g.latitude, g.longitude));
+      _syncRoute();
+    });
+  }
+
+  // ── Camera ────────────────────────────────────
+
+  void _refitMap() => _fitTrip();
+
+  void _fitTrip() {
+    if (!_mapReady) return;
+    final driver = _driverLatLng;
+    final toPickup = _status == _TripStatus.tripAccepted ||
+        _status == _TripStatus.driverArrived;
+    final target = toPickup ? _pickupLatLng : _dropoffLatLng;
+
+    if (driver == null || target == null) {
+      // No driver yet: frame pickup -> drop-off if we have both, else pickup.
+      if (_pickupLatLng != null && _dropoffLatLng != null && driver == null) {
+        final a = _pickupLatLng!, b = _dropoffLatLng!;
+        _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(min(a.latitude, b.latitude),
+                min(a.longitude, b.longitude)),
+            northeast: LatLng(max(a.latitude, b.latitude),
+                max(a.longitude, b.longitude)),
           ),
-        };
-      });
+          80,
+        ));
+        return;
+      }
+      final p = driver ?? target ?? _pickupLatLng;
+      if (p != null) {
+        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(p, 16));
+      }
+      return;
+    }
+
+    if (geoDistance(driver, target) < 30) {
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(driver, 17));
+      return;
+    }
+    final sw = LatLng(min(driver.latitude, target.latitude),
+        min(driver.longitude, target.longitude));
+    final ne = LatLng(max(driver.latitude, target.latitude),
+        max(driver.longitude, target.longitude));
+    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: sw, northeast: ne), 90));
+  }
+
+  void _followCamera() {
+    if (!_follow || !_mapReady) return;
+    final now = DateTime.now();
+    if (now.difference(_lastCam).inSeconds < 3) return;
+    _lastCam = now;
+    _fitTrip();
+  }
+
+  // ── Route ─────────────────────────────────────
+
+  Future<void> _syncRoute() async {
+    if (_routeBusy) return;
+    final toPickup = _status == _TripStatus.tripAccepted ||
+        _status == _TripStatus.driverArrived;
+    final from = toPickup ? _driverTarget : (_driverTarget ?? _pickupLatLng);
+    final to = toPickup ? _pickupLatLng : _dropoffLatLng;
+    if (from == null || to == null) return;
+
+    final key = toPickup ? 'pickup' : 'dropoff';
+    final now = DateTime.now();
+    final sinceLast = now.difference(_lastRouteAt).inSeconds;
+    final moved = _routeOrigin == null
+        ? double.infinity
+        : geoDistance(_routeOrigin!, from);
+
+    if (sinceLast < 8) return; // also acts as retry backoff on failures
+    if (key == _routeKey && !(moved > 200 && sinceLast > 20)) return;
+
+    _routeBusy = true;
+    _lastRouteAt = now;
+    try {
+      final result = await _routeService.getRoute(from, to);
+      if (result != null && result.points.isNotEmpty && mounted) {
+        setState(() {
+          _routePolyline = {
+            Polyline(
+              polylineId: const PolylineId('route'),
+              points: result.points,
+              color: _kPrimary,
+              width: 5,
+            ),
+          };
+        });
+        _routeKey = key;
+        _routeOrigin = from;
+      } else {
+        debugPrint('Route fetch returned nothing ($key)');
+      }
+    } catch (e) {
+      debugPrint('Route fetch failed: $e');
+    } finally {
+      _routeBusy = false;
     }
   }
 
@@ -229,14 +368,16 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         infoWindow: const InfoWindow(title: 'Drop-off'),
       ));
     }
-    if (_driverLatLng != null) {
+    final pose = _driverPose.value;
+    if (pose != null) {
       markers.add(Marker(
         markerId: const MarkerId('driver'),
-        position: _driverLatLng!,
+        position: pose.pos,
         icon: ms.vehicle(serviceType),
         anchor: const Offset(0.5, 0.5), // vehicle centered on coord
-        rotation: (_tripData['driverHeading'] as num?)?.toDouble() ?? 0,
+        rotation: pose.bearing,
         flat: true, // flat = rotates with map/heading
+        zIndex: 10,
         infoWindow:
             InfoWindow(title: _tripData['driverName'] as String? ?? 'Driver'),
       ));
@@ -375,7 +516,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
             'userRole': 'passenger',
             'subject': 'Trip dispute — did not arrive at destination',
             'message':
-                'Driver marked trip as complete but passenger did not arrive. Trip ID: \${widget.tripId}',
+                'Driver marked trip as complete but passenger did not arrive. Trip ID: ${widget.tripId}',
             'category': 'trip_dispute',
             'priority': 'high',
             'status': 'open',
@@ -405,25 +546,19 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     });
   }
 
-  Future<void> _callDriver() async {
-    final phone = _tripData['driverPhone'] as String?;
-    if (phone == null || phone.isEmpty) {
-      _snack('Driver phone not available.');
-      return;
-    }
-    final uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
+  Future<void> _callDriver() => openPhoneAction(
+        action: PhoneAction.call,
+        number: _tripData['driverPhone'] as String?,
+        label: 'your driver',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      );
 
-  Future<void> _messageDriver() async {
-    final phone = _tripData['driverPhone'] as String?;
-    if (phone == null || phone.isEmpty) {
-      _snack('Driver phone not available.');
-      return;
-    }
-    final uri = Uri(scheme: 'sms', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
+  Future<void> _messageDriver() => openPhoneAction(
+        action: PhoneAction.sms,
+        number: _tripData['driverPhone'] as String?,
+        label: 'your driver',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      );
 
   void _shareTrip() => Share.share(
         'I\'m on a CTSTransport trip to ${_tripData['dropoffAddress'] ?? 'my destination'}. '
@@ -433,9 +568,12 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
 
   Future<void> _cancelRide() async {
     if (_isCancelling) return;
+    // Pop with the dialog's own context: the dialog is on the root navigator,
+    // while this screen's context resolves to the shell's nested navigator,
+    // so popping with it closed the screen and left the dialog stuck.
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Cancel ride?',
             style: TextStyle(fontWeight: FontWeight.w700)),
@@ -443,10 +581,10 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
             'Cancelling after a driver has been assigned may incur a fee.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(dialogCtx, false),
               child: const Text('Keep Ride')),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Cancel Ride'),
           ),
@@ -550,115 +688,134 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tripSub?.cancel();
+    _driverDocSub?.cancel();
+    _driverAnim.dispose();
+    _driverPose.dispose();
     _mapController?.dispose();
     super.dispose();
   }
 
   @override
-Widget build(BuildContext context) {
-  if (_isLoading) {
-    return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: _kPrimary)));
-  }
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator(color: _kPrimary)));
+    }
 
-  return PopScope(
-    canPop: _status.isTerminal,
-    onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) _snack('Please wait for your trip to complete.');
-    },
-    child: Stack(
-      children: [
-        Scaffold(
-          backgroundColor: const Color(0xFFF8FAF9),
-          body: Column(
-            children: [
-              Expanded(
-                flex: 55,
-                child: Stack(
-                  children: [
-                    GoogleMap(
-                      style: _mapStyle,
-                      onMapCreated: (c) {
-                        _mapController = c;
-                        setState(() => _mapReady = true);
-                        WidgetsBinding.instance
-                            .addPostFrameCallback((_) => _refitMap());
-                      },
-                      initialCameraPosition: CameraPosition(
-                          target: _pickupLatLng ?? _kAccra, zoom: 14),
-                      markers: _buildMarkers(),
-                      polylines: _routePolyline,
-                      myLocationEnabled: true,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
-                      mapToolbarEnabled: false,
-                      compassEnabled: false,
-                    ),
-                    Positioned(
-                      top: MediaQuery.of(context).padding.top + 12,
-                      right: 16,
-                      child: _MapBtn(
+    return PopScope(
+      canPop: _status.isTerminal,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _snack('Please wait for your trip to complete.');
+      },
+      child: Stack(
+        children: [
+          Scaffold(
+            backgroundColor: const Color(0xFFF8FAF9),
+            body: Column(
+              children: [
+                Expanded(
+                  flex: 55,
+                  child: Stack(
+                    children: [
+                      // Only the map rebuilds on animation frames; a touch on
+                      // the map turns off camera-follow.
+                      Listener(
+                        onPointerDown: (_) => _follow = false,
+                        child: ValueListenableBuilder(
+                          valueListenable: _driverPose,
+                          builder: (_, __, ___) => GoogleMap(
+                            style: _mapStyle,
+                            onMapCreated: (c) {
+                              _mapController = c;
+                              setState(() => _mapReady = true);
+                              WidgetsBinding.instance
+                                  .addPostFrameCallback((_) => _fitTrip());
+                            },
+                            initialCameraPosition: CameraPosition(
+                                target: _pickupLatLng ?? _kAccra, zoom: 14),
+                            markers: _buildMarkers(),
+                            polylines: _routePolyline,
+                            myLocationEnabled: true,
+                            myLocationButtonEnabled: false,
+                            zoomControlsEnabled: false,
+                            mapToolbarEnabled: false,
+                            compassEnabled: false,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: MediaQuery.of(context).padding.top + 12,
+                        right: 16,
+                        child: _MapBtn(
                           icon: Icons.my_location_rounded,
                           color: _kPrimary,
-                          onTap: _refitMap),
-                    ),
-                    Positioned(
-                        bottom: 0, left: 0, right: 0, child: _buildStatusBar()),
-                  ],
+                          onTap: () {
+                            _follow = true;
+                            _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+                            _fitTrip();
+                          },
+                        ),
+                      ),
+                      Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: _buildStatusBar()),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 45,
-                child: Container(
-                  color: Colors.white,
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.fromLTRB(
-                        20, 0, 20, MediaQuery.of(context).padding.bottom + 16),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 8),
-                        _buildStepper(),
-                        const SizedBox(height: 16),
-                        _buildDriverCard(),
-                        const SizedBox(height: 12),
-                        _buildActionRow(),
-                        const SizedBox(height: 12),
-                        _buildSOSButton(),
-                      ],
+                Expanded(
+                  flex: 45,
+                  child: Container(
+                    color: Colors.white,
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(20, 0, 20,
+                          MediaQuery.of(context).padding.bottom + 16),
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 8),
+                          _buildStepper(),
+                          const SizedBox(height: 16),
+                          _buildDriverCard(),
+                          const SizedBox(height: 12),
+                          _buildActionRow(),
+                          const SizedBox(height: 12),
+                          _buildSOSButton(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        if (_isCancelling)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.45),
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 12),
-                    Text(
-                      'Cancelling ride...',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
+          if (_isCancelling)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.45),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 12),
+                      Text(
+                        'Cancelling ride...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
   Widget _buildStatusBar() {
     final (color, icon, label) = switch (_status) {
@@ -993,6 +1150,20 @@ class _ActionBtn extends StatelessWidget {
 class _SOSSheet extends StatelessWidget {
   final String tripId;
   const _SOSSheet({required this.tripId});
+
+  // Captures the messenger before closing the sheet so a failure message can
+  // still be shown on the tracking screen.
+  Future<void> _dial(BuildContext context, String number, String label) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    Navigator.pop(context);
+    return openPhoneAction(
+      action: PhoneAction.call,
+      number: number,
+      label: label,
+      messenger: messenger,
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
         padding: EdgeInsets.fromLTRB(
@@ -1022,22 +1193,21 @@ class _SOSSheet extends StatelessWidget {
             const Text('Select an option below',
                 style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 20),
+            // 112 is Ghana's national emergency number (police, fire,
+            // ambulance). These open the dialer; they do not place the call
+            // or alert anyone on the user's behalf.
+            _SOSOption(
+                icon: Icons.emergency_rounded,
+                label: 'Call Emergency (112)',
+                onTap: () => _dial(context, '112', 'Emergency (112)')),
             _SOSOption(
                 icon: Icons.local_police_rounded,
                 label: 'Call Police (191)',
-                onTap: () async {
-                  Navigator.pop(context);
-                  final uri = Uri(scheme: 'tel', path: '191');
-                  if (await canLaunchUrl(uri)) await launchUrl(uri);
-                }),
+                onTap: () => _dial(context, '191', 'Police (191)')),
             _SOSOption(
                 icon: Icons.local_hospital_rounded,
                 label: 'Call Ambulance (193)',
-                onTap: () async {
-                  Navigator.pop(context);
-                  final uri = Uri(scheme: 'tel', path: '193');
-                  if (await canLaunchUrl(uri)) await launchUrl(uri);
-                }),
+                onTap: () => _dial(context, '193', 'Ambulance (193)')),
             _SOSOption(
                 icon: Icons.people_rounded,
                 label: 'Share location with emergency contact',

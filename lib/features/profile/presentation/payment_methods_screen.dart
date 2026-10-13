@@ -193,7 +193,7 @@ class PaymentMethodsScreen extends ConsumerWidget {
   Future<void> _deleteMoMo(BuildContext context, SavedMoMo momo) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Remove number?', style: AppTextStyles.heading3),
@@ -203,13 +203,13 @@ class PaymentMethodsScreen extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: Text('Cancel',
                 style: AppTextStyles.bodySmall
                     .copyWith(color: AppColors.textSecondary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             child: Text('Remove',
                 style:
                     AppTextStyles.bodySmall.copyWith(color: AppColors.error)),

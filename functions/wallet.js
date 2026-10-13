@@ -18,16 +18,32 @@ function requireAuth(request) {
   return request.auth.uid;
 }
 
-async function getRole(uid) {
-  // Check drivers collection first
-  const driverDoc = await getDb().collection("drivers").doc(uid).get();
-  if (driverDoc.exists) return { role: "driver", data: driverDoc.data() };
+// A drivers/{uid} doc only counts as a driver once the driver has chosen a
+// driver role. Signing into the Driver app used to leave a token-only
+// drivers/{uid} (AUTH-03); that must not turn a passenger into a "driver".
+function isDriverRecord(driver) {
+  return !!driver && typeof driver.role === "string" &&
+    driver.role.startsWith("driver_");
+}
 
-  // Check users collection
-  const userDoc = await getDb().collection("users").doc(uid).get();
-  if (userDoc.exists) return { role: "passenger", data: userDoc.data() };
-
+// driver/user: the docs' data, or null when the doc does not exist.
+function classifyRole(driver, user) {
+  if (isDriverRecord(driver)) return { role: "driver", data: driver };
+  if (user) return { role: "passenger", data: user };
+  // A driver part-way through signup (no role yet) and no passenger profile.
+  if (driver) return { role: "driver", data: driver };
   return { role: "unknown", data: {} };
+}
+
+async function getRole(uid) {
+  const [driverDoc, userDoc] = await Promise.all([
+    getDb().collection("drivers").doc(uid).get(),
+    getDb().collection("users").doc(uid).get(),
+  ]);
+  return classifyRole(
+    driverDoc.exists ? driverDoc.data() : null,
+    userDoc.exists ? userDoc.data() : null,
+  );
 }
 
 // Paystack is retired. Production behaviour is unchanged until a separate
@@ -955,3 +971,6 @@ exports.migrateWallets = onCall(
   console.log(`✅ Migration: ${walletsMigrated} wallets, ${driverWallets} driver wallets`);
   return { success: true, walletsMigrated, driverWallets };
 });
+
+// Test-only access (not exported from index.js, so never deployed).
+exports._roles = { classifyRole };

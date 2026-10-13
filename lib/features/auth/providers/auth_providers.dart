@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import '../../home/services/notification_service.dart';
+import '../data/passenger_profile_check.dart';
 
 // ── Firebase instances ────────────────────────────────────────────────────────
 
@@ -783,10 +785,22 @@ class AuthNotifier extends Notifier<AuthState> {
   // (and signs out) if there's no passenger account for this number.
   Future<bool> _finishLogin(User user, void Function(String) onError) async {
     final docRef = _firestore.collection('users').doc(user.uid);
-    final userDoc = await docRef.get();
-    final data = userDoc.data();
 
-    if (!userDoc.exists || data == null || data['role'] != 'passenger') {
+    // Server copy only: right after sign-in the cache may hold just the
+    // push-token write, which has no role (see passenger_profile_check.dart).
+    final PassengerProfileRead profile;
+    try {
+      profile = await readPassengerProfile(docRef);
+    } catch (e) {
+      debugPrint('⚠️ LOGIN: could not read profile from server: $e');
+      state = state.copyWith(isLoading: false, verificationInProgress: false);
+      onError("Couldn't confirm your account. Check your connection and try again.");
+      return false;
+    }
+
+    if (profile.status != PassengerProfileStatus.passenger) {
+      debugPrint('⚠️ LOGIN: rejected (${profile.status.name})');
+      await NotificationService.instance.clearToken();
       await _auth.signOut();
       state = const AuthState();
       onError(
@@ -805,6 +819,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> signOut() async {
     state = state.copyWith(isLoading: true);
+    // Detach this device from the account's pushes while still signed in;
+    // never blocks sign-out (bounded, does not throw).
+    await NotificationService.instance.clearToken();
     await _auth.signOut();
     state = const AuthState();
   }
@@ -888,6 +905,9 @@ class AuthNotifier extends Notifier<AuthState> {
     // Firestore doc just written wouldn't otherwise be picked up until the
     // next auth state change, so nudge it explicitly.
     ref.invalidate(currentUserProvider);
+
+    // The sign-in token save was skipped (no profile yet); save it now.
+    await NotificationService.instance.saveCurrentToken();
 
     state = state.copyWith(isLoading: false, user: freshUser);
 

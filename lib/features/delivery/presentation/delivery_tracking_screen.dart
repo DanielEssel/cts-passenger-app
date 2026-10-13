@@ -1,5 +1,6 @@
 // lib/features/delivery/delivery_tracking_screen_refactored.dart
 
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../core/utils/phone_launcher.dart';
 import '../../../core/services/marker_service.dart';
 import '../../../widgets/common/shared_widgets.dart';
 import '../../ride/services/route_service.dart';
@@ -65,10 +67,24 @@ class DeliveryTrackingScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       body: deliveryAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => CtsErrorState(
+          title: "Can't load your delivery",
+          message: 'Check your connection. Your delivery request is not '
+              'affected.',
+          onRetry: () => ref.invalidate(deliveryStreamProvider(deliveryId)),
+          onBack: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+        ),
         data: (delivery) {
           if (delivery == null) {
-            return const Center(child: Text('Delivery not found'));
+            return CtsErrorState(
+              icon: Icons.search_off_rounded,
+              title: 'Delivery not found',
+              message: 'This delivery may have been removed. You can '
+                  'check your past deliveries in History.',
+              onBack: () =>
+                  Navigator.of(context).popUntil((route) => route.isFirst),
+            );
           }
           return _DeliveryTrackingBody(
             delivery: delivery,
@@ -627,12 +643,12 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
       vehiclePlate: delivery.vehiclePlate,
       price: 'GHS ${delivery.estimatedFare.toStringAsFixed(2)}',
       vehicleIcon: vehicleIcon,
-      onCall: () async {
-        final phone = delivery.driverPhone;
-        if (phone == null) return;
-        final uri = Uri(scheme: 'tel', path: phone);
-        if (await canLaunchUrl(uri)) launchUrl(uri);
-      },
+      onCall: () => openPhoneAction(
+        action: PhoneAction.call,
+        number: delivery.driverPhone,
+        label: 'your rider',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      ),
       onChat: () {
         // Implement chat functionality
         ScaffoldMessenger.of(context).showSnackBar(
@@ -652,12 +668,12 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
         TrackingActionButton(
           icon: Icons.phone_rounded,
           label: 'Call rider',
-          onTap: () async {
-            final phone = widget.delivery.driverPhone;
-            if (phone == null) return;
-            final uri = Uri(scheme: 'tel', path: phone);
-            if (await canLaunchUrl(uri)) launchUrl(uri);
-          },
+          onTap: () => openPhoneAction(
+            action: PhoneAction.call,
+            number: widget.delivery.driverPhone,
+            label: 'your rider',
+            messenger: ScaffoldMessenger.maybeOf(context),
+          ),
         ),
         const SizedBox(width: 10),
         TrackingActionButton(

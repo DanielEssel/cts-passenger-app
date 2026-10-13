@@ -13,10 +13,8 @@ import '../providers/wallet_provider.dart';
 import '../services/payment_method_service.dart';
 import '../services/ride_options_service.dart';
 import '../constants/ride_constants.dart';
+import '../../../core/widgets/cts_ui.dart';
 import 'ride_option_card.dart';
-
-// Service types shown in the ride options list
-const _hailingTypes = {'taxi', 'okada', 'pragyia'};
 
 class RideOptionsList extends ConsumerWidget {
   final RideRequestState state;
@@ -30,121 +28,61 @@ class RideOptionsList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final nearbyAsync = ref.watch(driversNearbyProvider);
+    // Same stream as the map markers. Categories stay selectable either way:
+    // the backend's search decides whether a driver is found.
+    final drivers = ref.watch(driversNearbyProvider);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Header ──
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'CHOOSE RIDE',
-                style: AppTextStyles.overline.copyWith(
-                  color:         AppColors.textTertiary,
-                  letterSpacing: 1.1,
-                  fontWeight:    FontWeight.w700,
-                ),
-              ),
-              nearbyAsync.when(
-                data: (drivers) {
-                  final total = drivers
-                      .where((d) => _hailingTypes.contains(d.serviceType))
-                      .length;
-                  return Text(
-                    '$total driver${total == 1 ? '' : 's'} nearby',
-                    style: AppTextStyles.caption.copyWith(
-                      color:      total > 0
-                          ? AppColors.success
-                          : AppColors.textTertiary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  );
-                },
-                loading: () => const SizedBox(
-                  width: 12, height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
+          const CtsSectionHeader('Choose a ride',
+              caption: 'Prices are estimates'),
 
           // ── Ride options ──
           ...RideOptionsService.availableRides.map((ride) {
-            // Use the Firestore string value — pragyia stays 'pragyia'
-            final serviceKey = ride.serviceType.name;
-
-            final driverCount = nearbyAsync.maybeWhen(
-              data: (drivers) => drivers
-                  .where((d) => d.serviceType == serviceKey)
-                  .length,
-              orElse: () => 0,
-            );
-
-            final isAvailable = driverCount > 0;
-
+            final availability =
+                rideAvailabilityFrom(drivers, ride.serviceType.name);
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: RideOptionCard(
-                option:      ride,
-                isSelected:  state.selectedRide?.serviceType ==
+                option:       ride,
+                isSelected:   state.selectedRide?.serviceType ==
                     ride.serviceType,
-                isAvailable: isAvailable,
-                driverCount: driverCount,
-                onTap: isAvailable
-                    ? () {
-                        HapticFeedback.selectionClick();
-                        ref
-                            .read(rideRequestProvider.notifier)
-                            .selectRide(ride);
-                      }
-                    : null,
+                availability: availability.status,
+                driverCount:  availability.count,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  ref.read(rideRequestProvider.notifier).selectRide(ride);
+                },
                 distance: state.estimatedDistance ??
                     RideConstants.defaultDistanceKm,
+                durationMin: state.estimatedDuration ?? 0,
               ),
             );
           }),
 
-          // ── No drivers banner ──
-          nearbyAsync.when(
-            data: (drivers) {
-              final hasAny = drivers
-                  .any((d) => _hailingTypes.contains(d.serviceType));
-              if (hasAny) return const SizedBox.shrink();
-              return Container(
-                margin:  const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color:        AppColors.warningLight,
-                  borderRadius: BorderRadius.circular(12),
-                  border:       Border.all(
-                      color: AppColors.warning.withValues(alpha: 0.3)),
+          // ── How availability works ──
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline_rounded,
+                    color: AppColors.textTertiary, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Prices are estimates. We search for a driver after '
+                    'you request, and tell you if none is available.',
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.textSecondary),
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline_rounded,
-                        color: AppColors.warning, size: 16),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'No drivers available in your area right now. '
-                        'Please try again in a few minutes.',
-                        style: AppTextStyles.caption
-                            .copyWith(color: AppColors.warning),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error:   (_, __) => const SizedBox.shrink(),
+              ],
+            ),
           ),
 
           const SizedBox(height: 4),

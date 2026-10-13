@@ -114,3 +114,34 @@ tightly scoped change. Until then the production endpoints are unchanged, and
 See the B0 report. Until they are answered, do not assume Bridge offers
 callback signatures, IP allow-lists, idempotency headers, a sandbox, or a
 transaction-status API.
+
+
+Account & Usage
+
+Account
+Auth method
+Claude AI
+Email
+dessel015@gmail.com
+Organization
+dessel015@gmail.com's Organization
+Plan
+Claude pro
+Usage
+Session (5hr)
+68%
+Resets in 2h
+Weekly (7 day)
+100%
+Resets in 19h
+Manage usage on claude.ai
+What’s contributing to your limits usage?
+Day
+Week
+Approximate, based on local sessions on this machine — does not include other devices or claude.ai
+Last 24h · these are independent characteristics of your usage, not a breakdown
+93% of your usage was at >150k context
+Longer sessions are more expensive even when cached. /compact mid-task, /clear when switching to new tasks.
+MCP servers
+% of usage
+claude-vscode

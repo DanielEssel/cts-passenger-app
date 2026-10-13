@@ -156,13 +156,15 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
         navigator.pop();
       }
     } catch (e) {
+      debugPrint('Delivery cancel failed: $e');
       if (!mounted) return;
 
       setState(() => _cancelling = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not cancel: $e'),
+          content: const Text(
+              "Couldn't cancel. Check your connection and try again."),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(

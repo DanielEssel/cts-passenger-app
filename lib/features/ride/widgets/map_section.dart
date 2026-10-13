@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import '../constants/ride_constants.dart';
 import '../providers/drivers_nearby_provider.dart';
 import '../providers/ride_request_provider.dart';
@@ -40,48 +42,31 @@ class MapSection extends ConsumerWidget {
               : null,
           onMapTap: onMapTap,
         ),
+        // Back button and status chips sit at the top: the booking sheet
+        // covers the lower half of the map.
         Positioned(
-          top: MediaQuery.of(context).padding.top + 10,
-          left: 16,
-          child: const _BackButton(),
-        ),
-        Positioned(
-          bottom: 12,
-          right: 12,
-          child: _DriversNearbyChip(),
-        ),
-        if (state.isDestinationSet)
-          Positioned(
-            bottom: 12,
-            left: 12,
-            child: _RouteStatsChip(state: state),
+          top: MediaQuery.paddingOf(context).top + 8,
+          left: ctsGutter,
+          right: ctsGutter,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const CtsBackButton(elevated: true),
+              const Spacer(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _DriversNearbyChip(),
+                  if (state.isDestinationSet) ...[
+                    const SizedBox(height: 8),
+                    _RouteStatsChip(state: state),
+                  ],
+                ],
+              ),
+            ],
           ),
+        ),
       ],
-    );
-  }
-}
-
-class _BackButton extends StatelessWidget {
-  const _BackButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.pop(context),
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        ),
-        child: const Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: Colors.white,
-          size: 16,
-        ),
-      ),
     );
   }
 }
@@ -141,9 +126,13 @@ class _MapChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
+        color: CtsTheme.surface,
         borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        border: Border.all(color: CtsTheme.border),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x1A000000), blurRadius: 6, offset: Offset(0, 2)),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -158,9 +147,9 @@ class _MapChip extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: Colors.white,
+              color: CtsTheme.textPrimary,
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],

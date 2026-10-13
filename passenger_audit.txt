@@ -1,0 +1,407 @@
+=== 1. Who LISTENS to trip / driver location ===
+lib/core/utils/driver_location.dart:6:// a job is active. Older documents may only carry `driverLocation`. The
+lib/core/utils/driver_location.dart:15:  return _usable(data['driverCurrentLocation']) ?? _usable(data['driverLocation']);
+lib/features/gas/widgets/address_picker_sheet.dart:136:      Navigator.pop(context, {'address': address, 'location': geoPoint});
+lib/features/gas/models/gas_refill_request.dart:343:  final GeoPoint? driverLocation;
+lib/features/gas/models/gas_refill_request.dart:406:    this.driverLocation,
+lib/features/gas/models/gas_refill_request.dart:455:    'driverLocation': driverLocation,
+lib/features/gas/models/gas_refill_request.dart:513:      driverLocation: readDriverLocation(d),
+lib/features/gas/models/gas_refill_request.dart:566:    GeoPoint? driverLocation,
+lib/features/gas/models/gas_refill_request.dart:610:      driverLocation: driverLocation ?? this.driverLocation,
+lib/features/gas/repositories/gas_order_repository.dart:49:  return _col.doc(orderId).snapshots().map((doc) {
+lib/features/gas/repositories/gas_order_repository.dart:60:        .snapshots()
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:475:    final driverLocation = order.driverLocation != null
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:477:            order.driverLocation!.latitude,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:478:            order.driverLocation!.longitude,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:488:          child: _buildTrackingMap(pickup, dropoff, driverLocation),
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:584:    LatLng? driverLocation,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:589:      driverLocation: driverLocation,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:624:      if (widget.order.driverLocation != null)
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:628:            widget.order.driverLocation!.latitude,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:629:            widget.order.driverLocation!.longitude,
+lib/features/gas/presentation/screens/gas_order_screen.dart:877:        _deliveryGeoPoint = result['location'] as GeoPoint;
+lib/features/gas/presentation/screens/gas_order_screen.dart:911:        final loc = data['location'] ?? data['currentLocation'];
+lib/features/gas/presentation/widgets/address_picker_sheet.dart:26:/// Returns `{'address': String, 'location': GeoPoint}` or null if dismissed.
+lib/features/gas/presentation/widgets/address_picker_sheet.dart:151:    Navigator.pop(context, {'address': address, 'location': geo});
+lib/features/wallet/data/datasources/wallet_remote_datasource.dart:90:        .snapshots()
+lib/features/wallet/data/datasources/wallet_remote_datasource.dart:226:        .snapshots()
+lib/features/ride_tracking/ride_tracking_screen.dart:139:        .snapshots()
+lib/features/ride/widgets/map_placeholder.dart:4:// ✅ Driver markers streamed live from Firestore via driversNearbyProvider
+lib/features/ride/widgets/map_placeholder.dart:150:  // Driver markers — rebuilt whenever driversNearbyProvider emits
+lib/features/ride/widgets/map_placeholder.dart:217:    ref.listen(driversNearbyProvider, (_, next) {
+lib/features/ride/widgets/map_section.dart:77:    final driversAsync = ref.watch(driversNearbyProvider);
+lib/features/ride/widgets/ride_options_list.dart:33:    final drivers = ref.watch(driversNearbyProvider);
+lib/features/ride/models/place_result.dart:57:        'location': location,
+lib/features/ride/providers/drivers_nearby_provider.dart:40:    final loc = data['location'];
+lib/features/ride/providers/drivers_nearby_provider.dart:63:final driversNearbyProvider =
+lib/features/ride/providers/drivers_nearby_provider.dart:73:      .snapshots()
+lib/features/ride/providers/drivers_nearby_provider.dart:94:      .snapshots()
+lib/features/ride/repositories/google_places_repository.dart:129:          'X-Goog-FieldMask': 'location', // only fetch what we need → cheaper
+lib/features/ride/repositories/google_places_repository.dart:138:      final location = data['location'] as Map<String, dynamic>?;
+lib/features/ride/presentation/screens/driver_matching_screen.dart:71:        .snapshots()
+lib/features/ride/presentation/widgets/map_placeholder.dart:4:// ✅ Driver markers streamed live from Firestore via driversNearbyProvider
+lib/features/ride/presentation/widgets/map_placeholder.dart:152:  // Driver markers — rebuilt whenever driversNearbyProvider emits
+lib/features/ride/presentation/widgets/map_placeholder.dart:220:    ref.listen(driversNearbyProvider, (_, next) {
+lib/features/ride/presentation/widgets/map_section.dart:92:    final driversAsync = ref.watch(driversNearbyProvider);
+lib/features/ride/presentation/book_ride_screen.dart:334:    final destLoc = result['location'] as GeoPoint;
+lib/features/ride/presentation/driver_matching_screen.dart:82:        .snapshots()
+lib/features/profile/presentation/payment_methods_screen.dart:64:      .snapshots()
+lib/features/profile/presentation/profile_screen.dart:28:      .snapshots()
+lib/features/profile/presentation/saved_places_screen.dart:98:      .snapshots()
+lib/features/tracking/widgets/tracking_map.dart:15:  final LatLng? driverLocation;
+lib/features/tracking/widgets/tracking_map.dart:30:    this.driverLocation,
+lib/features/tracking/widgets/tracking_map.dart:65:    if (widget.driverLocation != null &&
+lib/features/tracking/widgets/tracking_map.dart:66:        oldWidget.driverLocation != widget.driverLocation) {
+lib/features/tracking/widgets/tracking_map.dart:83:      if (_mapReady && _controller != null && widget.driverLocation != null) {
+lib/features/tracking/widgets/tracking_map.dart:102:      if (widget.driverLocation != null) widget.driverLocation!,
+lib/features/tracking/widgets/tracking_map.dart:127:    if (_controller == null || widget.driverLocation == null) return;
+lib/features/tracking/widgets/tracking_map.dart:132:          target: widget.driverLocation!,
+lib/features/tracking/widgets/tracking_map.dart:138:    _lastDriverPosition = widget.driverLocation;
+lib/features/tracking/widgets/tracking_map.dart:155:    final target = widget.driverLocation ?? widget.pickup;
+lib/features/home/services/driver_availability_service.dart:50:        .snapshots()
+lib/features/home/presentation/home_screen.dart:55:      .snapshots()
+lib/features/home/presentation/home_screen.dart:66:      .snapshots()
+lib/features/home/presentation/home_screen.dart:201:      // Centre of the 5 km driver-marker search (driversNearbyProvider).
+lib/features/home/presentation/home_screen.dart:402:      driversNearbyProvider,
+lib/features/home/presentation/home_screen.dart:955:        ref.read(driversNearbyProvider).whenData(_updateDriverMarkers);
+lib/features/home/presentation/home_screen.dart:1037:          .snapshots(),
+lib/features/bookings/service_request_manager.dart:31:        .snapshots();
+lib/features/delivery/models/delivery_request.dart:60:  final GeoPoint?      driverLocation;   // ← add: live position
+lib/features/delivery/models/delivery_request.dart:112:    this.driverLocation,
+lib/features/delivery/models/delivery_request.dart:176:      driverLocation:  readDriverLocation(d),
+lib/features/delivery/repositories/delivery_repositories.dart:20:      _db.collection(_col).doc(id).snapshots().map((doc) =>
+lib/features/delivery/presentation/delivery_tracking_screen.dart:198:    final driverLocation = delivery.driverLocation != null
+lib/features/delivery/presentation/delivery_tracking_screen.dart:200:            delivery.driverLocation!.latitude,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:201:            delivery.driverLocation!.longitude,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:211:          child: _buildTrackingMap(pickup, dropoff, driverLocation),
+lib/features/delivery/presentation/delivery_tracking_screen.dart:296:    LatLng? driverLocation,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:301:      driverLocation: driverLocation,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:336:      if (widget.delivery.driverLocation != null)
+lib/features/delivery/presentation/delivery_tracking_screen.dart:340:            widget.delivery.driverLocation!.latitude,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:341:            widget.delivery.driverLocation!.longitude,
+lib/features/notification/providers/notification_providers.dart:19:      .snapshots()
+lib/features/notification/providers/notification_providers.dart:35:      .snapshots()
+lib/features/driver/models/driver_locations.dart:25:      location: data['location'] as GeoPoint,
+lib/features/driver/models/driver_locations.dart:35:      'location': location,
+
+=== 2. Markers and map widgets ===
+lib/core/services/marker_service.dart:3:// Loads & caches custom map marker BitmapDescriptors once.
+lib/core/services/marker_service.dart:9:class MarkerService {
+lib/core/services/marker_service.dart:10:  MarkerService._();
+lib/core/services/marker_service.dart:11:  static final MarkerService instance = MarkerService._();
+lib/core/services/marker_service.dart:13:  final Map<String, BitmapDescriptor> _cache = {};
+lib/core/services/marker_service.dart:32:        // BitmapDescriptor.bytes is the most reliable across SDK versions
+lib/core/services/marker_service.dart:33:        _cache[e.key] = BitmapDescriptor.bytes(bytes);
+lib/core/services/marker_service.dart:41:  BitmapDescriptor vehicle(String? type) {
+lib/core/services/marker_service.dart:45:        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+lib/core/services/marker_service.dart:70:  BitmapDescriptor pickup() =>
+lib/core/services/marker_service.dart:72:      BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+lib/core/services/marker_service.dart:74:  BitmapDescriptor dropoff() =>
+lib/core/services/marker_service.dart:76:      BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:601:    final markerService = MarkerService.instance;
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:612:      Marker(
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:613:        markerId: const MarkerId('pickup'),
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:618:      Marker(
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:619:        markerId: const MarkerId('dropoff'),
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:625:        Marker(
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:626:          markerId: const MarkerId('driver'),
+lib/features/ride_tracking/ride_tracking_screen.dart:131:    await MarkerService.instance.warmUp(context);
+lib/features/ride_tracking/ride_tracking_screen.dart:164:        _mapController?.animateCamera(CameraUpdate.newLatLng(_driverLatLng!));
+lib/features/ride_tracking/ride_tracking_screen.dart:184:    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
+lib/features/ride_tracking/ride_tracking_screen.dart:211:    final ms = MarkerService.instance;
+lib/features/ride_tracking/ride_tracking_screen.dart:215:      markers.add(Marker(
+lib/features/ride_tracking/ride_tracking_screen.dart:216:        markerId: const MarkerId('pickup'),
+lib/features/ride_tracking/ride_tracking_screen.dart:224:      markers.add(Marker(
+lib/features/ride_tracking/ride_tracking_screen.dart:225:        markerId: const MarkerId('dropoff'),
+lib/features/ride_tracking/ride_tracking_screen.dart:233:      markers.add(Marker(
+lib/features/ride_tracking/ride_tracking_screen.dart:234:        markerId: const MarkerId('driver'),
+lib/features/ride_tracking/ride_tracking_screen.dart:576:                    GoogleMap(
+lib/features/ride_tracking/ride_tracking_screen.dart:586:                      markers: _buildMarkers(),
+lib/features/ride/widgets/map_placeholder.dart:21:class MapPlaceholder extends ConsumerStatefulWidget {
+lib/features/ride/widgets/map_placeholder.dart:28:  const MapPlaceholder({
+lib/features/ride/widgets/map_placeholder.dart:38:  ConsumerState<MapPlaceholder> createState() => _MapPlaceholderState();
+lib/features/ride/widgets/map_placeholder.dart:41:class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
+lib/features/ride/widgets/map_placeholder.dart:60:    await MarkerService.instance.warmUp(context);
+lib/features/ride/widgets/map_placeholder.dart:65:  void didUpdateWidget(MapPlaceholder oldWidget) {
+lib/features/ride/widgets/map_placeholder.dart:79:        if (widget.origin != null) _animateCameraTo(widget.origin!);
+lib/features/ride/widgets/map_placeholder.dart:89:    final ms = MarkerService.instance;
+lib/features/ride/widgets/map_placeholder.dart:90:    _markers.remove(const MarkerId('origin'));
+lib/features/ride/widgets/map_placeholder.dart:91:    _markers.remove(const MarkerId('destination'));
+lib/features/ride/widgets/map_placeholder.dart:94:      _markers[const MarkerId('origin')] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:95:        markerId: const MarkerId('origin'),
+lib/features/ride/widgets/map_placeholder.dart:104:      _markers[const MarkerId('destination')] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:105:        markerId: const MarkerId('destination'),
+lib/features/ride/widgets/map_placeholder.dart:154:    final ms = MarkerService.instance;
+lib/features/ride/widgets/map_placeholder.dart:158:      final markerId = MarkerId('driver_${driver.id}');
+lib/features/ride/widgets/map_placeholder.dart:159:      _markers[markerId] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:193:    _mapController!.animateCamera(
+lib/features/ride/widgets/map_placeholder.dart:194:      CameraUpdate.newLatLngBounds(
+lib/features/ride/widgets/map_placeholder.dart:204:  void _animateCameraTo(LatLng target) {
+lib/features/ride/widgets/map_placeholder.dart:205:    _mapController?.animateCamera(
+lib/features/ride/widgets/map_placeholder.dart:225:        child: GoogleMap(
+lib/features/ride/widgets/map_placeholder.dart:239:          markers: Set<Marker>.of(_markers.values),
+lib/features/ride/widgets/map_section.dart:28:        MapPlaceholder(
+lib/features/ride/presentation/widgets/map_placeholder.dart:19:class MapPlaceholder extends ConsumerStatefulWidget {
+lib/features/ride/presentation/widgets/map_placeholder.dart:26:  const MapPlaceholder({
+lib/features/ride/presentation/widgets/map_placeholder.dart:36:  ConsumerState<MapPlaceholder> createState() => _MapPlaceholderState();
+lib/features/ride/presentation/widgets/map_placeholder.dart:39:class _MapPlaceholderState extends ConsumerState<MapPlaceholder> {
+lib/features/ride/presentation/widgets/map_placeholder.dart:47:  BitmapDescriptor? _carIcon;
+lib/features/ride/presentation/widgets/map_placeholder.dart:60:    final icon = await BitmapDescriptor.asset(
+lib/features/ride/presentation/widgets/map_placeholder.dart:68:  void didUpdateWidget(MapPlaceholder oldWidget) {
+lib/features/ride/presentation/widgets/map_placeholder.dart:82:        if (widget.origin != null) _animateCameraTo(widget.origin!);
+lib/features/ride/presentation/widgets/map_placeholder.dart:92:    _markers.remove(const MarkerId('origin'));
+lib/features/ride/presentation/widgets/map_placeholder.dart:93:    _markers.remove(const MarkerId('destination'));
+lib/features/ride/presentation/widgets/map_placeholder.dart:96:      _markers[const MarkerId('origin')] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:97:        markerId: const MarkerId('origin'),
+lib/features/ride/presentation/widgets/map_placeholder.dart:100:        icon: BitmapDescriptor.defaultMarkerWithHue(
+lib/features/ride/presentation/widgets/map_placeholder.dart:101:            BitmapDescriptor.hueGreen),
+lib/features/ride/presentation/widgets/map_placeholder.dart:106:      _markers[const MarkerId('destination')] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:107:        markerId: const MarkerId('destination'),
+lib/features/ride/presentation/widgets/map_placeholder.dart:110:        icon: BitmapDescriptor.defaultMarkerWithHue(
+lib/features/ride/presentation/widgets/map_placeholder.dart:111:            BitmapDescriptor.hueRed),
+lib/features/ride/presentation/widgets/map_placeholder.dart:160:      final markerId = MarkerId('driver_${driver.id}');
+lib/features/ride/presentation/widgets/map_placeholder.dart:161:      _markers[markerId] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:165:            BitmapDescriptor.defaultMarkerWithHue(
+lib/features/ride/presentation/widgets/map_placeholder.dart:166:                BitmapDescriptor.hueAzure),
+lib/features/ride/presentation/widgets/map_placeholder.dart:196:    _mapController!.animateCamera(
+lib/features/ride/presentation/widgets/map_placeholder.dart:197:      CameraUpdate.newLatLngBounds(
+lib/features/ride/presentation/widgets/map_placeholder.dart:207:  void _animateCameraTo(LatLng target) {
+lib/features/ride/presentation/widgets/map_placeholder.dart:208:    _mapController?.animateCamera(
+lib/features/ride/presentation/widgets/map_placeholder.dart:228:        child: GoogleMap(
+lib/features/ride/presentation/widgets/map_placeholder.dart:242:          markers: Set<Marker>.of(_markers.values),
+lib/features/ride/presentation/widgets/map_section.dart:26:        MapPlaceholder(
+lib/features/tracking/widgets/tracking_map.dart:93:    _controller!.animateCamera(
+lib/features/tracking/widgets/tracking_map.dart:94:      CameraUpdate.newLatLngBounds(bounds, 80),
+lib/features/tracking/widgets/tracking_map.dart:129:    _controller!.animateCamera(
+lib/features/tracking/widgets/tracking_map.dart:160:    _controller!.animateCamera(
+lib/features/tracking/widgets/tracking_map.dart:176:      _controller!.animateCamera(
+lib/features/tracking/widgets/tracking_map.dart:184:      _controller!.animateCamera(
+lib/features/tracking/widgets/tracking_map.dart:202:        GoogleMap(
+lib/features/tracking/widgets/tracking_map.dart:209:          markers: _buildMarkers(),
+lib/features/home/presentation/home_screen.dart:208:        _mapController?.animateCamera(
+lib/features/home/presentation/home_screen.dart:212:      _updateUserMarker(ll);
+lib/features/home/presentation/home_screen.dart:247:        _updateUserMarker(ll);
+lib/features/home/presentation/home_screen.dart:268:      final ms = MarkerService.instance;
+lib/features/home/presentation/home_screen.dart:270:        _markers.add(Marker(
+lib/features/home/presentation/home_screen.dart:271:          markerId: MarkerId('driver_${d.id}'),
+lib/features/home/presentation/home_screen.dart:285:  void _updateUserMarker(LatLng pos) {
+lib/features/home/presentation/home_screen.dart:293:      _mapController?.animateCamera(
+lib/features/home/presentation/home_screen.dart:946:    return GoogleMap(
+lib/features/home/presentation/home_screen.dart:953:        await MarkerService.instance.warmUp(context);
+lib/features/home/presentation/home_screen.dart:957:          await c.animateCamera(CameraUpdate.newCameraPosition(
+lib/features/home/presentation/home_screen.dart:962:      markers: _markers,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:313:    final markerService = MarkerService.instance;
+lib/features/delivery/presentation/delivery_tracking_screen.dart:324:      Marker(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:325:        markerId: const MarkerId('pickup'),
+lib/features/delivery/presentation/delivery_tracking_screen.dart:330:      Marker(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:331:        markerId: const MarkerId('dropoff'),
+lib/features/delivery/presentation/delivery_tracking_screen.dart:337:        Marker(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:338:          markerId: const MarkerId('driver'),
+lib/widgets/common/shared_widgets.dart:214:class MapPlaceholder extends StatelessWidget {
+lib/widgets/common/shared_widgets.dart:219:  const MapPlaceholder({
+
+=== 3. Marker set handling ===
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:600:  Set<Marker> _buildMarkers() {
+lib/features/ride_tracking/ride_tracking_screen.dart:209:  Set<Marker> _buildMarkers() {
+lib/features/ride_tracking/ride_tracking_screen.dart:215:      markers.add(Marker(
+lib/features/ride_tracking/ride_tracking_screen.dart:224:      markers.add(Marker(
+lib/features/ride_tracking/ride_tracking_screen.dart:233:      markers.add(Marker(
+lib/features/ride/widgets/map_placeholder.dart:45:  final Map<MarkerId, Marker> _markers = {};
+lib/features/ride/widgets/map_placeholder.dart:90:    _markers.remove(const MarkerId('origin'));
+lib/features/ride/widgets/map_placeholder.dart:91:    _markers.remove(const MarkerId('destination'));
+lib/features/ride/widgets/map_placeholder.dart:94:      _markers[const MarkerId('origin')] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:104:      _markers[const MarkerId('destination')] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:156:    _markers.removeWhere((id, _) => id.value.startsWith('driver_'));
+lib/features/ride/widgets/map_placeholder.dart:159:      _markers[markerId] = Marker(
+lib/features/ride/widgets/map_placeholder.dart:239:          markers: Set<Marker>.of(_markers.values),
+lib/features/ride/presentation/widgets/map_placeholder.dart:43:  final Map<MarkerId, Marker> _markers = {};
+lib/features/ride/presentation/widgets/map_placeholder.dart:92:    _markers.remove(const MarkerId('origin'));
+lib/features/ride/presentation/widgets/map_placeholder.dart:93:    _markers.remove(const MarkerId('destination'));
+lib/features/ride/presentation/widgets/map_placeholder.dart:96:      _markers[const MarkerId('origin')] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:106:      _markers[const MarkerId('destination')] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:157:    _markers.removeWhere((id, _) => id.value.startsWith('driver_'));
+lib/features/ride/presentation/widgets/map_placeholder.dart:161:      _markers[markerId] = Marker(
+lib/features/ride/presentation/widgets/map_placeholder.dart:242:          markers: Set<Marker>.of(_markers.values),
+lib/features/tracking/widgets/tracking_map.dart:17:  final Set<Marker>? additionalMarkers;
+lib/features/tracking/widgets/tracking_map.dart:224:  Set<Marker> _buildMarkers() {
+lib/features/home/presentation/home_screen.dart:88:  final Set<Marker> _markers = {};
+lib/features/home/presentation/home_screen.dart:267:      _markers.removeWhere((m) => m.markerId.value.startsWith('driver_'));
+lib/features/home/presentation/home_screen.dart:270:        _markers.add(Marker(
+lib/features/home/presentation/home_screen.dart:895:        _markers.where((m) => m.markerId.value.startsWith('driver_')).length;
+lib/features/home/presentation/home_screen.dart:962:      markers: _markers,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:312:  Set<Marker> _buildMarkers() {
+
+=== 4. Tracking and matching screens ===
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:307:            builder: (_) => TripCompleteScreen(
+lib/features/ride_tracking/ride_tracking_screen.dart:56:class RideTrackingScreen extends StatefulWidget {
+lib/features/ride_tracking/ride_tracking_screen.dart:58:  const RideTrackingScreen({super.key, required this.tripId});
+lib/features/ride_tracking/ride_tracking_screen.dart:61:  State<RideTrackingScreen> createState() => _RideTrackingScreenState();
+lib/features/ride_tracking/ride_tracking_screen.dart:64:class _RideTrackingScreenState extends State<RideTrackingScreen>
+lib/features/ride_tracking/ride_tracking_screen.dart:349:              builder: (_) => TripCompleteScreen(
+lib/features/root/passenger_root_shell.dart:197:          builder: (context) => RideTrackingScreen(
+lib/features/ride/presentation/screens/driver_matching_screen.dart:11:class DriverMatchingScreen extends StatefulWidget {
+lib/features/ride/presentation/screens/driver_matching_screen.dart:17:  const DriverMatchingScreen({
+lib/features/ride/presentation/screens/driver_matching_screen.dart:26:  State<DriverMatchingScreen> createState() => _DriverMatchingScreenState();
+lib/features/ride/presentation/screens/driver_matching_screen.dart:29:class _DriverMatchingScreenState extends State<DriverMatchingScreen>
+lib/features/ride/presentation/book_ride_screen.dart:487:          builder: (_) => DriverMatchingScreen(
+lib/features/ride/presentation/driver_matching_screen.dart:11:class DriverMatchingScreen extends ConsumerStatefulWidget {
+lib/features/ride/presentation/driver_matching_screen.dart:17:  const DriverMatchingScreen({
+lib/features/ride/presentation/driver_matching_screen.dart:26:  ConsumerState<DriverMatchingScreen> createState() =>
+lib/features/ride/presentation/driver_matching_screen.dart:27:      _DriverMatchingScreenState();
+lib/features/ride/presentation/driver_matching_screen.dart:30:class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
+lib/features/ride/presentation/trip_complete_screen.dart:10:class TripCompleteScreen extends StatefulWidget {
+lib/features/ride/presentation/trip_complete_screen.dart:22:  const TripCompleteScreen({
+lib/features/ride/presentation/trip_complete_screen.dart:36:  State<TripCompleteScreen> createState() => _TripCompleteScreenState();
+lib/features/ride/presentation/trip_complete_screen.dart:39:class _TripCompleteScreenState extends State<TripCompleteScreen>
+lib/features/ride/presentation/trip_complete_screen.dart:58:  // ✅ Safe initials — identical pattern to RideTrackingScreen
+lib/features/delivery/presentation/delivery_tracking_screen.dart:50:            builder: (_) => TripCompleteScreen(
+lib/main.dart:357:        builder: (context) => RideTrackingScreen(tripId: tripId),
+
+=== 5. Route / polyline ===
+lib/core/utils/vehicle_icons.dart:11:      _            => Icons.directions_car_rounded,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:366:  late final RouteService _routeService;
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:367:  Set<Polyline> _polylines = {};
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:386:    GasOrderStatus.driverEnRoute: Icons.directions_bike_rounded,
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:410:    _routeService = RouteService();
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:427:    final result = await _routeService.getRoute(pickup, dropoff);
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:432:          Polyline(
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:433:            polylineId: const PolylineId('main_route'),
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:444:          Polyline(
+lib/features/gas/presentation/screens/gas_order_tracking_screen.dart:445:            polylineId: const PolylineId('shadow_route'),
+lib/features/history/presentation/history_screen.dart:185:    (label: 'Rides',      icon: Icons.directions_car_rounded),
+lib/features/history/presentation/history_screen.dart:606:    HistoryItemType.ride     => Icons.directions_car_rounded,
+lib/features/wallet/presentation/screens/wallet_screen.dart:100:    'Rides': Icons.directions_car_rounded,
+lib/features/wallet/presentation/screens/wallet_screen.dart:688:            icon: Icons.directions_car_rounded,
+lib/features/wallet/presentation/widgets/transaction_tile.dart:147:      return Icons.directions_car_rounded;
+lib/features/ride_tracking/ride_tracking_screen.dart:75:  final _routeService = RouteService();
+lib/features/ride_tracking/ride_tracking_screen.dart:76:  Set<Polyline> _routePolyline = {};
+lib/features/ride_tracking/ride_tracking_screen.dart:100:      icon: Icons.directions_car_rounded,
+lib/features/ride_tracking/ride_tracking_screen.dart:194:        await _routeService.getRoute(_pickupLatLng!, _dropoffLatLng!);
+lib/features/ride_tracking/ride_tracking_screen.dart:197:        _routePolyline = {
+lib/features/ride_tracking/ride_tracking_screen.dart:198:          Polyline(
+lib/features/ride_tracking/ride_tracking_screen.dart:199:            polylineId: const PolylineId('route'),
+lib/features/ride_tracking/ride_tracking_screen.dart:587:                      polylines: _routePolyline,
+lib/features/ride_tracking/ride_tracking_screen.dart:664:          Icons.directions_car_rounded,
+lib/features/ride/widgets/map_placeholder.dart:9:// ✅ RouteService injected via Riverpod — swappable in tests
+lib/features/ride/widgets/map_placeholder.dart:46:  final Set<Polyline> _polylines = {};
+lib/features/ride/widgets/map_placeholder.dart:124:    final result = await ref.read(routeServiceProvider).getRoute(
+lib/features/ride/widgets/map_placeholder.dart:135:        _polylines.add(Polyline(
+lib/features/ride/widgets/map_placeholder.dart:136:          polylineId: const PolylineId('route'),
+lib/features/ride/models/ride_option.dart:27:        return Icons.directions_car_rounded;
+lib/features/ride/services/ride_options_service.dart:9:      icon: Icons.directions_car_rounded,
+lib/features/ride/services/route_service.dart:29:class RouteService {
+lib/features/ride/services/route_service.dart:31:  RouteService({http.Client? client}) : _client = client ?? http.Client();
+lib/features/ride/services/route_service.dart:33:  Future<RouteResult?> getRoute(LatLng origin, LatLng destination) async {
+lib/features/ride/services/route_service.dart:36:      '/maps/api/directions/json',
+lib/features/ride/services/route_service.dart:65:      final points = _decodePolyline(encoded);
+lib/features/ride/services/route_service.dart:78:  List<LatLng> _decodePolyline(String encoded) {
+lib/features/ride/services/route_service.dart:111:final routeServiceProvider = Provider<RouteService>(
+lib/features/ride/services/route_service.dart:112:  (_) => RouteService(),
+lib/features/ride/repositories/place_repository.dart:83:      icon: Icons.directions_bus_rounded,
+lib/features/ride/presentation/screens/driver_matching_screen.dart:319:              child: const Icon(Icons.directions_car_rounded,
+lib/features/ride/presentation/screens/driver_matching_screen.dart:432:              icon:  Icons.directions_car_rounded,
+lib/features/ride/presentation/widgets/map_placeholder.dart:9:// ✅ RouteService injected via Riverpod — swappable in tests
+lib/features/ride/presentation/widgets/map_placeholder.dart:44:  final Set<Polyline> _polylines = {};
+lib/features/ride/presentation/widgets/map_placeholder.dart:126:    final result = await ref.read(routeServiceProvider).getRoute(
+lib/features/ride/presentation/widgets/map_placeholder.dart:137:        _polylines.add(Polyline(
+lib/features/ride/presentation/widgets/map_placeholder.dart:138:          polylineId: const PolylineId('route'),
+lib/features/ride/presentation/book_ride_screen.dart:343:        final route = await ref.read(routeServiceProvider).getRoute(
+lib/features/ride/presentation/driver_matching_screen.dart:575:      return const _VehicleInfo(Icons.directions_car_rounded, 'Taxi');
+lib/features/ride/presentation/driver_matching_screen.dart:579:        Icons.directions_car_rounded, raw.isEmpty ? 'Ride' : raw);
+lib/features/profile/presentation/promotions_screen.dart:25:        icon: Icons.directions_car_rounded),
+lib/features/tracking/widgets/tracking_map.dart:18:  final Set<Polyline>? polylines;
+lib/features/tracking/widgets/tracking_constants.dart:8:  // Polyline styling
+lib/features/home/extensions/service_type_extensions.dart:29:        return Icons.directions_car_rounded;
+lib/features/delivery/presentation/delivery_vehicle_screen.dart:123:      final result = await ref.read(routeServiceProvider).getRoute(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:114:  late final RouteService _routeService;
+lib/features/delivery/presentation/delivery_tracking_screen.dart:115:  Set<Polyline> _polylines = {};
+lib/features/delivery/presentation/delivery_tracking_screen.dart:130:    DeliveryStatus.pickupEnroute: Icons.directions_rounded,
+lib/features/delivery/presentation/delivery_tracking_screen.dart:141:    _routeService = RouteService();
+lib/features/delivery/presentation/delivery_tracking_screen.dart:158:    final result = await _routeService.getRoute(pickup, dropoff);
+lib/features/delivery/presentation/delivery_tracking_screen.dart:162:          Polyline(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:163:            polylineId: const PolylineId('main_route'),
+lib/features/delivery/presentation/delivery_tracking_screen.dart:171:          Polyline(
+lib/features/delivery/presentation/delivery_tracking_screen.dart:172:            polylineId: const PolylineId('shadow_route'),
+lib/features/notification/models/notification_item.dart:43:    'ride'     => Icons.directions_car_rounded,
+lib/features/auth/widgets/auth_widgets.dart:229:            Icons.directions_car_rounded,
+
+=== 6. Marker assets declared + present ===
+92:  image_path: "assets/icons/app_icon.png"
+100:  assets:
+101:    - assets/images/
+102:    - assets/images/services/
+103:    - assets/icons/
+104:    - assets/logos/
+105:    - assets/markers/
+113:  #       - asset: assets/fonts/Poppins-Regular.ttf
+115:  #       - asset: assets/fonts/Poppins-Medium.ttf
+117:  #       - asset: assets/fonts/Poppins-SemiBold.ttf
+119:  #       - asset: assets/fonts/Poppins-Bold.ttf
+123:  #       - asset: assets/fonts/Inter-Regular.ttf
+125:  #       - asset: assets/fonts/Inter-Medium.ttf
+127:  #       - asset: assets/fonts/Inter-Bold.ttf
+assets/images/services/taxi.jpeg
+assets/images/services/okada.jpeg
+assets/images/services/pragya.jpeg
+assets/icons/motorcycle_marker.png
+assets/markers
+assets/markers/marker_motorbike.png
+assets/markers/marker_taxi.png
+assets/markers/2.0x/marker_motorbike.png
+assets/markers/2.0x/marker_taxi.png
+assets/markers/2.0x/marker_minitruck.png
+assets/markers/2.0x/marker_tricycle.png
+assets/markers/marker_minitruck.png
+assets/markers/3.0x/marker_motorbike.png
+assets/markers/3.0x/marker_taxi.png
+assets/markers/3.0x/marker_minitruck.png
+assets/markers/3.0x/marker_tricycle.png
+assets/markers/marker_tricycle.png
+
+=== 7. Lifecycle: cancel / dispose in files with maps ===
+--- lib/features/ride_tracking/ride_tracking_screen.dart
+84:  StreamSubscription<DocumentSnapshot>? _tripSub;
+547:  void dispose() {
+549:    _tripSub?.cancel();
+550:    _mapController?.dispose();
+551:    super.dispose();
+--- lib/features/ride/widgets/map_placeholder.dart
+217:    ref.listen(driversNearbyProvider, (_, next) {
+--- lib/features/ride/presentation/widgets/map_placeholder.dart
+220:    ref.listen(driversNearbyProvider, (_, next) {
+--- lib/features/tracking/widgets/tracking_map.dart
+72:    _autoFitTimer?.cancel();
+81:    _followTimer?.cancel();
+191:  void dispose() {
+192:    _autoFitTimer?.cancel();
+193:    _followTimer?.cancel();
+194:    _controller?.dispose();
+195:    super.dispose();
+--- lib/features/home/presentation/home_screen.dart
+42:  final svc = ref.watch(driverAvailabilityServiceProvider);
+48:  final uid = ref.watch(userIdProvider);
+91:  StreamSubscription<Position>? _locationSub;
+232:    _locationSub?.cancel();
+290:    _debounceTimer?.cancel();
+385:  void dispose() {
+386:    _debounceTimer?.cancel();
+387:    _mapController?.dispose();
+388:    _locationSub?.cancel();
+391:    super.dispose();
+401:    ref.listen<AsyncValue<List<NearbyDriver>>>(
+444:    final user = ref.watch(currentUserProvider).value;
+483:              final count = ref.watch(unreadNotifCountProvider).value ?? 0;
+532:    final balanceAsync = ref.watch(walletBalanceProvider);
+620:    final placesAsync = ref.watch(savedPlacesProvider);
+1027:    final uid = ref.watch(userIdProvider);
+1135:    final promoAsync = ref.watch(promoBannerProvider);
+1208:  void dispose() {
+1209:    _c.dispose();
+1210:    super.dispose();
+
+=== 8. Files that contain a GoogleMap ===
+lib/features/ride_tracking/ride_tracking_screen.dart
+lib/features/ride/widgets/map_placeholder.dart
+lib/features/ride/presentation/widgets/map_placeholder.dart
+lib/features/tracking/widgets/tracking_map.dart
+lib/features/home/presentation/home_screen.dart

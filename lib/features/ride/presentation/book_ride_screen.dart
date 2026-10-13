@@ -15,8 +15,10 @@ import '../../../core/services/pricing_service.dart';
 import '../../../core/services/escrow_service.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/theme/cts_theme.dart';
 import '../../bookings/service_request_manager.dart';
 import '../constants/ride_constants.dart';
+import '../domain/ride_fare_estimate.dart';
 import '../providers/ride_request_provider.dart';
 import '../providers/wallet_provider.dart';
 import '../widgets/active_request_banner.dart';
@@ -143,36 +145,51 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
     }
   }
 
+  // GPS state for the pickup row (only used when Home had no real fix).
+  bool _locatingPickup = false;
+  bool _pickupFailed = false;
+
   Future<void> _initUserLocation() async {
+    if (mounted) {
+      setState(() {
+        _locatingPickup = true;
+        _pickupFailed = false;
+      });
+    }
+    final Position position;
     try {
-      final position = await Geolocator.getCurrentPosition(
+      position = await Geolocator.getCurrentPosition(
         locationSettings:
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
-      final placemarks =
-          await placemarkFromCoordinates(position.latitude, position.longitude);
-      final place = placemarks.first;
-      final address = place.street ??
-          place.subLocality ??
-          place.locality ??
-          'Current location';
-      if (mounted) {
-        ref.read(rideRequestProvider.notifier).setOrigin(
-              address,
-              GeoPoint(position.latitude, position.longitude),
-            );
-      }
     } catch (_) {
+      // Never invent a pickup: a default point would send a driver somewhere
+      // the customer never chose. Leave it unset; the sheet offers a retry
+      // and booking stays blocked until a real location is known.
       if (mounted) {
-        ref.read(rideRequestProvider.notifier).setOrigin(
-              RideConstants.defaultOrigin,
-              GeoPoint(
-                RideConstants.defaultPickupCoordinates.latitude,
-                RideConstants.defaultPickupCoordinates.longitude,
-              ),
-            );
+        setState(() {
+          _locatingPickup = false;
+          _pickupFailed = true;
+        });
       }
+      return;
     }
+
+    // The position is real even if reverse geocoding fails.
+    var address = 'Current location';
+    try {
+      final place = (await placemarkFromCoordinates(
+              position.latitude, position.longitude))
+          .first;
+      address = place.street ?? place.subLocality ?? place.locality ?? address;
+    } catch (_) {/* keep the generic label */}
+
+    if (!mounted) return;
+    ref.read(rideRequestProvider.notifier).setOrigin(
+          address,
+          GeoPoint(position.latitude, position.longitude),
+        );
+    setState(() => _locatingPickup = false);
   }
 
   @override
@@ -230,23 +247,26 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
           builder: (context, scrollController) {
             return Container(
               decoration: const BoxDecoration(
-                color: AppColors.surface,
+                color: CtsTheme.surface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [
                   BoxShadow(
                       color: Color(0x14000000),
-                      blurRadius: 20,
-                      offset: Offset(0, -4)),
+                      blurRadius: 12,
+                      offset: Offset(0, -2)),
                 ],
               ),
               child: CustomScrollView(
                 controller: scrollController,
                 slivers: [
                   SliverToBoxAdapter(child: _buildDragHandle()),
+                  const SliverToBoxAdapter(child: _SheetTitle()),
                   SliverToBoxAdapter(
                     child: RouteSummary(
                       state: state,
                       onDestinationTap: _openDestinationSearch,
+                      locatingPickup: _locatingPickup,
+                      onRetryPickup: _pickupFailed ? _initUserLocation : null,
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -288,7 +308,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
           height: 4,
           margin: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: Colors.grey[300],
+            color: CtsTheme.border,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -467,7 +487,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
           builder: (_) => DriverMatchingScreen(
             rideType: selectedRide.serviceType.displayName,
             destination: state.destination!,
-            fare: 'GHS ${state.calculatedFare.toStringAsFixed(0)}',
+            fare: formatGhs(state.calculatedFare),
             tripId: tripId,
           ),
         ),
@@ -546,4 +566,23 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
       ),
     );
   }
+}
+
+class _SheetTitle extends StatelessWidget {
+  const _SheetTitle();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
+        child: Text(
+          'Book a ride',
+          style: TextStyle(
+            fontFamily: 'Inter',
+            color: CtsTheme.textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.4,
+          ),
+        ),
+      );
 }

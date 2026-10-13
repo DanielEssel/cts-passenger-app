@@ -10,6 +10,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/gas_pricing.dart';
 
+import '../../../../core/theme/cts_theme.dart';
+import '../../../../core/widgets/cts_ui.dart';
+import '../../../home/widgets/service_tile.dart';
+import '../../../ride/models/service_type.dart';
 import '../../theme/gas_theme.dart';
 import '../../models/gas_refill_request.dart';
 import '../../providers/gas_order_providers.dart' hide authStateProvider;
@@ -26,8 +30,7 @@ class GasOrderScreen extends ConsumerStatefulWidget {
   ConsumerState<GasOrderScreen> createState() => _GasOrderScreenState();
 }
 
-class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
-    with SingleTickerProviderStateMixin {
+class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   GasRefillType _selectedType = GasRefillType.exchangeEmpty;
   CylinderSize _selectedSize = CylinderSize.kg12_5;
   GasBrand? _selectedBrand;
@@ -39,9 +42,6 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   double _distanceKm = 5.0; // one-way estimate; defaults to 5km fallback
   bool _calculatingDistance = false;
   String _paymentMethod = 'wallet'; // 'wallet' | 'cash'
-
-  late final AnimationController _animController;
-  late final Animation<double> _fadeAnim;
 
   /// Single source of truth for this order's pricing (type-aware).
   GasPriceBreakdown get _pricing {
@@ -92,334 +92,256 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     return 0;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-    _animController.forward();
-  }
-
-  @override
-  void dispose() {
-    _animController.dispose();
-    super.dispose();
-  }
-
   // ─────────────────────────────────────────────
   // BUILD
+  //
+  // Sections live in a lazily built SliverList and render at full opacity
+  // with the page transition. The old version faded the whole form in over
+  // 600 ms on top of the transition, which forced an offscreen layer of every
+  // blurred shadow and gradient each frame (worst frame ~500 ms on first open).
   // ─────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final sections = <Widget>[
+      _buildIntroCard(),
+      _gap,
+      _buildServiceTypeSection(),
+      _gap,
+      _buildCylinderSection(),
+      if (_selectedType != GasRefillType.pickupAndReturn) ...[
+        _gap,
+        _buildBrandSection(),
+      ],
+      if (_selectedType == GasRefillType.commercialBulk) ...[
+        const SizedBox(height: 12),
+        _buildQuantitySection(),
+      ],
+      _gap,
+      _buildAddressSection(),
+      _gap,
+      _buildSafetySection(),
+      _gap,
+      const CtsSectionHeader('Payment'),
+      _buildPaymentSelector(),
+      _gap,
+      _buildPriceSummary(),
+      const SizedBox(height: 24),
+    ];
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: GasTheme.background,
-        body: Stack(
+        backgroundColor: CtsTheme.background,
+        body: Column(
           children: [
-            CustomScrollView(
-              slivers: [
-                _buildSliverHeader(),
-                SliverToBoxAdapter(
-                  child: FadeTransition(
-                    opacity: _fadeAnim,
-                    child: Column(
-                      children: [
-                        _buildStepIndicator(),
-                        const SizedBox(height: 16),
-                        _buildTrustCard(),
-                        const SizedBox(height: 24),
-                        _buildServiceTypeSection(),
-                        const SizedBox(height: 24),
-                        _buildCylinderSection(),
-                        const SizedBox(height: 24),
-                        if (_selectedType != GasRefillType.pickupAndReturn)
-                          _buildBrandSection(),
-                        if (_selectedType == GasRefillType.commercialBulk) ...[
-                          const SizedBox(height: 24),
-                          _buildQuantitySection(),
-                        ],
-                        const SizedBox(height: 24),
-                        _buildAddressSection(),
-                        const SizedBox(height: 24),
-                        _buildSafetySection(),
-                        const SizedBox(height: 24),
-                        _buildPriceSummary(),
-                        const SizedBox(height: 140),
-                      ],
+            CtsServiceHeader(
+              title: 'Cooking gas',
+              subtitle: 'Delivered to your door',
+              trailing: Semantics(
+                button: true,
+                label: 'Help',
+                excludeSemantics: true,
+                onTap: _showHelp,
+                child: Material(
+                  color: CtsTheme.surface,
+                  shape: const CircleBorder(
+                      side: BorderSide(color: CtsTheme.border)),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: _showHelp,
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(Icons.headset_mic_rounded,
+                          color: CtsTheme.textPrimary, size: 19),
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
-            _buildBottomCTA(),
+            Expanded(
+              child: CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding:
+                        const EdgeInsets.fromLTRB(ctsGutter, 6, ctsGutter, 0),
+                    sliver: SliverList.list(children: sections),
+                  ),
+                ],
+              ),
+            ),
+            _buildBottomBar(),
           ],
         ),
       ),
     );
   }
 
+  static const Widget _gap = SizedBox(height: 22);
+
+  void _toggleBrand(GasBrand brand) {
+    HapticFeedback.selectionClick();
+    setState(() => _selectedBrand = _selectedBrand == brand ? null : brand);
+  }
+
+  void _toggleSafety() {
+    HapticFeedback.selectionClick();
+    setState(() => _safetyAccepted = !_safetyAccepted);
+  }
+
   // ─────────────────────────────────────────────
-  // SLIVER HEADER
+  // INTRO — photo + progress
   // ─────────────────────────────────────────────
 
-  Widget _buildSliverHeader() => SliverAppBar(
-        expandedHeight: 200,
-        pinned: true,
-        stretch: true,
-        backgroundColor: GasTheme.primaryDark,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: Colors.white, size: 16),
-          ),
-        ),
-        actions: [
-          GestureDetector(
-            onTap: _showHelp,
-            child: Container(
-              margin: const EdgeInsets.all(8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
+  Widget _buildIntroCard() => CtsCard(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: const SizedBox(
+                width: 84,
+                child: ServiceImage(service: ServiceType.gas, aspectRatio: 1),
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.headset_mic_rounded,
-                      color: Colors.white, size: 16),
-                  SizedBox(width: 4),
-                  Text('Help',
+                  const Text('Order cooking gas',
                       style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
+                        fontFamily: 'Inter',
+                        color: CtsTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      )),
+                  const SizedBox(height: 2),
+                  const Text(
+                      'Choose a service and cylinder, then where to deliver.',
+                      style: TextStyle(
+                        color: CtsTheme.textSecondary,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      )),
+                  const SizedBox(height: 10),
+                  _buildProgress(),
                 ],
               ),
             ),
-          ),
-        ],
-        flexibleSpace: FlexibleSpaceBar(
-          stretchModes: const [StretchMode.zoomBackground],
-          background: Container(
-            decoration: const BoxDecoration(gradient: GasTheme.heroGradient),
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  // ── FIX: mainAxisSize.min stops overflow ──
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.local_fire_department_rounded,
-                            color: Colors.white,
-                            size: 22,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        // ── ETA pill moved to same row as icon ──
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.access_time_rounded,
-                                  color: Colors.white, size: 12),
-                              SizedBox(width: 4),
-                              Text('~35 mins',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500)),
-                            ],
-                          ),
-                        ),
-                      ],
+          ],
+        ),
+      );
+
+  Widget _buildProgress() {
+    const labels = ['Order', 'Delivery', 'Review'];
+    return Semantics(
+      label: 'Step ${_currentStep + 1} of 3, ${labels[_currentStep]}',
+      excludeSemantics: true,
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: i <= _currentStep
+                          ? CtsTheme.primary
+                          : CtsTheme.border,
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Order Cooking Gas',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(labels[i],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Fast · Safe · Doorstep Delivery',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: i <= _currentStep
+                            ? CtsTheme.primaryDeep
+                            : CtsTheme.textTertiary,
+                      )),
+                ],
               ),
             ),
-          ),
-        ),
-      );
-
-  // ─────────────────────────────────────────────
-  // STEP INDICATOR
-  // ─────────────────────────────────────────────
-
-  Widget _buildStepIndicator() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: BoxDecoration(
-            color: GasTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Row(
-            children: [
-              _Step(index: 0, current: _currentStep, label: 'Order'),
-              _StepConnector(active: _currentStep >= 1),
-              _Step(index: 1, current: _currentStep, label: 'Delivery'),
-              _StepConnector(active: _currentStep >= 2),
-              _Step(index: 2, current: _currentStep, label: 'Review'),
-            ],
-          ),
-        ),
-      );
+          ],
+        ],
+      ),
+    );
+  }
 
   // ─────────────────────────────────────────────
   // SERVICE TYPE
   // ─────────────────────────────────────────────
 
   Widget _buildServiceTypeSection() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _sectionTitle('Service Type', Icons.category_rounded),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: GasRefillType.values.map((type) {
-                final selected = type == _selectedType;
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _selectedType = type);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
+          const CtsSectionHeader('Service'),
+          for (final type in GasRefillType.values) ...[
+            CtsSelectableCard(
+              selected: type == _selectedType,
+              semanticLabel:
+                  '${type.displayName}, about ${_formatDuration(type.estimatedDuration)}',
+              showCheck: false,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _selectedType = type);
+              },
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
-                      gradient: selected ? GasTheme.heroGradient : null,
-                      color: selected ? null : GasTheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: selected ? Colors.transparent : GasTheme.border,
-                        width: selected ? 0 : 0.5,
-                      ),
-                      boxShadow:
-                          selected ? GasTheme.emberGlow : GasTheme.cardShadow,
+                      color: type == _selectedType
+                          ? CtsTheme.surface
+                          : CtsTheme.surfaceAlt,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Icon(type.icon,
+                        size: 20,
+                        color: type == _selectedType
+                            ? CtsTheme.primaryDeep
+                            : CtsTheme.textSecondary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? Colors.white.withValues(alpha: 0.2)
-                                : GasTheme.primaryDim,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(type.icon,
-                              size: 22,
-                              color:
-                                  selected ? Colors.white : GasTheme.primary),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                type.displayName,
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: selected
-                                      ? Colors.white
-                                      : GasTheme.textPrimary,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _formatDuration(type.estimatedDuration),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: selected
-                                      ? Colors.white70
-                                      : GasTheme.textTertiary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Selection indicator
-                        Container(
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: selected ? Colors.white : Colors.transparent,
-                            border: Border.all(
-                              color: selected
-                                  ? Colors.white
-                                  : GasTheme.textTertiary
-                                      .withValues(alpha: 0.4),
-                              width: 1.5,
-                            ),
-                          ),
-                          child: selected
-                              ? Icon(Icons.check_rounded,
-                                  size: 14, color: GasTheme.primary)
-                              : null,
-                        ),
+                        Text(type.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: CtsTheme.textPrimary,
+                            )),
+                        Text('About ${_formatDuration(type.estimatedDuration)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: CtsTheme.textSecondary,
+                            )),
                       ],
                     ),
                   ),
-                );
-              }).toList(),
+                  _RadioDot(selected: type == _selectedType),
+                ],
+              ),
             ),
-          ),
+            const SizedBox(height: 8),
+          ],
         ],
       );
 
@@ -427,127 +349,124 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // CYLINDER SIZE
   // ─────────────────────────────────────────────
 
-  Widget _buildCylinderSection() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _sectionTitle('Cylinder Size', Icons.propane_tank_rounded),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 0.92,
-              ),
-              itemCount: CylinderSize.values.length,
-              itemBuilder: (_, i) {
-                final size = CylinderSize.values[i];
-                final selected = size == _selectedSize;
-                final isPopular =
-                    size == CylinderSize.kg14_5; // common household
+  // Per-cylinder price for the selected service, from the same price lists
+  // GasPricing charges (new cylinders use the full-cylinder price).
+  double _unitPriceFor(CylinderSize size) =>
+      _selectedType == GasRefillType.newCylinder
+          ? size.fullCylinderPrice
+          : size.refillPrice;
 
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _selectedSize = size);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      gradient: selected ? GasTheme.heroGradient : null,
-                      color: selected ? null : GasTheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: selected ? Colors.transparent : GasTheme.border,
-                        width: selected ? 0 : 0.5,
-                      ),
-                      boxShadow:
-                          selected ? GasTheme.emberGlow : GasTheme.cardShadow,
-                    ),
-                    child: Stack(
-                      children: [
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? Colors.white.withValues(alpha: 0.2)
-                                    : GasTheme.primaryDim,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(
-                                Icons.propane_tank_rounded,
-                                size: 17,
-                                color:
-                                    selected ? Colors.white : GasTheme.primary,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              size.displayName,
-                              style: TextStyle(
+  Widget _buildCylinderSection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CtsSectionHeader('Cylinder size',
+              caption: _selectedType == GasRefillType.newCylinder
+                  ? 'Price per new cylinder'
+                  : 'Price per refill'),
+          LayoutBuilder(builder: (_, c) {
+            const spacing = 8.0;
+            final w = (c.maxWidth - spacing * 2) / 3;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final size in CylinderSize.values)
+                  SizedBox(
+                    width: w,
+                    child: CtsSelectableCard(
+                      selected: size == _selectedSize,
+                      semanticLabel:
+                          '${size.displayName}, ₵${_unitPriceFor(size).toStringAsFixed(0)}',
+                      padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _selectedSize = size);
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.propane_tank_rounded,
+                              size: 20,
+                              color: size == _selectedSize
+                                  ? CtsTheme.primaryDeep
+                                  : CtsTheme.textSecondary),
+                          const SizedBox(height: 8),
+                          Text(size.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
                                 fontFamily: 'Inter',
-                                fontSize: 14,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w800,
-                                color: selected
-                                    ? Colors.white
-                                    : GasTheme.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '₵${size.refillPrice.toStringAsFixed(0)}',
-                              style: TextStyle(
+                                color: CtsTheme.textPrimary,
+                              )),
+                          Text('₵${_unitPriceFor(size).toStringAsFixed(0)}',
+                              maxLines: 1,
+                              style: const TextStyle(
                                 fontFamily: 'Inter',
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w700,
+                                color: CtsTheme.primaryDeep,
+                              )),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          }),
+        ],
+      );
+
+  // ─────────────────────────────────────────────
+  // BRAND (optional)
+  // ─────────────────────────────────────────────
+
+  Widget _buildBrandSection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CtsSectionHeader('Preferred brand',
+              caption: _selectedBrand == null
+                  ? 'Optional · any brand if none chosen'
+                  : 'Tap again to clear'),
+          SizedBox(
+            height: 44,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: GasBrand.values.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final brand = GasBrand.values[i];
+                final selected = brand == _selectedBrand;
+                return Semantics(
+                  button: true,
+                  selected: selected,
+                  label: brand.displayName,
+                  excludeSemantics: true,
+                  onTap: () => _toggleBrand(brand),
+                  child: Material(
+                    color: selected ? CtsTheme.primary : CtsTheme.surface,
+                    shape: StadiumBorder(
+                      side: BorderSide(
+                          color: selected ? CtsTheme.primary : CtsTheme.border),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => _toggleBrand(brand),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Center(
+                          child: Text(brand.displayName,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
                                 color: selected
-                                    ? Colors.white70
-                                    : GasTheme.primary,
-                              ),
-                            ),
-                          ],
+                                    ? Colors.white
+                                    : CtsTheme.textPrimary,
+                              )),
                         ),
-                        // Check when selected (top-right)
-                        if (selected)
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                              ),
-                              child: Icon(Icons.check_rounded,
-                                  size: 12, color: GasTheme.primary),
-                            ),
-                          ),
-                        // "Popular" dot when not selected (small, top-right)
-                        if (isPopular && !selected)
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: GasTheme.primary,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
+                      ),
                     ),
                   ),
                 );
@@ -558,113 +477,15 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       );
 
   // ─────────────────────────────────────────────
-  // BRAND
+  // QUANTITY (commercial only)
   // ─────────────────────────────────────────────
 
-  Widget _buildBrandSection() => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: GasTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: GasTheme.border),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              tilePadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              leading: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: GasTheme.primaryDim,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Icon(Icons.business_rounded,
-                    color: GasTheme.primary, size: 16),
-              ),
-              title: Text('Preferred Brand',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: GasTheme.textPrimary,
-                  )),
-              subtitle: Text(
-                _selectedBrand?.displayName ?? 'Optional · tap to choose',
-                style: TextStyle(fontSize: 12, color: GasTheme.textTertiary),
-              ),
-              children: [
-                SizedBox(
-                  height: 44,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: GasBrand.values.length,
-                    itemBuilder: (_, i) {
-                      final brand = GasBrand.values[i];
-                      final selected = brand == _selectedBrand;
-                      return GestureDetector(
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(
-                              () => _selectedBrand = selected ? null : brand);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? GasTheme.primary
-                                : GasTheme.surfaceAlt,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(
-                              color:
-                                  selected ? GasTheme.primary : GasTheme.border,
-                            ),
-                          ),
-                          child: Text(
-                            brand.displayName,
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: selected
-                                  ? Colors.white
-                                  : GasTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-
-  // ─────────────────────────────────────────────
-  // QUANTITY
-  // ─────────────────────────────────────────────
-
-  Widget _buildQuantitySection() => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: GasTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Row(
-            children: [
-              Column(
+  Widget _buildQuantitySection() => CtsCard(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Quantity',
@@ -672,104 +493,44 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
                         fontFamily: 'Inter',
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: GasTheme.textPrimary,
+                        color: CtsTheme.textPrimary,
                       )),
                   Text('Number of cylinders',
                       style: TextStyle(
-                          fontSize: 12, color: GasTheme.textTertiary)),
+                          fontSize: 12, color: CtsTheme.textSecondary)),
                 ],
               ),
-              const Spacer(),
-              _QtyBtn(
-                icon: Icons.remove_rounded,
-                onTap: () {
-                  if (_quantity > 1) {
-                    HapticFeedback.selectionClick();
-                    setState(() => _quantity--);
-                  }
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  '$_quantity',
-                  style: TextStyle(
+            ),
+            _QtyBtn(
+              icon: Icons.remove_rounded,
+              label: 'Fewer cylinders',
+              onTap: _quantity > 1
+                  ? () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _quantity--);
+                    }
+                  : null,
+            ),
+            SizedBox(
+              width: 44,
+              child: Text('$_quantity',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
-                    color: GasTheme.textPrimary,
-                  ),
-                ),
-              ),
-              _QtyBtn(
-                icon: Icons.add_rounded,
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _quantity++);
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-
-  // ─────────────────────────────────────────────
-  // TRUST CARD
-  // ─────────────────────────────────────────────
-
-  Widget _buildTrustCard() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: GasTheme.cardGradient,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.15)),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.verified_user_rounded,
-                      color: GasTheme.primary, size: 18),
-                  const SizedBox(width: 8),
-                  Text('Why CTS Gas',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: GasTheme.textPrimary,
-                      )),
-                  const Spacer(),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: GasTheme.primaryDim,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text('~35 min avg',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: GasTheme.primary,
-                        )),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: const [
-                  _TrustChip(
-                      Icons.local_shipping_rounded, 'Licensed\npartners'),
-                  _TrustChip(Icons.verified_rounded, 'Verified\nsuppliers'),
-                  _TrustChip(Icons.shield_rounded, 'Inspected\ncylinders'),
-                  _TrustChip(Icons.my_location_rounded, 'Live\ntracking'),
-                ],
-              ),
-            ],
-          ),
+                    color: CtsTheme.textPrimary,
+                  )),
+            ),
+            _QtyBtn(
+              icon: Icons.add_rounded,
+              label: 'More cylinders',
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _quantity++);
+              },
+            ),
+          ],
         ),
       );
 
@@ -777,510 +538,328 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
   // ADDRESS
   // ─────────────────────────────────────────────
 
-  Widget _buildAddressSection() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _sectionTitle('Delivery Address', Icons.location_on_rounded),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: GestureDetector(
+  Widget _buildAddressSection() {
+    final hasAddress = _deliveryAddress != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const CtsSectionHeader('Delivery address'),
+        Semantics(
+          button: true,
+          label: hasAddress
+              ? 'Delivery address, $_deliveryAddress. Change'
+              : 'Set your delivery location',
+          excludeSemantics: true,
+          onTap: _selectAddress,
+          child: Material(
+            color: CtsTheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: hasAddress ? CtsTheme.primary : CtsTheme.border,
+                width: hasAddress ? 1.5 : 1,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
               onTap: _selectAddress,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: GasTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _deliveryAddress != null
-                        ? GasTheme.primary.withValues(alpha: 0.4)
-                        : GasTheme.border,
-                    width: _deliveryAddress != null ? 1.5 : 0.5,
-                  ),
-                  boxShadow: GasTheme.cardShadow,
-                ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
                     Container(
-                      width: 44,
-                      height: 44,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
-                        gradient: _deliveryAddress != null
-                            ? GasTheme.heroGradient
-                            : null,
-                        color: _deliveryAddress != null
-                            ? null
-                            : GasTheme.surfaceAlt,
+                        color: hasAddress
+                            ? CtsTheme.primaryTint
+                            : CtsTheme.surfaceAlt,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(
-                        Icons.location_on_rounded,
-                        color: _deliveryAddress != null
-                            ? Colors.white
-                            : GasTheme.textTertiary,
-                        size: 20,
-                      ),
+                      child: Icon(Icons.location_on_rounded,
+                          size: 20,
+                          color: hasAddress
+                              ? CtsTheme.primaryDeep
+                              : CtsTheme.textSecondary),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _deliveryAddress != null
-                                ? 'Delivery Address'
-                                : 'Select location',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: _deliveryAddress != null
-                                  ? GasTheme.primary
-                                  : GasTheme.textTertiary,
+                            hasAddress
+                                ? 'Deliver to'
+                                : 'Where should we deliver?',
+                            style: const TextStyle(
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
+                              color: CtsTheme.textSecondary,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            _deliveryAddress ??
-                                'Tap to set your delivery location',
+                            _deliveryAddress ?? 'Tap to set your location',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 14,
-                              fontWeight: _deliveryAddress != null
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: _deliveryAddress != null
-                                  ? GasTheme.textPrimary
-                                  : GasTheme.textTertiary,
+                              fontWeight: hasAddress
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: hasAddress
+                                  ? CtsTheme.textPrimary
+                                  : CtsTheme.textTertiary,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
                     ),
-                    Icon(
-                      _deliveryAddress != null
-                          ? Icons.edit_rounded
-                          : Icons.chevron_right_rounded,
-                      color: _deliveryAddress != null
-                          ? GasTheme.primary
-                          : GasTheme.textTertiary,
-                      size: 18,
-                    ),
+                    const SizedBox(width: 8),
+                    Text(hasAddress ? 'Change' : 'Set',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: CtsTheme.primaryDeep,
+                        )),
                   ],
                 ),
               ),
             ),
           ),
-          // ── Delivery expectations (ETA + fee) ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: GasTheme.surfaceAlt,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Icon(Icons.access_time_rounded,
-                            color: GasTheme.primary, size: 16),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Est. delivery',
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    color: GasTheme.textTertiary)),
-                            Text(_etaText,
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: GasTheme.textPrimary,
-                                )),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(width: 1, height: 28, color: GasTheme.border),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 16),
-                      child: Row(
-                        children: [
-                          Icon(Icons.local_shipping_rounded,
-                              color: GasTheme.primary, size: 16),
-                          const SizedBox(width: 8),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(_pricing.deliveryLabel,
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      color: GasTheme.textTertiary)),
-                              Text('₵${_deliveryFee.toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    fontFamily: 'Inter',
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: GasTheme.textPrimary,
-                                  )),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: CtsTheme.surfaceAlt,
+            borderRadius: BorderRadius.circular(14),
           ),
-        ],
-      );
+          child: Row(
+            children: [
+              Expanded(
+                child: _InfoPair(
+                  icon: Icons.access_time_rounded,
+                  label: 'Est. delivery',
+                  value: _etaText,
+                ),
+              ),
+              Container(width: 1, height: 28, color: CtsTheme.border),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _InfoPair(
+                  icon: Icons.local_shipping_rounded,
+                  label: _pricing.deliveryLabel,
+                  value: _calculatingDistance
+                      ? 'Calculating…'
+                      : '₵${_deliveryFee.toStringAsFixed(2)}',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   // ─────────────────────────────────────────────
   // SAFETY CHECKLIST
   // ─────────────────────────────────────────────
 
-  Widget _buildSafetySection() => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: GasTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _safetyAccepted
-                  ? GasTheme.success.withValues(alpha: 0.3)
-                  : GasTheme.border,
-            ),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: GasTheme.success.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.shield_rounded,
-                        color: GasTheme.success, size: 18),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Safety Checklist',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: GasTheme.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _SafetyItem('Valid empty cylinder ready for exchange',
-                  'Ensure cylinder is not expired and has valid certification'),
-              const SizedBox(height: 10),
-              _SafetyItem('Cylinder in good condition — no leaks or damage',
-                  'Check for rust, dents, or damaged valves'),
-              const SizedBox(height: 10),
-              _SafetyItem('I understand gas safety guidelines',
-                  'Keep upright, away from heat, in ventilated area'),
-              Divider(height: 24, color: GasTheme.border),
-              GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _safetyAccepted = !_safetyAccepted);
-                },
-                child: Row(
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: _safetyAccepted
-                            ? GasTheme.success
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: _safetyAccepted
-                              ? GasTheme.success
-                              : GasTheme.textTertiary,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: _safetyAccepted
-                          ? const Icon(Icons.check_rounded,
-                              color: Colors.white, size: 14)
-                          : null,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'I confirm all safety requirements are met',
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: GasTheme.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  // ─────────────────────────────────────────────
-  // PRICE SUMMARY
-  // ─────────────────────────────────────────────
-
-  Widget _buildPriceSummary() => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: GasTheme.cardGradient,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.15)),
-            boxShadow: GasTheme.cardShadow,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.receipt_long_rounded,
-                      color: GasTheme.primary, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Order Summary',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: GasTheme.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _PriceLine(
-                label:
-                    '${_pricing.unitLabel} · ${_selectedSize.displayName} × $_quantity',
-                value: '₵${_basePrice.toStringAsFixed(2)}',
-              ),
-              const SizedBox(height: 8),
-              _PriceLine(
-                  label: _pricing.deliveryLabel,
-                  value: '₵${_deliveryFee.toStringAsFixed(2)}'),
-              if (_brandPremium > 0) ...[
-                const SizedBox(height: 8),
-                _PriceLine(
-                  label: '${_selectedBrand!.displayName} premium',
-                  value: '₵${_brandPremium.toStringAsFixed(2)}',
-                ),
-              ],
-              Divider(height: 24, color: GasTheme.border),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Total',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: GasTheme.textPrimary,
-                      )),
-                  Text(
-                    '₵${_total.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: GasTheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-
-  // ─────────────────────────────────────────────
-  // BOTTOM CTA
-  // ─────────────────────────────────────────────
-
-  Widget _buildBottomCTA() => Positioned(
-        bottom: 0,
-        left: 0,
-        right: 0,
-        child: Container(
-          padding: EdgeInsets.fromLTRB(
-              20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
-          decoration: BoxDecoration(
-            color: GasTheme.surface,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, -4),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!_isOrderValid()) _buildValidationHint(),
-              if (!_isOrderValid()) const SizedBox(height: 10),
-              _buildPaymentSelector(),
-              GestureDetector(
-                onTap: _isSubmitting || !_isOrderValid() ? null : _placeOrder,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  decoration: BoxDecoration(
-                    gradient: _isOrderValid() && !_isSubmitting
-                        ? GasTheme.heroGradient
-                        : null,
-                    color: _isOrderValid() && !_isSubmitting
-                        ? null
-                        : GasTheme.border,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: _isOrderValid() && !_isSubmitting
-                        ? GasTheme.emberGlow
-                        : [],
-                  ),
-                  child: Center(
-                    child: _isSubmitting
-                        ? const SizedBox(
+  Widget _buildSafetySection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const CtsSectionHeader('Safety checklist',
+              caption: 'Please confirm before we send a driver'),
+          CtsCard(
+            borderColor: _safetyAccepted ? CtsTheme.primary : null,
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+            child: Column(
+              children: [
+                const _SafetyItem('Valid empty cylinder ready for exchange',
+                    'Ensure cylinder is not expired and has valid certification'),
+                const SizedBox(height: 10),
+                const _SafetyItem(
+                    'Cylinder in good condition — no leaks or damage',
+                    'Check for rust, dents, or damaged valves'),
+                const SizedBox(height: 10),
+                const _SafetyItem('I understand gas safety guidelines',
+                    'Keep upright, away from heat, in ventilated area'),
+                const Divider(height: 20, color: CtsTheme.border),
+                Semantics(
+                  checked: _safetyAccepted,
+                  label: 'I confirm all safety requirements are met',
+                  excludeSemantics: true,
+                  onTap: _toggleSafety,
+                  child: InkWell(
+                    onTap: _toggleSafety,
+                    borderRadius: BorderRadius.circular(10),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
                             width: 22,
                             height: 22,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2.5, color: Colors.white),
-                          )
-                        : Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.local_fire_department_rounded,
-                                  color: Colors.white, size: 18),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Confirm Gas Order  •  ₵${_total.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                ),
+                            decoration: BoxDecoration(
+                              color: _safetyAccepted
+                                  ? CtsTheme.primary
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: _safetyAccepted
+                                    ? CtsTheme.primary
+                                    : CtsTheme.textTertiary,
+                                width: 1.5,
                               ),
-                            ],
+                            ),
+                            child: _safetyAccepted
+                                ? const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 15)
+                                : null,
                           ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'I confirm all safety requirements are met',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: CtsTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  Widget _buildValidationHint() {
-    final hints = <String>[];
-    if (_deliveryAddress == null) hints.add('Select a delivery address');
-    if (!_safetyAccepted) hints.add('Accept the safety checklist');
-    if (hints.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: GasTheme.warning.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: GasTheme.warning.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline_rounded, color: GasTheme.warning, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              hints.join(' · '),
-              style: TextStyle(
-                fontSize: 12,
-                color: GasTheme.warning,
-                fontWeight: FontWeight.w500,
-              ),
+              ],
             ),
           ),
         ],
+      );
+
+  // ─────────────────────────────────────────────
+  // PRICE SUMMARY — every figure comes from GasPricing (_pricing)
+  // ─────────────────────────────────────────────
+
+  Widget _buildPriceSummary() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const CtsSectionHeader('Order summary'),
+          CtsCard(
+            child: Column(
+              children: [
+                _PriceLine(
+                  label:
+                      '${_pricing.unitLabel} · ${_selectedSize.displayName} × $_quantity',
+                  value: '₵${_basePrice.toStringAsFixed(2)}',
+                ),
+                const SizedBox(height: 8),
+                _PriceLine(
+                    label: _pricing.deliveryLabel,
+                    value: '₵${_deliveryFee.toStringAsFixed(2)}'),
+                if (_brandPremium > 0) ...[
+                  const SizedBox(height: 8),
+                  _PriceLine(
+                    label: '${_selectedBrand!.displayName} premium',
+                    value: '₵${_brandPremium.toStringAsFixed(2)}',
+                  ),
+                ],
+                const Divider(height: 24, color: CtsTheme.border),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('Total',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: CtsTheme.textPrimary,
+                          )),
+                    ),
+                    Text('₵${_total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: CtsTheme.textPrimary,
+                        )),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+
+  // ─────────────────────────────────────────────
+  // BOTTOM BAR — hint, payment method, confirm
+  // ─────────────────────────────────────────────
+
+  Widget _buildBottomBar() {
+    final valid = _isOrderValid();
+    return Container(
+      decoration: const BoxDecoration(
+        color: CtsTheme.surface,
+        border: Border(top: BorderSide(color: CtsTheme.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(ctsGutter, 12, ctsGutter, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!valid) ...[
+                _buildValidationHint(),
+                const SizedBox(height: 10),
+              ],
+              CtsPrimaryButton(
+                label: 'Confirm gas order',
+                trailingText: '₵${_total.toStringAsFixed(2)}',
+                icon: Icons.local_fire_department_rounded,
+                loading: _isSubmitting,
+                onPressed: valid ? _placeOrder : null,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  // ─────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────
-
-  Widget _sectionTitle(String title, IconData icon, {String? subtitle}) =>
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: GasTheme.primaryDim,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(icon, color: GasTheme.primary, size: 16),
+  Widget _buildValidationHint() {
+    final hints = <String>[];
+    if (_deliveryAddress == null) hints.add('Set a delivery address');
+    if (!_safetyAccepted) hints.add('confirm the safety checklist');
+    if (hints.isEmpty) return const SizedBox.shrink();
+    final text = hints.join(' and ');
+    return Row(
+      children: [
+        const Icon(Icons.info_outline_rounded,
+            color: CtsTheme.textSecondary, size: 16),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '${text[0].toUpperCase()}${text.substring(1)} to continue.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: CtsTheme.textSecondary,
+              fontWeight: FontWeight.w500,
             ),
-            const SizedBox(width: 10),
-            Text(
-              title,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: GasTheme.textPrimary,
-              ),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: GasTheme.surfaceAlt,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(subtitle,
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: GasTheme.textTertiary,
-                        fontWeight: FontWeight.w500)),
-              ),
-            ],
-          ],
+          ),
         ),
-      );
+      ],
+    );
+  }
 
   bool _isOrderValid() =>
       _deliveryAddress != null && _deliveryGeoPoint != null && _safetyAccepted;
@@ -1370,72 +949,54 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
-
   Widget _buildPaymentSelector() {
     Widget option(String value, IconData icon, String label, String sub) {
       final selected = _paymentMethod == value;
       return Expanded(
-        child: GestureDetector(
+        child: CtsSelectableCard(
+          selected: selected,
+          semanticLabel: '$label, $sub',
+          showCheck: false,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           onTap: () => setState(() => _paymentMethod = value),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-            decoration: BoxDecoration(
-              color: selected
-                  ? const Color(0xFF16A34A).withValues(alpha: 0.08)
-                  : const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFF16A34A)
-                    : const Color(0xFFE5E7EB),
-                width: selected ? 1.5 : 1,
+          child: Row(children: [
+            Icon(icon,
+                size: 18,
+                color:
+                    selected ? CtsTheme.primaryDeep : CtsTheme.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: CtsTheme.textPrimary,
+                      )),
+                  Text(sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 11, color: CtsTheme.textSecondary)),
+                ],
               ),
             ),
-            child: Row(children: [
-              Icon(icon,
-                  size: 18,
-                  color: selected
-                      ? const Color(0xFF16A34A)
-                      : const Color(0xFF6B7280)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: selected
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFF111827),
-                        )),
-                    const SizedBox(height: 1),
-                    Text(sub,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF9CA3AF))),
-                  ],
-                ),
-              ),
-            ]),
-          ),
+          ]),
         ),
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Row(children: [
-        option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
-            'Pay from balance'),
-        const SizedBox(width: 10),
-        option('cash', Icons.money_rounded, 'Cash', 'Pay driver directly'),
-      ]),
-    );
+    return Row(children: [
+      option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
+          'Pay from balance'),
+      const SizedBox(width: 10),
+      option('cash', Icons.payments_rounded, 'Cash', 'Pay driver directly'),
+    ]);
   }
-
-
 
   Future<void> _placeOrder() async {
     if (!_isOrderValid() || _isSubmitting) return; // ← add _isSubmitting check
@@ -1483,8 +1044,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
             backgroundColor: const Color(0xFFDC2626),
             action: SnackBarAction(
               label: 'Top Up',
-              onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pushNamed('/wallet'),
+              onPressed: () => Navigator.of(context, rootNavigator: true)
+                  .pushNamed('/wallet'),
             ),
           ));
         }
@@ -1492,7 +1053,6 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
       }
       escrowId = escrowResult.escrowId!;
     }
-    
 
     try {
       final user = FirebaseAuth.instance.currentUser ??
@@ -1566,8 +1126,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
               builder: (_) => GasOrderTrackingScreen(orderId: orderId)),
         );
       }
-
-      } catch (e) {
+    } catch (e) {
       // Rollback escrow if order creation failed (wallet bookings only)
       if (escrowId != null) {
         try {
@@ -1653,90 +1212,95 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen>
 // PRIVATE WIDGETS
 // ─────────────────────────────────────────────
 
-class _Step extends StatelessWidget {
-  final int index, current;
-  final String label;
-  const _Step(
-      {required this.index, required this.current, required this.label});
+class _RadioDot extends StatelessWidget {
+  final bool selected;
+  const _RadioDot({required this.selected});
 
   @override
-  Widget build(BuildContext context) {
-    final done = current > index;
-    final active = current >= index;
-    return Column(
-      children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: active ? GasTheme.primary : GasTheme.surfaceAlt,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: active ? GasTheme.primary : GasTheme.border,
-            ),
-          ),
-          child: Center(
-            child: done
-                ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
-                : Text(
-                    '${index + 1}',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: active ? Colors.white : GasTheme.textTertiary,
-                    ),
-                  ),
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: selected ? CtsTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: selected ? CtsTheme.primary : CtsTheme.textTertiary,
+            width: 1.5,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-              color: active ? GasTheme.primary : GasTheme.textTertiary,
-            )),
-      ],
-    );
-  }
-}
-
-class _StepConnector extends StatelessWidget {
-  final bool active;
-  const _StepConnector({required this.active});
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 18, left: 4, right: 4),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            height: 2,
-            color: active ? GasTheme.primary : GasTheme.border,
-          ),
-        ),
+        child: selected
+            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+            : null,
       );
 }
 
 class _QtyBtn extends StatelessWidget {
   final IconData icon;
-  final VoidCallback onTap;
-  const _QtyBtn({required this.icon, required this.onTap});
+  final String label;
+  final VoidCallback? onTap;
+  const _QtyBtn({required this.icon, required this.label, this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        enabled: onTap != null,
+        label: label,
+        excludeSemantics: true,
         onTap: onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: GasTheme.primaryDim,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: GasTheme.primary.withValues(alpha: 0.3)),
+        child: Material(
+          color: onTap != null ? CtsTheme.primaryTint : CtsTheme.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Icon(icon,
+                  size: 20,
+                  color: onTap != null
+                      ? CtsTheme.primaryDeep
+                      : CtsTheme.textTertiary),
+            ),
           ),
-          child: Icon(icon, color: GasTheme.primary, size: 18),
         ),
+      );
+}
+
+class _InfoPair extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  const _InfoPair(
+      {required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Icon(icon, color: CtsTheme.primaryDeep, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11, color: CtsTheme.textSecondary)),
+                Text(value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: CtsTheme.textPrimary,
+                    )),
+              ],
+            ),
+          ),
+        ],
       );
 }
 
@@ -1753,10 +1317,11 @@ class _SafetyItem extends StatelessWidget {
             height: 20,
             margin: const EdgeInsets.only(top: 1),
             decoration: BoxDecoration(
-              color: GasTheme.success.withValues(alpha: 0.1),
+              color: CtsTheme.primaryTint,
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.check_rounded, color: GasTheme.success, size: 12),
+            child: const Icon(Icons.check_rounded,
+                color: CtsTheme.primaryDeep, size: 12),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1786,15 +1351,19 @@ class _PriceLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(fontSize: 13, color: GasTheme.textSecondary)),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 13, color: CtsTheme.textSecondary)),
+          ),
+          const SizedBox(width: 12),
           Text(value,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: GasTheme.textPrimary,
+                color: CtsTheme.textPrimary,
               )),
         ],
       );
@@ -1825,38 +1394,5 @@ class _HelpRow extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               )),
         ],
-      );
-}
-
-class _TrustChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _TrustChip(this.icon, this.label);
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-        child: Column(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: GasTheme.surface,
-                borderRadius: BorderRadius.circular(11),
-                boxShadow: GasTheme.cardShadow,
-              ),
-              child: Icon(icon, color: GasTheme.primary, size: 18),
-            ),
-            const SizedBox(height: 6),
-            Text(label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 10,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
-                  color: GasTheme.textSecondary,
-                )),
-          ],
-        ),
       );
 }

@@ -53,7 +53,7 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
       final gasSnapshot = await FirebaseFirestore.instance
           .collection('gas_orders')
           .where('passengerId', isEqualTo: passenger.uid)
-          .where('status', whereIn: _activeGasStatuses)
+          .where('status', whereIn: GasOrderStatus.activeStatusNames)
           .limit(1)
           .get();
 
@@ -86,16 +86,6 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
     'packagePicked',
     'deliveryEnroute',
     'arrivedAtDropoff',
-  ];
-
-  static const _activeGasStatuses = [
-    'searchingDriver',
-    'driverAssigned',
-    'pickupEnroute',
-    'cylinderPicked',
-    'enrouteToStation',
-    'refilling',
-    'deliveryEnroute',
   ];
 }
 

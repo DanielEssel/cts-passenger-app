@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
 
@@ -89,21 +90,13 @@ class CTSTransportAppBar extends StatelessWidget
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       centerTitle: false,
+      // Same back control as the Ride and Gas screens.
+      leadingWidth: showBack ? 64 : null,
       leading: showBack
-          ? GestureDetector(
-              onTap: () => Navigator.pop(context),
-              child: Container(
-                margin: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: const Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 16,
-                  color: AppColors.textPrimary,
-                ),
+          ? Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: Center(
+                child: CtsBackButton(onTap: () => Navigator.pop(context)),
               ),
             )
           : null,

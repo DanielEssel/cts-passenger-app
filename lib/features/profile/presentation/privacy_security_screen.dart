@@ -289,7 +289,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
   void _requestDataDownload() {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Request data export', style: AppTextStyles.heading3),
@@ -299,14 +299,14 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogCtx),
             child: Text('Cancel',
                 style: AppTextStyles.bodySmall
                     .copyWith(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogCtx);
               // Write a request to Firestore — your backend processes it
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid != null) {
@@ -339,7 +339,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
 
   void _confirmDeactivate() => showDialog(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (dialogCtx) => AlertDialog(
           backgroundColor: AppColors.surface,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -351,14 +351,14 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogCtx),
               child: Text('Cancel',
                   style: AppTextStyles.bodySmall
                       .copyWith(color: AppColors.textSecondary)),
             ),
             TextButton(
               onPressed: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogCtx);
                 _deactivateAccount();
               },
               child: Text('Deactivate',
@@ -371,7 +371,7 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
 
   void _confirmDelete() => showDialog(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (dialogCtx) => AlertDialog(
           backgroundColor: AppColors.surface,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -382,14 +382,14 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogCtx),
               child: Text('Cancel',
                   style: AppTextStyles.bodySmall
                       .copyWith(color: AppColors.textSecondary)),
             ),
             TextButton(
               onPressed: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogCtx);
                 _deleteAccount();
               },
               child: Text('Delete permanently',

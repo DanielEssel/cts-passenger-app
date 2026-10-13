@@ -13,8 +13,8 @@ import 'package:geocoding/geocoding.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
-import '../../../widgets/common/shared_widgets.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import '../../ride/models/place_result.dart';
 import '../../ride/repositories/google_places_repository.dart';
 import '../domain/delivery_form_validator.dart';
@@ -58,6 +58,9 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   File? _photoFile;
   String? _photoUrl;
   bool _uploadingPhoto = false;
+
+  // True while the vehicle screen is open, so a double tap can't push twice.
+  bool _navigating = false;
 
   // ── Inline validation errors ────────────────────────────────────────────
   String? _phoneError;
@@ -295,6 +298,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
   // ── Navigate ──────────────────────────────────────────────────────────────
   void _goToVehicles() {
+    if (_navigating) return;
     // Final gate — never trust the button's enabled state alone.
     final err = _blockingError;
     if (err != null) {
@@ -302,7 +306,11 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
       return;
     }
     HapticFeedback.mediumImpact();
+    // Unfocus the field itself (not just the scope) so returning from the
+    // vehicle screen doesn't reopen the keyboard.
+    FocusManager.instance.primaryFocus?.unfocus();
     final tier = _weightTiers[_selectedWeight];
+    _navigating = true;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -325,63 +333,97 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           notes: _noteCtrl.text.trim(),
         ),
       ),
-    );
+    ).whenComplete(() => _navigating = false);
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
+  // Layout: light service header, one scrolling form grouped as the journey
+  // reads (route → parcel → weight → receiver → extras → photo → note), and a
+  // fixed bottom bar with the next step. The bar sits above the keyboard.
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        FocusScope.of(context).unfocus();
-        setState(() => _showSuggestions = false);
-      },
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: const CTSTransportAppBar(title: 'Send a Parcel'),
-        body: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          setState(() => _showSuggestions = false);
+        },
+        child: Scaffold(
+          backgroundColor: CtsTheme.background,
+          body: Column(
             children: [
-              _buildRouteCard(),
-              const SizedBox(height: 14),
-              _buildSection(
-                step: 3,
-                title: 'What are you sending?',
-                child: _buildParcelTypes(),
+              const CtsServiceHeader(
+                title: 'Send a parcel',
+                subtitle: 'Picked up and delivered across town',
               ),
-              const SizedBox(height: 14),
-              _buildSection(
-                step: 4,
-                title: 'Approximate weight',
-                subtitle: 'Determines which vehicles can carry your delivery',
-                child: _buildWeightTiers(),
-              ),
-              const SizedBox(height: 14),
-              _buildDetailsCard(),
-              const SizedBox(height: 24),
-              PrimaryButton(
-                label: _canProceed
-                    ? 'See available vehicles →'
-                    : 'Complete required fields',
-                onTap: _canProceed ? _goToVehicles : null,
-                color: _canProceed ? null : AppColors.textTertiary,
-              ),
-              if (!_canProceed) ...[
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    _validationHint,
-                    style: AppTextStyles.caption
-                        .copyWith(color: AppColors.textSecondary),
-                    textAlign: TextAlign.center,
-                  ),
+              Expanded(
+                child: ListView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding:
+                      const EdgeInsets.fromLTRB(ctsGutter, 6, ctsGutter, 24),
+                  children: [
+                    _buildRouteCard(),
+                    _gap,
+                    const CtsSectionHeader('What are you sending?'),
+                    _buildParcelTypes(),
+                    _gap,
+                    const CtsSectionHeader('How heavy is it?',
+                        caption: 'This decides which vehicles can carry it'),
+                    _buildWeightTiers(),
+                    _gap,
+                    const CtsSectionHeader('Receiver'),
+                    ReceiverSection(
+                      phoneController: _receiverPhoneCtrl,
+                      nameController: _receiverNameCtrl,
+                      phoneError: _phoneError,
+                      nameError: _nameError,
+                      onPhoneChanged: (v) => setState(() {
+                        _phoneError = v.trim().isEmpty
+                            ? null
+                            : DeliveryFormValidator.receiverPhone(v);
+                      }),
+                      onNameChanged: (v) => setState(() {
+                        _nameError = DeliveryFormValidator.receiverName(v);
+                      }),
+                    ),
+                    _gap,
+                    const CtsSectionHeader('Extras'),
+                    ExtraOptions(
+                      isFragile: _isFragile,
+                      requiresHelpers: _requiresHelpers,
+                      onFragileChanged: (v) => setState(() => _isFragile = v),
+                      onHelpersChanged: (v) =>
+                          setState(() => _requiresHelpers = v),
+                      selectedTierVehicles: _selectedWeight >= 0
+                          ? _weightTiers[_selectedWeight].vehicles
+                          : null,
+                    ),
+                    _gap,
+                    const CtsSectionHeader('Photo of items',
+                        caption:
+                            'Optional · helps the rider confirm the items'),
+                    _buildPhotoUpload(),
+                    _gap,
+                    CtsTextField(
+                      controller: _noteCtrl,
+                      label: 'Note for the rider',
+                      optional: true,
+                      hint: 'Gate code, landmark, handling instructions…',
+                      icon: Icons.notes_rounded,
+                      maxLines: 3,
+                      maxLength: DeliveryFormValidator.notesMaxLength,
+                      textCapitalization: TextCapitalization.sentences,
+                      errorText: DeliveryFormValidator.notes(_noteCtrl.text),
+                      helperText:
+                          '${_noteCtrl.text.length}/${DeliveryFormValidator.notesMaxLength}',
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
                 ),
-              ],
-              const SizedBox(height: 24),
+              ),
+              _buildBottomBar(),
             ],
           ),
         ),
@@ -389,722 +431,564 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     );
   }
 
-  // ── Delivery details (grouped: photo, receiver, options, notes) ──────────
-  // These are secondary to the route + parcel + weight essentials, so they
-  // live in one lighter card with plain sub-labels instead of numbered
-  // sections — cutting the perceived length of the form. No logic changes;
-  // every field and its validation behaves exactly as before.
-  Widget _buildDetailsCard() => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
+  static const Widget _gap = SizedBox(height: 22);
+
+  // ── Bottom bar: what's missing + next step ────────────────────────────────
+  Widget _buildBottomBar() => Container(
+        decoration: const BoxDecoration(
+          color: CtsTheme.surface,
+          border: Border(top: BorderSide(color: CtsTheme.border)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        child: SafeArea(
+          top: false,
+          minimum: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(ctsGutter, 12, ctsGutter, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const _StepCircle('5'),
-                const SizedBox(width: 12),
-                Text('Delivery details', style: AppTextStyles.labelLarge),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Receiver contact (phone required) — most important, shown first
-            _detailLabel('Receiver contact'),
-            const SizedBox(height: 8),
-            ReceiverSection(
-              phoneController: _receiverPhoneCtrl,
-              nameController: _receiverNameCtrl,
-              phoneError: _phoneError,
-              nameError: _nameError,
-              onPhoneChanged: (v) => setState(() {
-                _phoneError = v.trim().isEmpty
-                    ? null
-                    : DeliveryFormValidator.receiverPhone(v);
-              }),
-              onNameChanged: (v) => setState(() {
-                _nameError = DeliveryFormValidator.receiverName(v);
-              }),
-            ),
-            const SizedBox(height: 16),
-
-            // Photo (optional)
-            _detailLabel('Photo of items', optional: true),
-            const SizedBox(height: 8),
-            _buildPhotoUpload(),
-            const SizedBox(height: 16),
-
-            // Extra options
-            _detailLabel('Extra options'),
-            const SizedBox(height: 8),
-            ExtraOptions(
-              isFragile: _isFragile,
-              requiresHelpers: _requiresHelpers,
-              onFragileChanged: (v) => setState(() => _isFragile = v),
-              onHelpersChanged: (v) => setState(() => _requiresHelpers = v),
-              selectedTierVehicles: _selectedWeight >= 0
-                  ? _weightTiers[_selectedWeight].vehicles
-                  : null,
-            ),
-            const SizedBox(height: 16),
-
-            // Notes (optional)
-            _detailLabel('Delivery notes', optional: true),
-            const SizedBox(height: 8),
-            _inputField(
-              controller: _noteCtrl,
-              hint: 'Any special instructions for the rider…',
-              icon: Icons.notes_rounded,
-              maxLines: 3,
-              maxLength: DeliveryFormValidator.notesMaxLength,
-              onChanged: (_) => setState(() {}),
-            ),
-          ],
-        ),
-      );
-
-  // Lightweight sub-label for the grouped details card.
-  Widget _detailLabel(String text, {bool optional = false}) => Row(
-        children: [
-          Text(text,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              )),
-          if (optional) ...[
-            const SizedBox(width: 6),
-            Text('(optional)',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textTertiary,
-                )),
-          ],
-        ],
-      );
-
-  // ── Route card ────────────────────────────────────────────────────────────
-  Widget _buildRouteCard() => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Pickup
-            _buildLocationRow(
-              step: '1',
-              label: 'Pickup location',
-              child: GestureDetector(
-                onTap: _detectPickup,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceAlt,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Row(
-                    children: [
-                      _loadingPickup
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: AppColors.primary))
-                          : const Icon(Icons.my_location_rounded,
-                              color: AppColors.success, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _pickupAddress ?? 'Detecting location…',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: _pickupAddress != null
-                                ? AppColors.textPrimary
-                                : AppColors.textTertiary,
-                          ),
-                        ),
-                      ),
-                      Text('Change',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
-                          )),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // Connector line
-            Padding(
-              padding: const EdgeInsets.only(left: 13, top: 6, bottom: 6),
-              child:
-                  Container(width: 2, height: 20, color: AppColors.borderLight),
-            ),
-
-            // Dropoff with Places API
-            _buildLocationRow(
-              step: '2',
-              label: 'Drop-off address',
-              child: Column(
-                children: [
-                  // Search input
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: _dropoffGeo != null
-                            ? AppColors.primary
-                            : AppColors.border,
-                        width: _dropoffGeo != null ? 1.5 : 1,
-                      ),
-                    ),
+                if (!_canProceed) ...[
+                  Semantics(
+                    liveRegion: true,
                     child: Row(
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(left: 10),
-                          child: Icon(
-                            _dropoffGeo != null
-                                ? Icons.check_circle_rounded
-                                : Icons.search_rounded,
-                            color: _dropoffGeo != null
-                                ? AppColors.primary
-                                : AppColors.textTertiary,
-                            size: 16,
-                          ),
-                        ),
+                        const Icon(Icons.info_outline_rounded,
+                            size: 16, color: CtsTheme.textSecondary),
+                        const SizedBox(width: 8),
                         Expanded(
-                          child: TextField(
-                            controller: _dropoffCtrl,
-                            onChanged: _onDropoffChanged,
+                          child: Text(
+                            _validationHint,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                fontSize: 13, color: AppColors.textPrimary),
-                            decoration: InputDecoration(
-                              hintText: 'Search drop-off address…',
-                              hintStyle: TextStyle(
-                                fontSize: 13,
-                                color: AppColors.textTertiary,
-                                fontStyle: FontStyle.italic,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 12),
+                              fontSize: 12.5,
+                              color: CtsTheme.textSecondary,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
-                        if (_searchingDropoff)
-                          const Padding(
-                            padding: EdgeInsets.only(right: 10),
-                            child: SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          )
-                        else if (_dropoffCtrl.text.isNotEmpty)
-                          GestureDetector(
-                            onTap: () {
-                              _dropoffCtrl.clear();
-                              setState(() {
-                                _dropoffGeo = null;
-                                _dropoffAddress = null;
-                                _suggestions = [];
-                                _showSuggestions = false;
-                              });
-                            },
-                            child: const Padding(
-                              padding: EdgeInsets.only(right: 10),
-                              child: Icon(Icons.clear_rounded,
-                                  color: AppColors.textTertiary, size: 16),
-                            ),
-                          ),
                       ],
                     ),
                   ),
-
-                  // Suggestions dropdown
-                  if (_showSuggestions && _suggestions.isNotEmpty)
-                    Container(
-                      margin: const EdgeInsets.only(top: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: _suggestions.take(5).map((p) {
-                          final isLast = p == _suggestions.take(5).last;
-                          return Column(
-                            children: [
-                              InkWell(
-                                onTap: () => _selectDropoff(p),
-                                borderRadius: BorderRadius.circular(12),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 10),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 28,
-                                        height: 28,
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primaryDim,
-                                          borderRadius:
-                                              BorderRadius.circular(7),
-                                        ),
-                                        child: Icon(p.icon,
-                                            size: 14, color: AppColors.primary),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(p.name,
-                                                style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppColors.textPrimary,
-                                                ),
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis),
-                                            Text(p.address,
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  color: AppColors.textTertiary,
-                                                ),
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              if (!isLast)
-                                const Divider(
-                                    height: 0.5,
-                                    indent: 50,
-                                    color: AppColors.border),
-                            ],
-                          );
-                        }).toList(),
-                      ),
-                    ),
-
-                  // Confirmed address
-                  if (_dropoffAddress != null && _dropoffGeo != null) ...[
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      const Icon(Icons.check_circle_rounded,
-                          color: AppColors.success, size: 13),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(_dropoffAddress!,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.success,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ]),
-                  ],
+                  const SizedBox(height: 10),
                 ],
-              ),
-            ),
-          ],
-        ),
-      );
-
-  Widget _buildLocationRow({
-    required String step,
-    required String label,
-    required Widget child,
-  }) =>
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _StepCircle(step),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: AppTextStyles.labelLarge),
-                const SizedBox(height: 8),
-                child,
+                CtsPrimaryButton(
+                  label: 'See vehicles & prices',
+                  icon: Icons.local_shipping_rounded,
+                  onPressed: _canProceed ? _goToVehicles : null,
+                ),
               ],
             ),
           ),
-        ],
+        ),
       );
 
-  // ── Section wrapper ───────────────────────────────────────────────────────
-  Widget _buildSection({
-    required int step,
-    required String title,
-    String? subtitle,
-    required Widget child,
-  }) =>
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _StepCircle('$step'),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: AppTextStyles.labelLarge),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle, style: AppTextStyles.caption),
+  // ── Route card: pickup → drop-off ─────────────────────────────────────────
+  Widget _buildRouteCard() {
+    final pickupText = _pickupAddress ??
+        (_loadingPickup
+            ? 'Finding your location…'
+            : 'Location unavailable. Tap to try again.');
+    final query = _dropoffCtrl.text.trim();
+    final noMatches = _showSuggestions &&
+        query.isNotEmpty &&
+        !_searchingDropoff &&
+        _suggestions.isEmpty &&
+        _dropoffGeo == null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: CtsTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: CtsTheme.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Pickup — GPS. Tapping re-detects the current location.
+          Semantics(
+            button: true,
+            label: 'Pickup, $pickupText. Detect current location again',
+            excludeSemantics: true,
+            onTap: _loadingPickup ? null : _detectPickup,
+            child: InkWell(
+              onTap: _loadingPickup ? null : _detectPickup,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 3),
+                      child: _RouteDot(filled: false),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Pickup · your current location',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: CtsTheme.textSecondary,
+                              )),
+                          const SizedBox(height: 2),
+                          Text(
+                            pickupText,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 14.5,
+                              fontWeight: _pickupAddress != null
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: _pickupAddress != null
+                                  ? CtsTheme.textPrimary
+                                  : CtsTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: _loadingPickup
+                          ? const Padding(
+                              padding: EdgeInsets.all(3),
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: CtsTheme.primary),
+                            )
+                          : const Icon(Icons.my_location_rounded,
+                              size: 20, color: CtsTheme.primaryDeep),
+                    ),
                   ],
-                  const SizedBox(height: 10),
-                  child,
+                ),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 38),
+            child: Divider(height: 1, color: CtsTheme.border),
+          ),
+
+          // Drop-off — Places search
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 3),
+                  child: _RouteDot(filled: true),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Drop-off',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: CtsTheme.textSecondary,
+                          )),
+                      TextField(
+                        controller: _dropoffCtrl,
+                        onChanged: _onDropoffChanged,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                          color: CtsTheme.textPrimary,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: 'Search a street, landmark or area',
+                          hintStyle: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w500,
+                            color: CtsTheme.textTertiary,
+                          ),
+                          isDense: true,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          contentPadding: EdgeInsets.symmetric(vertical: 6),
+                        ),
+                      ),
+                      if (_dropoffAddress != null && _dropoffGeo != null)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(top: 1),
+                              child: Icon(Icons.check_circle_rounded,
+                                  color: CtsTheme.primaryDeep, size: 15),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(_dropoffAddress!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    color: CtsTheme.textSecondary,
+                                  )),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: _searchingDropoff
+                      ? const Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: CtsTheme.primary),
+                          ),
+                        )
+                      : _dropoffCtrl.text.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Clear drop-off',
+                              icon: const Icon(Icons.close_rounded,
+                                  size: 19, color: CtsTheme.textSecondary),
+                              onPressed: () {
+                                _dropoffCtrl.clear();
+                                setState(() {
+                                  _dropoffGeo = null;
+                                  _dropoffAddress = null;
+                                  _suggestions = [];
+                                  _showSuggestions = false;
+                                });
+                              },
+                            )
+                          : const Icon(Icons.search_rounded,
+                              size: 20, color: CtsTheme.textTertiary),
+                ),
+              ],
+            ),
+          ),
+
+          // Suggestions from the Places search
+          if (_showSuggestions && _suggestions.isNotEmpty) ...[
+            const Divider(height: 1, color: CtsTheme.border),
+            for (final p in _suggestions.take(5))
+              InkWell(
+                onTap: () => _selectDropoff(p),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 52),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: CtsTheme.surfaceAlt,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(p.icon,
+                              size: 16, color: CtsTheme.textSecondary),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(p.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: CtsTheme.textPrimary,
+                                  )),
+                              Text(p.address,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: CtsTheme.textSecondary,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+          if (noMatches) ...[
+            const Divider(height: 1, color: CtsTheme.border),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.search_off_rounded,
+                      size: 18, color: CtsTheme.textSecondary),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No matches. Try a street, landmark or area name.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: CtsTheme.textSecondary),
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
-        ),
-      );
+        ],
+      ),
+    );
+  }
 
   // ── Parcel types ──────────────────────────────────────────────────────────
   Widget _buildParcelTypes() => Wrap(
         spacing: 8,
         runSpacing: 8,
-        children: List.generate(_parcelTypes.length, (i) {
-          final p = _parcelTypes[i];
-          final isSelected = _selectedParcel == i;
-          return GestureDetector(
-            onTap: () => setState(() => _selectedParcel = i),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.primary.withValues(alpha: 0.1)
-                    : AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isSelected ? AppColors.primary : AppColors.border,
-                  width: isSelected ? 1.5 : 0.5,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(p.icon,
-                      size: 15,
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.textSecondary),
-                  const SizedBox(width: 6),
-                  Text(p.label,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 12,
-                        fontWeight:
-                            isSelected ? FontWeight.w700 : FontWeight.w400,
-                        color: isSelected
-                            ? AppColors.primary
-                            : AppColors.textSecondary,
-                      )),
-                ],
-              ),
+        children: [
+          for (var i = 0; i < _parcelTypes.length; i++)
+            CtsChoicePill(
+              label: _parcelTypes[i].label,
+              icon: _parcelTypes[i].icon,
+              selected: _selectedParcel == i,
+              onTap: () => setState(() => _selectedParcel = i),
             ),
-          );
-        }),
+        ],
       );
 
   // ── Weight tiers ──────────────────────────────────────────────────────────
   Widget _buildWeightTiers() => Column(
-        children: List.generate(_weightTiers.length, (i) {
-          final t = _weightTiers[i];
-          final isSelected = _selectedWeight == i;
-          return GestureDetector(
-            onTap: () => setState(() {
-              _selectedWeight = i;
-              // If this tier can't carry helpers, clear a stale toggle so a
-              // +GHS 10 fee never rides along on an Okada-only delivery.
-              if (!DeliveryFormValidator.helpersAllowedForTier(t.vehicles)) {
-                _requiresHelpers = false;
-              }
-            }),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.primary.withValues(alpha: 0.07)
-                    : AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isSelected ? AppColors.primary : AppColors.border,
-                  width: isSelected ? 1.5 : 0.5,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppColors.primary.withValues(alpha: 0.12)
-                          : AppColors.surface,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(t.icon,
-                        color: isSelected
-                            ? AppColors.primary
-                            : AppColors.textSecondary,
-                        size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Text(t.label,
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.textPrimary,
-                              )),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppColors.primary.withValues(alpha: 0.1)
-                                  : AppColors.border,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(t.range,
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : AppColors.textSecondary,
-                                )),
-                          ),
-                        ]),
-                        const SizedBox(height: 2),
-                        Text(t.example,
-                            style: const TextStyle(
-                                fontSize: 11, color: AppColors.textSecondary)),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: t.vehicles
-                        .map((v) => Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(v,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: isSelected
-                                        ? AppColors.primary
-                                        : AppColors.textTertiary,
-                                  )),
-                            ))
-                        .toList(),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
+        children: [
+          for (var i = 0; i < _weightTiers.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            _weightTile(i),
+          ],
+        ],
       );
 
-  // ── Photo upload ──────────────────────────────────────────────────────────
-  Widget _buildPhotoUpload() => GestureDetector(
-        onTap: _uploadingPhoto ? null : _pickPhoto,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: double.infinity,
-          height: 100,
-          decoration: BoxDecoration(
-            color: _photoUrl != null
-                ? AppColors.primary.withValues(alpha: 0.06)
-                : AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _photoUrl != null ? AppColors.primary : AppColors.border,
-              width: _photoUrl != null ? 1.5 : 0.5,
+  Widget _weightTile(int i) {
+    final t = _weightTiers[i];
+    final isSelected = _selectedWeight == i;
+    return CtsSelectableCard(
+      selected: isSelected,
+      showCheck: false,
+      semanticLabel:
+          '${t.label}, ${t.range}. ${t.example}. Vehicles: ${t.vehicles.join(', ')}',
+      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+      onTap: () => setState(() {
+        _selectedWeight = i;
+        // If this tier can't carry helpers, clear a stale toggle so a
+        // helpers fee never rides along on an Okada-only delivery.
+        if (!DeliveryFormValidator.helpersAllowedForTier(t.vehicles)) {
+          _requiresHelpers = false;
+        }
+      }),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: isSelected ? CtsTheme.surface : CtsTheme.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
             ),
+            child: Icon(t.icon,
+                size: 20,
+                color:
+                    isSelected ? CtsTheme.primaryDeep : CtsTheme.textSecondary),
           ),
-          child: _uploadingPhoto
-              ? const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.primary),
-                    ),
-                    SizedBox(height: 8),
-                    Text('Uploading photo…',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
+                    Text(t.label,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                          color: CtsTheme.textPrimary,
+                        )),
+                    Text(t.range,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: CtsTheme.primaryDeep,
                         )),
                   ],
-                )
-              : _photoFile != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.file(_photoFile!, fit: BoxFit.cover),
-                          Container(
-                              color: Colors.black.withValues(alpha: 0.35)),
-                          const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.check_circle_rounded,
-                                  color: Colors.white, size: 28),
-                              SizedBox(height: 4),
-                              Text('Photo added — tap to change',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ],
-                      ),
-                    )
-                  : Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.add_a_photo_rounded,
-                            color: AppColors.textTertiary, size: 26),
-                        const SizedBox(height: 6),
-                        const Text('Add photo of items',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary,
-                            )),
-                        const SizedBox(height: 2),
-                        Text('Optional — helps driver verify at pickup',
-                            style: TextStyle(
-                                fontSize: 11, color: AppColors.textTertiary)),
-                      ],
-                    ),
-        ),
-      );
-
-  Widget _inputField({
-    TextEditingController? controller,
-    required String hint,
-    required IconData icon,
-    TextInputType? keyboardType,
-    int maxLines = 1,
-    int? maxLength,
-    ValueChanged<String>? onChanged,
-  }) =>
-      Container(
-        decoration: BoxDecoration(
-          color: AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          maxLines: maxLines,
-          maxLength: maxLength,
-          onChanged: onChanged,
-          style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
-          decoration: InputDecoration(
-            hintText: hint,
-            counterText: '',
-            hintStyle: const TextStyle(
-              fontSize: 13,
-              color: AppColors.textTertiary,
-              fontStyle: FontStyle.italic,
+                ),
+                const SizedBox(height: 2),
+                Text(t.example,
+                    style: const TextStyle(
+                        fontSize: 12, color: CtsTheme.textSecondary)),
+                const SizedBox(height: 2),
+                Text('Vehicles: ${t.vehicles.join(', ')}',
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: CtsTheme.textTertiary)),
+              ],
             ),
-            prefixIcon: Icon(icon, color: AppColors.textSecondary, size: 18),
-            border: InputBorder.none,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           ),
+          const SizedBox(width: 8),
+          _RadioDot(selected: isSelected),
+        ],
+      ),
+    );
+  }
+
+  // ── Photo upload ──────────────────────────────────────────────────────────
+  Widget _buildPhotoUpload() {
+    final hasPhoto = _photoUrl != null && _photoFile != null;
+    final title = _uploadingPhoto
+        ? 'Uploading photo…'
+        : hasPhoto
+            ? 'Photo added'
+            : 'Add a photo';
+    final subtitle = _uploadingPhoto
+        ? 'Please wait before continuing'
+        : hasPhoto
+            ? 'Tap to choose a different photo'
+            : 'From your gallery';
+    return Semantics(
+      button: true,
+      label: '$title. $subtitle',
+      excludeSemantics: true,
+      onTap: _uploadingPhoto ? null : _pickPhoto,
+      child: Material(
+        color: hasPhoto ? CtsTheme.primaryTint : CtsTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: hasPhoto ? CtsTheme.primary : CtsTheme.border,
+            width: hasPhoto ? 1.5 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _uploadingPhoto ? null : _pickPhoto,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 60,
+                    height: 60,
+                    child: _uploadingPhoto
+                        ? const ColoredBox(
+                            color: CtsTheme.surfaceAlt,
+                            child: Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: CtsTheme.primary),
+                              ),
+                            ),
+                          )
+                        : _photoFile != null
+                            ? Image.file(_photoFile!,
+                                fit: BoxFit.cover, cacheWidth: 180)
+                            : const ColoredBox(
+                                color: CtsTheme.surfaceAlt,
+                                child: Icon(Icons.add_a_photo_rounded,
+                                    size: 22, color: CtsTheme.textSecondary),
+                              ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: CtsTheme.textPrimary,
+                          )),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 12, color: CtsTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+                if (!_uploadingPhoto)
+                  Text(hasPhoto ? 'Change' : 'Add',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: CtsTheme.primaryDeep,
+                      )),
+                const SizedBox(width: 6),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Small pieces ─────────────────────────────────────────────────────────────
+class _RouteDot extends StatelessWidget {
+  final bool filled;
+  const _RouteDot({required this.filled});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: filled ? CtsTheme.primary : CtsTheme.surface,
+          shape: BoxShape.circle,
+          border: Border.all(color: CtsTheme.primary, width: 2.5),
         ),
       );
 }
 
-// ── Step circle ───────────────────────────────────────────────────────────────
-class _StepCircle extends StatelessWidget {
-  final String number;
-  const _StepCircle(this.number);
+class _RadioDot extends StatelessWidget {
+  final bool selected;
+  const _RadioDot({required this.selected});
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: 26,
-        height: 26,
-        decoration: const BoxDecoration(
-          color: AppColors.primary,
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
           shape: BoxShape.circle,
+          color: selected ? CtsTheme.primary : Colors.transparent,
+          border: Border.all(
+            color: selected ? CtsTheme.primary : CtsTheme.textTertiary,
+            width: 1.5,
+          ),
         ),
-        child: Center(
-          child: Text(number,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              )),
-        ),
+        child: selected
+            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+            : null,
       );
 }

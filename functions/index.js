@@ -339,3 +339,6 @@ exports.rejectWithdrawal = withdrawalApproval.rejectWithdrawal;
 // ─────────gas dispatch policy ─────────────────────────────────────────────
 const gasAcceptance = require("./accept_gas_order");
 exports.acceptGasOrder = gasAcceptance.acceptGasOrder;
+
+// ── Passenger map markers (driver_map) ───────────────────────────────────────
+exports.syncDriverMap = require("./driver_map").syncDriverMap;

@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../payment/models/payment_method.dart';
 import '../../ride/models/ride_option.dart';
-import '../../../core/services/pricing_service.dart';
+import '../domain/ride_fare_estimate.dart';
 import '../models/service_type.dart';
 
 final rideRequestProvider =
@@ -83,21 +83,13 @@ class RideRequestState {
 
   double get calculatedFare {
     if (selectedRide == null || estimatedDistance == null) return 0;
-    if (estimatedDistance! <= 0) return 0;
 
-    // Ensure PricingService has data — uses cached values if available
-    final pricing = PricingService.instance;
-    final serviceType = selectedRide!.serviceType.name; // 'okada' or 'taxi'
-    final fare = pricing.calculateRideFare(
-  serviceType, estimatedDistance!,
-  waitingMinutes: (estimatedDuration ?? 0).toDouble(),
-);
-
-    // Never return 0 for a valid ride — use minimum fare as floor
-    final minFare = serviceType == 'okada'
-        ? PricingService.instance.okadaMinFare
-        : PricingService.instance.taxiMinFare;
-    return fare > 0 ? (fare >= minFare ? fare : minFare) : minFare;
+    // Shared with RideOptionCard so the card and the confirm button agree.
+    return estimateRideFare(
+      serviceType: selectedRide!.serviceType.name,
+      distanceKm: estimatedDistance!,
+      durationMin: estimatedDuration ?? 0,
+    );
   }
 
   /// Convenient getter for full payment model

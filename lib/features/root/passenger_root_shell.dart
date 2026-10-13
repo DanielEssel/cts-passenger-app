@@ -84,9 +84,11 @@ class _PassengerRootShellState extends ConsumerState<PassengerRootShell> {
 
         final innerNav = _navKeys[_currentIndex].currentState;
 
-        // If current tab has its own navigation stack → pop inside tab
+        // If current tab has its own navigation stack → pop inside tab.
+        // maybePop (not pop) so a screen's own PopScope can intercept back,
+        // e.g. "Finding a driver" asks before abandoning a live request.
         if (innerNav != null && innerNav.canPop()) {
-          innerNav.pop();
+          innerNav.maybePop();
           return;
         }
 
@@ -188,7 +190,8 @@ case AppRoutes.deliveryTracking:
         final args = settings.arguments;
         final tripId = args is String
             ? args
-            : args is Map ? (args['rideId'] ?? args['tripId'] ?? '') as String
+            : args is Map
+                ? (args['rideId'] ?? args['tripId'] ?? '') as String
             : '';
         return MaterialPageRoute<void>(
           builder: (context) => RideTrackingScreen(

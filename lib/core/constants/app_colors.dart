@@ -16,11 +16,11 @@ class AppColors {
   // PRIMARY  —  Forest Green
   // Rich, confident green. Readable on white, premium on card.
   // ──────────────────────────────────────────────────────────
-  static const Color primary       = Color(0xFF00A86B); // forest emerald
-  static const Color primaryDark   = Color(0xFF007A4D); // deep pressed state
-  static const Color primaryLight  = Color(0xFF33C98A); // hover / highlight
-  static const Color primaryDim    = Color(0xFFE6F7F1); // 10% tint overlay
-  static const Color primaryGlow1  = Color(0x4000A86B); // glow shadow
+  static const Color primary       = Color(0xFF16A34A); // CTSGo green
+  static const Color primaryDark   = Color(0xFF15803D); // deep pressed state
+  static const Color primaryLight  = Color(0xFF22C55E); // hover / highlight
+  static const Color primaryDim    = Color(0xFFE8F5EC); // 10% tint overlay
+  static const Color primaryGlow1  = Color(0x4016A34A); // glow shadow
 
   // ──────────────────────────────────────────────────────────
   // SECONDARY  —  Warm Gold
@@ -64,9 +64,9 @@ class AppColors {
   // ──────────────────────────────────────────────────────────
   // STATUS COLORS  —  Vivid, readable on white
   // ──────────────────────────────────────────────────────────
-  static const Color success      = Color(0xFF00A86B);
+  static const Color success      = Color(0xFF16A34A);
   static const Color successLight = Color(0xFFE6F7F1);
-  static const Color successDark  = Color(0xFF007A4D);
+  static const Color successDark  = Color(0xFF15803D);
 
   static const Color error        = Color(0xFFE53935);
   static const Color errorLight   = Color(0xFFFFEBEA);
@@ -86,7 +86,7 @@ class AppColors {
   // ──────────────────────────────────────────────────────────
   static const Color border       = Color(0xFFDDEBE4); // soft sage edge
   static const Color borderLight  = Color(0xFFEEF5F1); // hairline
-  static const Color borderFocus  = Color(0x6600A86B); // active input ring
+  static const Color borderFocus  = Color(0x6616A34A); // active input ring
   static const Color divider      = Color(0xFFE8F0EC); // section rule
 
   // ──────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ class AppColors {
   // ──────────────────────────────────────────────────────────
   // RIDE TYPE ACCENT COLORS
   // ──────────────────────────────────────────────────────────
-  static const Color taxi     = Color(0xFF00A86B); // forest green — flagship
+  static const Color taxi     = Color(0xFF16A34A); // forest green — flagship
   static const Color okada    = Color(0xFFD4A843); // gold — fast & agile
   static const Color delivery = Color(0xFF2196F3); // sapphire — logistics
   static const Color gas      = Color(0xFFFF7A35); // ember — energy

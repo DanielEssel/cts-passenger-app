@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/utils/otp_utils.dart';
+import '../../../core/utils/driver_location.dart';
 
 enum DeliveryStatus {
   pending,
@@ -172,7 +173,7 @@ class DeliveryRequest {
       paymentMethod:   d['paymentMethod']   as String? ?? 'wallet',
       passengerRating: (d['passengerRating'] as num?)?.toDouble(),
       deliveryOtp:     d['deliveryOtp']     as String?,
-      driverLocation:  d['driverLocation']  as GeoPoint?,
+      driverLocation:  readDriverLocation(d),
       driverHeading:   (d['driverHeading']   as num?)?.toDouble()   
     );  
   }
