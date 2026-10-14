@@ -8,7 +8,13 @@
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "test:payments:smoke": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/smoke.test.js\"",
-"test:payments:security": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/security.test.js\""  },
+"test:payments:security": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/security.test.js\"",
+    "test:payments:escrow": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/escrow_recovery.test.js test/payments/auto_expired_assessment.test.js\"",
+    "test:payments:delivery": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/delivery_integrity.test.js\"",
+    "test:payments:attach": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/escrow_attach.test.js\"",
+    "test:payments:monitor": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/settlement_monitor.test.js\"",
+    "test:deploy-packaging": "node --test test/deploy_packaging.test.js"
+  },
   "engines": {
     "node": "22"
   },

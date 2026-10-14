@@ -1,4 +1,10 @@
-const { releaseEscrow, refundEscrow } = require("./escrow");
+const { releaseEscrow, refundEscrow, EscrowMismatchError } = require("./escrow");
+const {
+  verifyDeliveryEscrow,
+  SettlementBlockedError,
+  DELIVERY_REFERENCE_TYPE,
+  DELIVERY_RELEASE_REASON,
+} = require("./delivery_settlement");
 // functions/trips.js
 const {
   onDocumentUpdated,
@@ -884,6 +890,11 @@ exports.onDeliveryCompleted = onDocumentUpdated(
     if (before.status === after.status && after.status !== "completed") return;
     if (after.status !== "completed") return;
     if (after.walletProcessed === true) return;
+    // A failed settlement waits for operations. Without this, the failure
+    // write itself (an update to a completed delivery) re-fired this
+    // trigger, which failed and wrote again, without end. Operations retry
+    // by clearing settlementStatus once the cause is fixed.
+    if (after.settlementStatus === "failed") return;
 
     const deliveryRef = db().collection("deliveries").doc(deliveryId);
 
@@ -956,6 +967,7 @@ exports.onDeliveryCompleted = onDocumentUpdated(
 
       if (delivery.walletProcessed === true) return false;
       if (delivery.settlementStatus === "processing") return false;
+      if (delivery.settlementStatus === "failed") return false;
 
       tx.update(deliveryRef, {
         settlementStatus: "processing",
@@ -995,49 +1007,70 @@ exports.onDeliveryCompleted = onDocumentUpdated(
           .collection("escrows")
           .doc(escrowId)
           .get();
+        const escrow = escrowSnap.exists ? escrowSnap.data() : null;
 
-        if (!escrowSnap.exists) {
-          throw new Error(`Escrow not found: ${escrowId}`);
-        }
+        // The escrow must be this delivery's own payment: same passenger,
+        // attached to exactly this delivery, still HELD (or already
+        // released for it by an earlier attempt).
+        const check = verifyDeliveryEscrow({
+          deliveryId,
+          passengerId,
+          estimatedFare: after.estimatedFare,
+          escrow,
+        });
+        if (!check.ok) throw new SettlementBlockedError(check.reason, escrowId);
 
-        const escrow = escrowSnap.data();
-
-        if (escrow.userId !== passengerId) {
-          throw new Error(
-            `Escrow ${escrowId} does not belong to passenger`,
-          );
-        }
-
-        if (escrow.status === "REFUNDED") {
-          throw new Error(
-            `Escrow ${escrowId} was refunded and cannot settle delivery`,
-          );
-        }
-
-        if (escrow.status !== "HELD" && escrow.status !== "RELEASED") {
-          throw new Error(
-            `Escrow ${escrowId} has unexpected status: ${escrow.status}`,
-          );
-        }
-
-        if (typeof escrow.amount === "number") {
-          actualFare = escrow.amount;
-        }
-
+        // escrow.amount is authoritative for escrow-backed deliveries.
+        actualFare = escrow.amount;
         if (typeof escrow.platformFee === "number") {
           platformFee = escrow.platformFee;
         }
-
         if (typeof escrow.driverNet === "number") {
           driverEarnings = escrow.driverNet;
         }
 
-        if (escrow.status === "HELD") {
-          await releaseEscrow(
+        if (check.amountMismatch) {
+          // Observe only: older app versions could hold and store figures
+          // computed a moment apart. Settles on the held amount, as before.
+          await db().collection("admin_alerts").add({
+            type: "delivery_escrow_amount_mismatch",
+            deliveryId,
             escrowId,
-            driverId,
-            "delivery_completed",
-          );
+            heldAmount: escrow.amount,
+            estimatedFare: Number.isFinite(Number(after.estimatedFare))
+              ? Number(after.estimatedFare)
+              : null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        if (check.mode === "release") {
+          let released;
+          try {
+            released = await releaseEscrow(
+              escrowId,
+              driverId,
+              DELIVERY_RELEASE_REASON,
+              {
+                userId: passengerId,
+                referenceId: deliveryId,
+                referenceType: DELIVERY_REFERENCE_TYPE,
+              },
+            );
+          } catch (e) {
+            if (e instanceof EscrowMismatchError) {
+              throw new SettlementBlockedError(e.reason, escrowId);
+            }
+            throw e;
+          }
+          // Not HELD by the time the transaction ran: a refund (or another
+          // settlement) got there first. Never record this as settled.
+          if (!released) {
+            throw new SettlementBlockedError(
+              "escrow_not_held_at_release",
+              escrowId,
+            );
+          }
         }
       }
 
@@ -1246,11 +1279,24 @@ exports.onDeliveryCompleted = onDocumentUpdated(
         message,
       );
 
+      const reason =
+        e instanceof SettlementBlockedError ? e.reason : "settlement_error";
+
       await deliveryRef.update({
         settlementStatus: "failed",
+        settlementFailureReason: reason,
         walletProcessError: message,
         walletProcessedAt:
           admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Operations investigate every failed settlement (ids only).
+      await db().collection("admin_alerts").add({
+        type: "delivery_settlement_failed",
+        deliveryId,
+        escrowId: after.escrowId ?? null,
+        reason,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
   },

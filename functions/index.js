@@ -312,6 +312,13 @@ exports.migrateWallets = wallet.migrateWallets;
 exports.refundEscrowOnError = escrow.refundEscrowOnError;
 exports.broadcastNotification = notifications.broadcastNotification;
 exports.onDeliveryCreated = notifications.onDeliveryCreated;
+// Observe-only server check of the client-supplied delivery fare: records
+// deliveryFareChecks/{id} and alerts admins; never changes the order.
+exports.onDeliveryFareValidation =
+  require("./delivery_fare_validation").onDeliveryFareValidation;
+// Alert-only: delivery settlements stuck in "processing" (no money movement).
+exports.detectStuckDeliverySettlements =
+  require("./settlement_monitor").detectStuckDeliverySettlements;
 
 // ── Bridge payment integration (collection + payout) ──────────────────────────
 const bridge = require("./bridge");
