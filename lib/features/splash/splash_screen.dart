@@ -117,26 +117,21 @@ class _SplashScreenState extends State<SplashScreen>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo Container with proper sizing
+              // Official CTSGo logo on a white plate (the artwork has a
+              // white background, so it is never clipped or recoloured).
               Container(
-                width: 120,
-                height: 120,
+                width: 112,
+                height: 112,
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppColors.primaryColor.withValues(alpha: 0.1),
-                      AppColors.primaryColor.withValues(alpha: 0.05),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  shape: BoxShape.circle,
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
                 ),
                 child: Center(
                   child: Image.asset(
-                    'assets/logos/logo.png',
-                    width: 80,
-                    height: 80,
+                    'assets/logos/ctsgo_logo.png',
+                    width: 96,
+                    height: 96,
                     filterQuality: FilterQuality.high,
                     errorBuilder: (_, __, ___) => const Icon(
                       Icons.local_taxi_rounded,

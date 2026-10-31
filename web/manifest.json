@@ -1,11 +1,11 @@
 {
-    "name": "cts_transport_app",
-    "short_name": "cts_transport_app",
+    "name": "CTSGo",
+    "short_name": "CTSGo",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#15803D",
+    "description": "CTSGo rides, deliveries and gas. A CTS Africa product.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

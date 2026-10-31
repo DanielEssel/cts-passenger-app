@@ -395,11 +395,22 @@ class _PremiumSignupLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // White plate: the CTSGo artwork has a white background, so it sits on
+    // a matching tile instead of a visible square on the off-white page.
     return Center(
-      child: Image.asset(
-        'assets/logos/logo.png',
-        width: 150,
-        fit: BoxFit.contain,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: CtsTheme.border),
+        ),
+        child: Image.asset(
+          'assets/logos/ctsgo_logo.png',
+          width: 88,
+          height: 88,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }

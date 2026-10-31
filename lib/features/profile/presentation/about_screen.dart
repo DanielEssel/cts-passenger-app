@@ -85,7 +85,7 @@ class _AboutScreenState extends State<AboutScreen> {
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(12),
-        child: Image.asset('assets/logos/logo.png', width: 56, height: 56),
+        child: Image.asset('assets/logos/ctsgo_logo.png', width: 56, height: 56),
       ),
     );
   }
@@ -145,7 +145,7 @@ class _AboutScreenState extends State<AboutScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: Image.asset(
-                  'assets/logos/logo.png',
+                  'assets/logos/ctsgo_logo.png',
                   width: 80,
                   height: 80,
                   fit: BoxFit.contain,
@@ -262,8 +262,17 @@ class _AboutScreenState extends State<AboutScreen> {
 
   // ── Footer ────────────────────────────────────────────────────────────────
 
+  // CTSGo is the product; CTS Africa is the company that operates it.
   Widget _buildFooter() => Column(
         children: [
+          Image.asset('assets/logos/cts_africa_logo.png', height: 48),
+          const SizedBox(height: 4),
+          Text(
+            'CTSGo is a CTS Africa product',
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
           Text(
             'Made with ❤️ in Accra',
             style:
@@ -271,7 +280,7 @@ class _AboutScreenState extends State<AboutScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '© ${DateTime.now().year} CTSTransport Technologies Ltd',
+            '© ${DateTime.now().year} CTS Africa',
             style:
                 AppTextStyles.caption.copyWith(color: AppColors.textTertiary),
           ),

@@ -115,7 +115,7 @@ class TripTracker {
         distanceFilter: 3,
         intervalDuration: const Duration(seconds: 2),
         foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'CTS Go Driver',
+          notificationTitle: 'CTSGo',
           notificationText: 'Sharing your location for the active trip',
           enableWakeLock: true,
           setOngoing: true,
