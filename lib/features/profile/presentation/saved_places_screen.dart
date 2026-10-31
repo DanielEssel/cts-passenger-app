@@ -1,6 +1,8 @@
 // lib/features/profile/presentation/screens/saved_places_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/cts_ui.dart';
+import '../../../core/theme/cts_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -143,10 +145,13 @@ class SavedPlacesScreen extends ConsumerWidget {
         ),
         body: placesAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => _ErrorState(
-            message: e.toString(),
-            onRetry: () => ref.invalidate(savedPlacesStreamProvider),
-          ),
+          error: (e, _) {
+            debugPrint('Saved places load error: $e');
+            return _ErrorState(
+              message: 'Check your connection and try again.',
+              onRetry: () => ref.invalidate(savedPlacesStreamProvider),
+            );
+          },
           data: (places) => places.isEmpty
               ? _EmptyState(onAdd: () => _showAddEditSheet(context, ref))
               : ListView.separated(
@@ -619,35 +624,25 @@ class _PlaceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        color: CtsTheme.surface,
+        borderRadius: BorderRadius.circular(CtsTheme.radiusLg),
+        border: Border.all(color: CtsTheme.border),
       ),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(_iconFor(place.iconKey),
-                color: AppColors.primary, size: 20),
-          ),
+          CtsIconTile(_iconFor(place.iconKey)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(place.label, style: AppTextStyles.labelLarge),
+                Text(place.label, style: CtsText.cardTitle),
                 const SizedBox(height: 2),
                 Text(
                   place.address,
-                  style: AppTextStyles.caption
-                      .copyWith(color: AppColors.textSecondary),
+                  style: CtsText.bodySmall.copyWith(fontSize: 13),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -655,8 +650,9 @@ class _PlaceTile extends StatelessWidget {
             ),
           ),
           PopupMenuButton<String>(
+            tooltip: 'Options for ${place.label}',
             icon: const Icon(Icons.more_vert_rounded,
-                color: AppColors.textTertiary, size: 18),
+                color: CtsTheme.textSecondary, size: 20),
             color: AppColors.surface,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -703,43 +699,15 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Icon(Icons.location_off_rounded,
-                    size: 34, color: AppColors.textTertiary),
-              ),
-              const SizedBox(height: 16),
-              const Text('No saved places', style: AppTextStyles.heading4),
-              const SizedBox(height: 6),
-              const Text(
+        child: SingleChildScrollView(
+          child: CtsEmptyState(
+            icon: Icons.location_off_rounded,
+            title: 'No saved places',
+            message:
                 'Save your home, office or frequent destinations for faster booking',
-                style: AppTextStyles.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              GestureDetector(
-                onTap: onAdd,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text('Add a place', style: AppTextStyles.button),
-                ),
-              ),
-            ],
+            actionLabel: 'Add a place',
+            onAction: onAdd,
+            primaryAction: true,
           ),
         ),
       );
@@ -752,35 +720,13 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.cloud_off_rounded,
-                  size: 40, color: AppColors.textTertiary),
-              const SizedBox(height: 12),
-              const Text('Could not load saved places',
-                  style: AppTextStyles.heading4),
-              const SizedBox(height: 6),
-              Text(message,
-                  style: AppTextStyles.caption
-                      .copyWith(color: AppColors.textSecondary),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: onRetry,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text('Retry', style: AppTextStyles.button),
-                ),
-              ),
-            ],
+        child: SingleChildScrollView(
+          child: CtsEmptyState(
+            icon: Icons.cloud_off_rounded,
+            title: 'Could not load saved places',
+            message: message,
+            actionLabel: 'Retry',
+            onAction: onRetry,
           ),
         ),
       );

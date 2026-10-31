@@ -1,6 +1,8 @@
 // lib/features/profile/presentation/screens/about_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/widgets/cts_ui.dart';
+import '../../../core/theme/cts_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -70,17 +72,16 @@ class _AboutScreenState extends State<AboutScreen> {
   }
 
   void _shareApp() {
-    const text =
-        'Try CTS Go — fast, safe rides and deliveries in Ghana! '
+    const text = 'Try CTSGo — fast, safe rides and deliveries in Ghana! '
         'Download: https://play.google.com/store/apps/details?id=com.cts.passenger';
     // Use share_plus API
-    Share.share(text, subject: 'CTS Go');
+    Share.share(text, subject: 'CTSGo');
   }
 
   void _showLicenses() {
     showLicensePage(
       context: context,
-      applicationName: 'CTS Go',
+      applicationName: 'CTSGo',
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(12),
@@ -95,7 +96,7 @@ class _AboutScreenState extends State<AboutScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CTSTransportAppBar(title: 'About CTS Go'),
+      appBar: const CTSTransportAppBar(title: 'About CTSGo'),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(20),
@@ -155,7 +156,7 @@ class _AboutScreenState extends State<AboutScreen> {
             const SizedBox(height: 16),
 
             Text(
-              'CTSTransport',
+              'CTSGo',
               style:
                   AppTextStyles.heading2.copyWith(color: AppColors.background),
             ),
@@ -235,13 +236,13 @@ class _AboutScreenState extends State<AboutScreen> {
           _LinkTile(
             icon: Icons.star_rounded,
             iconColor: const Color(0xFFF59E0B),
-            label: 'Rate CTSTransport',
+            label: 'Rate CTSGo',
             onTap: _rateApp,
           ),
           _LinkTile(
             icon: Icons.share_rounded,
             iconColor: AppColors.primary,
-            label: 'Share CTSTransport',
+            label: 'Share CTSGo',
             onTap: _shareApp,
             isLast: true,
           ),
@@ -289,10 +290,11 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
+          color: CtsTheme.surface,
+          borderRadius: BorderRadius.circular(CtsTheme.radiusLg),
+          border: Border.all(color: CtsTheme.border),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       );
 }
@@ -312,48 +314,18 @@ class _LinkTile extends StatelessWidget {
     this.isLast = false,
   });
 
+  // Amber marks "rate us"; everything else uses the brand tile.
+  CtsTone get _tone =>
+      iconColor == const Color(0xFFF59E0B) ? CtsTone.warning : CtsTone.brand;
+
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: (iconColor ?? AppColors.textSecondary)
-                        .withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Icon(
-                    icon,
-                    size: 18,
-                    color: iconColor ?? AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(child: Text(label, style: AppTextStyles.bodyMedium)),
-                const Icon(Icons.chevron_right_rounded,
-                    color: AppColors.textTertiary, size: 18),
-              ],
-            ),
-          ),
-        ),
-        if (!isLast)
-          const Divider(
-            height: 0.5,
-            thickness: 0.5,
-            indent: 66,
-            color: AppColors.borderLight,
-          ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Column(
+        children: [
+          CtsListRow(icon: icon, title: label, tone: _tone, onTap: onTap),
+          if (!isLast)
+            const Divider(height: 1, indent: 68, color: CtsTheme.borderLight),
+        ],
+      );
 }
 
 class _InfoRow extends StatelessWidget {
@@ -375,22 +347,20 @@ class _InfoRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           child: Row(
             children: [
-              Expanded(child: Text(label, style: AppTextStyles.bodyMedium)),
-              Text(
-                value,
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.textSecondary),
+              Expanded(child: Text(label, style: CtsText.cardTitle)),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.end,
+                  style: CtsText.bodySmall,
+                ),
               ),
             ],
           ),
         ),
         if (!isLast)
-          const Divider(
-            height: 0.5,
-            thickness: 0.5,
-            indent: 16,
-            color: AppColors.borderLight,
-          ),
+          const Divider(height: 1, indent: 16, color: CtsTheme.borderLight),
       ],
     );
   }

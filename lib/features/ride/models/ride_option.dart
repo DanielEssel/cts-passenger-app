@@ -272,7 +272,7 @@ class RideOption {
     return RideOption(
       serviceType: type,
       icon: type.icon,
-      name: type.displayName == 'Taxi' ? 'CTSTransport Taxi' : type.displayName,
+      name: type.displayName == 'Taxi' ? 'CTSGo Taxi' : type.displayName,
       badge: type.badge,
       description: type.description,
       eta: type.eta,

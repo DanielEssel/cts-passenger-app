@@ -1,7 +1,8 @@
 // lib/features/delivery/models/delivery_request.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../core/utils/otp_utils.dart';
+import '../../../core/utils/driver_location.dart';
+import '../../tracking/domain/tracking_view.dart' show readDriverLocationTime;
 
 enum DeliveryStatus {
   pending,
@@ -59,6 +60,13 @@ class DeliveryRequest {
   final GeoPoint?      driverLocation;   // ← add: live position
   final double?        driverHeading;
 
+  /// The status exactly as stored. [status] maps values this app does not
+  /// know to `pending`; tracking uses this so they are shown as unknown.
+  final String?        rawStatus;
+
+  /// When the Driver App last wrote [driverLocation] (read only).
+  final DateTime?      driverLocationAt;
+
   // Locations
   final GeoPoint pickupLocation;
   final GeoPoint dropoffLocation;
@@ -95,6 +103,9 @@ class DeliveryRequest {
   // OTP for delivery confirmation
   final String? deliveryOtp;
 
+  /// The server quote this delivery was booked on (delivery_quotes.js).
+  final String? deliveryQuoteId;
+
   // Payment
   final String paymentMethod;
 
@@ -110,6 +121,8 @@ class DeliveryRequest {
     this.driverRating,
     this.driverLocation,
     this.driverHeading,
+    this.rawStatus,
+    this.driverLocationAt,
     required this.status,
     required this.pickupLocation,
     required this.dropoffLocation,
@@ -133,6 +146,7 @@ class DeliveryRequest {
     this.completedAt,
     this.cancelledAt,
     this.deliveryOtp,
+    this.deliveryQuoteId,
     required this.paymentMethod,
     this.passengerRating,
   });
@@ -172,7 +186,10 @@ class DeliveryRequest {
       paymentMethod:   d['paymentMethod']   as String? ?? 'wallet',
       passengerRating: (d['passengerRating'] as num?)?.toDouble(),
       deliveryOtp:     d['deliveryOtp']     as String?,
-      driverLocation:  d['driverLocation']  as GeoPoint?,
+      deliveryQuoteId: d['deliveryQuoteId'] as String?,
+      driverLocation:  readDriverLocation(d),
+      rawStatus:       d['status'] as String?,
+      driverLocationAt: readDriverLocationTime(d),
       driverHeading:   (d['driverHeading']   as num?)?.toDouble()   
     );  
   }
@@ -198,8 +215,11 @@ class DeliveryRequest {
     'vehicleType':     vehicleType,
     'receiverPhone':   receiverPhone,
     'receiverName':    receiverName,
-    'deliveryOtp':     deliveryOtp ?? OtpUtils.generate(),
+    // New orders carry no code: the server creates it where the driver
+    // cannot read it (functions/completion_codes.js).
+    if (deliveryOtp != null) 'deliveryOtp': deliveryOtp,
     'estimatedFare':   estimatedFare,
+    if (deliveryQuoteId != null) 'deliveryQuoteId': deliveryQuoteId,
     'actualFare':      actualFare,
     'createdAt':       FieldValue.serverTimestamp(),
     'assignedAt':      null,

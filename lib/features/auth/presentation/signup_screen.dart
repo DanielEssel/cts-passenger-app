@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
+import '../../../core/theme/cts_theme.dart';
 import '../../../core/routes/app_routes.dart';
 import '../providers/auth_providers.dart';
 import '../../auth/widgets/auth_widgets.dart';
@@ -89,65 +89,62 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
     final email = _emailController.text.trim();
 
     // ✅ E.164 number with country code from PhoneInputField
-    final phone = _phoneKey.currentState?.fullNumber
-        ?? _phoneController.text.trim();
+    final phone =
+        _phoneKey.currentState?.fullNumber ?? _phoneController.text.trim();
 
-        // ── Check if phone number already registered ──
-  try {
-    final existing = await FirebaseFirestore.instance
-        .collection('users')
-        .where('phoneNumber', isEqualTo: phone)
-        .limit(1)
-        .get();
+    // ── Check if phone number already registered ──
+    try {
+      final existing = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phoneNumber', isEqualTo: phone)
+          .limit(1)
+          .get();
 
-    if (existing.docs.isNotEmpty) {
-      _showError(
-          'This number is already registered. Please sign in instead.');
-      return;
+      if (existing.docs.isNotEmpty) {
+        _showError(
+            'This number is already registered. Please sign in instead.');
+        return;
+      }
+    } catch (e) {
+      // Non-fatal — let the flow continue if check fails
+      debugPrint('Phone existence check failed: $e');
     }
-  } catch (e) {
-    // Non-fatal — let the flow continue if check fails
-    debugPrint('Phone existence check failed: $e');
-  }
 
     await ref.read(authProvider.notifier).signUp(
-  firstName: firstName,
-  lastName: lastName,
-  phone: phone,
-  email: email,
+          firstName: firstName,
+          lastName: lastName,
+          phone: phone,
+          email: email,
+          onCodeSent: () {
+            Navigator.pushNamed(
+              context,
+              AppRoutes.otpVerification,
+              arguments: {
+                'phone': phone,
+                'isSignUp': true,
+                'firstName': firstName,
+                'lastName': lastName,
+                'email': email,
+              },
+            );
+          },
+          onAuthenticated: () {
+            if (!context.mounted) return;
 
-  onCodeSent: () {
-    Navigator.pushNamed(
-      context,
-      AppRoutes.otpVerification,
-      arguments: {
-        'phone': phone,
-        'isSignUp': true,
-        'firstName': firstName,
-        'lastName': lastName,
-        'email': email,
-      },
-    );
-  },
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.welcome,
+              (_) => false,
+            );
+          },
+          onError: (msg) {
+            if (!context.mounted) return;
 
-  onAuthenticated: () {
-    if (!context.mounted) return;
-
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.welcome,
-      (_) => false,
-    );
-  },
-
-  onError: (msg) {
-    if (!context.mounted) return;
-
-    // Keep your existing error UI.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
-  },
-);
+            // Keep your existing error UI.
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(msg)),
+            );
+          },
+        );
   }
 
   void _showError(String message) {
@@ -156,8 +153,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
         content: Text(message),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       ),
     );
@@ -209,8 +205,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
             top: -50,
             left: -60,
             child: AuthGlow(
-              color: AppColors.primary, 
-              size: 200, 
+              color: AppColors.primary,
+              size: 200,
               opacity: 0.10,
             ),
           ),
@@ -218,8 +214,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
             bottom: 120,
             right: -50,
             child: AuthGlow(
-              color: AppColors.secondary, 
-              size: 160, 
+              color: CtsTheme.apple,
+              size: 160,
               opacity: 0.08,
             ),
           ),
@@ -234,7 +230,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                   child: Form(
                     key: _formKey,
                     child: Column(
-  crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 12),
                         // Premium Back Button - larger touch target
@@ -245,54 +241,41 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                         const SizedBox(height: 32),
 
                         // Typography with better hierarchy
-                        Center(
-                          child: Text(
-                            'Create account',
-                            style: AppTextStyles.heading1.copyWith(
-                              fontSize: 34,
-                              height: 1.1,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                        Semantics(
+                          header: true,
+                          child: const Text('Create account',
+                              style: CtsText.title1),
                         ),
-                        const SizedBox(height: 6),
-                        Center(
-                          child: Text(
-                            'Join thousands riding smarter across Ghana',
-                            textAlign: TextAlign.center,
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: AppColors.textSecondary,
-                              height: 1.5,
-                              fontSize: 16,
-                            ),
-                          ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Join thousands riding smarter across Ghana',
+                          style: CtsText.body
+                              .copyWith(color: CtsTheme.textSecondary),
                         ),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 28),
 
                         // Name row with premium styling
                         Row(
                           children: [
                             Expanded(
                               child: AuthFormField(
-                                label: 'FIRST NAME',
+                                label: 'First name',
                                 hint: 'John',
                                 controller: _firstNameController,
                                 validator: _validateName,
                                 enabled: !isLoading,
-                                textCapitalization:
-                                    TextCapitalization.words,
+                                textCapitalization: TextCapitalization.words,
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: AuthFormField(
-                                label: 'LAST NAME',
+                                label: 'Last name',
                                 hint: 'Doe',
                                 controller: _lastNameController,
                                 validator: _validateName,
                                 enabled: !isLoading,
-                                textCapitalization:
-                                    TextCapitalization.words,
+                                textCapitalization: TextCapitalization.words,
                               ),
                             ),
                           ],
@@ -300,23 +283,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                         const SizedBox(height: 18),
 
                         // Phone with premium styling
-                        const AuthFieldLabel('PHONE NUMBER'),
+                        const AuthFieldLabel('Phone number'),
                         const SizedBox(height: 6),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: AppColors.border.withValues(alpha: 0.3),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.03),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
+                        SizedBox(
                           child: PhoneInputField(
                             key: _phoneKey,
                             controller: _phoneController,
@@ -328,7 +297,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
 
                         // Email field with premium styling
                         AuthFormField(
-                          label: 'EMAIL (OPTIONAL)',
+                          label: 'Email (optional)',
                           hint: 'john@example.com',
                           controller: _emailController,
                           validator: _validateEmail,
@@ -341,8 +310,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                         // Premium Terms checkbox
                         _PremiumTermsCheckbox(
                           value: _agreeToTerms,
-                          onChanged: (v) =>
-                              setState(() => _agreeToTerms = v),
+                          onChanged: (v) => setState(() => _agreeToTerms = v),
                         ),
                         const SizedBox(height: 32),
 
@@ -355,34 +323,33 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                         const SizedBox(height: 24),
 
                         // Premium Sign in link
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            Text(
+                            const Text(
                               'Already have an account? ',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.textSecondary,
-                                fontSize: 14,
-                              ),
+                              style: CtsText.bodySmall,
                             ),
                             GestureDetector(
                               onTap: () {
                                 HapticFeedback.selectionClick();
                                 Navigator.pushReplacementNamed(
-                                  context, 
+                                  context,
                                   AppRoutes.login,
                                 );
                               },
                               child: Container(
+                                constraints: const BoxConstraints(
+                                    minHeight: CtsTheme.minTouch),
+                                alignment: Alignment.center,
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
+                                  horizontal: 6,
                                 ),
                                 child: Text(
                                   'Sign in',
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.primary,
-                                    fontWeight: FontWeight.w700,
+                                  style: CtsText.label.copyWith(
+                                    color: CtsTheme.primary,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -391,8 +358,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                           ],
                         ),
                         SizedBox(
-                          height:
-                              MediaQuery.of(context).padding.bottom + 24,
+                          height: MediaQuery.of(context).padding.bottom + 24,
                         ),
                       ],
                     ),
@@ -416,32 +382,7 @@ class _PremiumBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.pop(context),
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.border.withValues(alpha: 0.3),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: AppColors.textPrimary,
-          size: 20,
-        ),
-      ),
-    );
+    return const AuthBackButton();
   }
 }
 
@@ -479,80 +420,72 @@ class _PremiumTermsCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onChanged(!value);
-      },
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: value ? AppColors.primary : Colors.white,
-              borderRadius: BorderRadius.circular(7),
-              border: Border.all(
-                color: value ? AppColors.primary : AppColors.border,
-                width: value ? 0 : 1.5,
+    return Semantics(
+      checked: value,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onChanged(!value);
+        },
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: value ? CtsTheme.primary : CtsTheme.surface,
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(
+                  color: value ? CtsTheme.primary : CtsTheme.textTertiary,
+                  width: 1.5,
+                ),
               ),
-              boxShadow: value
-                  ? [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ]
+              child: value
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 16,
+                    )
                   : null,
             ),
-            child: value
-                ? const Icon(
-                    Icons.check_rounded,
-                    color: Colors.white,
-                    size: 16,
-                  )
-                : null,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
-                  height: 1.5,
-                  fontSize: 14,
+            const SizedBox(width: 14),
+            Expanded(
+              child: RichText(
+                text: TextSpan(
+                  style: CtsText.bodySmall.copyWith(height: 1.5),
+                  children: [
+                    const TextSpan(
+                        text: 'I confirm I am 18 or older and agree to the '),
+                    TextSpan(
+                      text: 'Terms & Conditions',
+                      style: CtsText.bodySmall.copyWith(
+                        color: CtsTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap =
+                            () => LegalUrls.open(context, LegalUrls.terms),
+                    ),
+                    const TextSpan(text: ' and '),
+                    TextSpan(
+                      text: 'Privacy Policy',
+                      style: CtsText.bodySmall.copyWith(
+                        color: CtsTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap =
+                            () => LegalUrls.open(context, LegalUrls.privacy),
+                    ),
+                  ],
                 ),
-                children: [
-                  const TextSpan(text: 'I confirm I am 18 or older and agree to the '),
-                  TextSpan(
-                    text: 'Terms & Conditions',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                    recognizer: TapGestureRecognizer()
-                      ..onTap = () => LegalUrls.open(context, LegalUrls.terms),
-                  ),
-                  const TextSpan(text: ' and '),
-                  TextSpan(
-                    text: 'Privacy Policy',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                    recognizer: TapGestureRecognizer()
-                      ..onTap = () => LegalUrls.open(context, LegalUrls.privacy),
-                  ),
-                ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -589,6 +522,7 @@ class _PremiumSignupButtonState extends State<_PremiumSignupButton>
       duration: const Duration(milliseconds: 150),
       lowerBound: 0.97,
       upperBound: 1.0,
+      value: 1.0,
     );
   }
 
@@ -600,93 +534,78 @@ class _PremiumSignupButtonState extends State<_PremiumSignupButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) {
-        if (!widget.isLoading) {
+    return Semantics(
+      button: true,
+      enabled: !widget.isLoading,
+      child: GestureDetector(
+        onTapDown: (_) {
+          if (!widget.isLoading) {
+            _scaleController.reverse();
+            HapticFeedback.lightImpact();
+          }
+        },
+        onTapUp: (_) {
           _scaleController.forward();
-          HapticFeedback.lightImpact();
-        }
-      },
-      onTapUp: (_) {
-        _scaleController.reverse();
-        if (!widget.isLoading) {
-          widget.onTap();
-        }
-      },
-      onTapCancel: () {
-        _scaleController.reverse();
-      },
-      child: AnimatedBuilder(
-        animation: _scaleController,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleController.value,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              decoration: BoxDecoration(
-                gradient: widget.isLoading
-                    ? LinearGradient(
-                        colors: [
-                          AppColors.primary.withValues(alpha: 0.6),
-                          AppColors.primary.withValues(alpha: 0.4),
-                        ],
-                      )
-                    : LinearGradient(
-                        colors: [
-                          AppColors.primary,
-                          AppColors.primary.withValues(alpha: 0.8),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: widget.isLoading
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-              ),
-              child: Center(
-                child: widget.isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.label,
-                            style: AppTextStyles.button.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 17,
-                              letterSpacing: 0.3,
+          if (!widget.isLoading) {
+            widget.onTap();
+          }
+        },
+        onTapCancel: () {
+          _scaleController.forward();
+        },
+        child: AnimatedBuilder(
+          animation: _scaleController,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _scaleController.value,
+              child: Container(
+                width: double.infinity,
+                constraints:
+                    const BoxConstraints(minHeight: CtsTheme.buttonHeight),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: widget.isLoading
+                      ? CtsTheme.vivid.withValues(alpha: 0.7)
+                      : CtsTheme.vivid,
+                  borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+                ),
+                child: Center(
+                  child: widget.isLoading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              CtsTheme.onVivid,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          const Icon(
-                            Icons.person_add_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ],
-                      ),
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.label,
+                                textAlign: TextAlign.center,
+                                style: CtsText.button
+                                    .copyWith(color: CtsTheme.onVivid),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.person_add_rounded,
+                              color: CtsTheme.onVivid,
+                              size: 20,
+                            ),
+                          ],
+                        ),
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

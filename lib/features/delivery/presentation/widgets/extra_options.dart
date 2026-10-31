@@ -2,11 +2,13 @@
 //
 // Fragile + loading-helpers toggles. The helpers toggle is disabled (and
 // visually explained) when the selected weight tier can't carry helpers —
-// preventing a +GHS 10 charge for a vehicle class the tier can't use.
+// preventing a helpers charge for a vehicle class the tier can't use.
+// Fee amounts come from PricingService, the same values the fare uses.
 
 import 'package:flutter/material.dart';
 
-import '../../../../core/constants/app_colors.dart';
+import '../../../../core/services/pricing_service.dart';
+import '../../../../core/theme/cts_theme.dart';
 import '../../domain/delivery_form_validator.dart';
 
 class ExtraOptions extends StatelessWidget {
@@ -28,27 +30,33 @@ class ExtraOptions extends StatelessWidget {
     required this.selectedTierVehicles,
   });
 
+  static String _fee(double v) => '+GHS ${v.toStringAsFixed(2)}';
+
   @override
   Widget build(BuildContext context) {
+    final pricing = PricingService.instance;
     final helpersAllowed = selectedTierVehicles != null &&
         DeliveryFormValidator.helpersAllowedForTier(selectedTierVehicles!);
 
     return Column(
       children: [
         _ToggleRow(
-          icon: Icons.broken_image_rounded,
+          icon: Icons.wine_bar_rounded,
           label: 'Fragile item',
-          subtitle: '+GHS 5.00 handling fee',
+          subtitle:
+              'Handled with extra care · ${_fee(pricing.deliveryFragileSurcharge)}',
           value: isFragile,
           onChanged: onFragileChanged,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         _ToggleRow(
           icon: Icons.people_rounded,
-          label: 'Requires loading helpers',
-          subtitle: selectedTierVehicles != null && !helpersAllowed
-              ? 'Not available for this weight tier'
-              : '+GHS 10.00 (Aboboya / Mini Truck only)',
+          label: 'Loading helpers',
+          subtitle: selectedTierVehicles == null
+              ? 'Choose a weight first · Aboboya / Mini Truck only'
+              : helpersAllowed
+                  ? 'Help to load and unload · ${_fee(pricing.deliveryHelperSurcharge)}'
+                  : 'Not available for this weight',
           value: helpersAllowed && requiresHelpers,
           enabled: helpersAllowed,
           onChanged: helpersAllowed ? onHelpersChanged : null,
@@ -77,52 +85,60 @@ class _ToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: enabled ? 1 : 0.55,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: value
-              ? AppColors.primary.withValues(alpha: 0.06)
-              : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: value ? AppColors.primary : AppColors.border,
-            width: value ? 1.5 : 0.5,
+    return MergeSemantics(
+      child: Material(
+        color: value ? CtsTheme.primaryTint : CtsTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: value ? CtsTheme.primary : CtsTheme.border,
+            width: value ? 1.5 : 1,
           ),
         ),
-        child: Row(
-          children: [
-            Icon(icon,
-                size: 18,
-                color: value ? AppColors.primary : AppColors.textSecondary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: value
-                            ? AppColors.primary
-                            : AppColors.textPrimary,
-                      )),
-                  Text(subtitle,
-                      style: const TextStyle(
-                          fontSize: 11, color: AppColors.textSecondary)),
-                ],
-              ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onChanged == null ? null : () => onChanged!(!value),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+            child: Row(
+              children: [
+                Icon(icon,
+                    size: 20,
+                    color: !enabled
+                        ? CtsTheme.textTertiary
+                        : value
+                            ? CtsTheme.primaryDeep
+                            : CtsTheme.textSecondary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label,
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: enabled
+                                ? CtsTheme.textPrimary
+                                : CtsTheme.textTertiary,
+                          )),
+                      const SizedBox(height: 1),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 12, color: CtsTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: value,
+                  onChanged: onChanged,
+                  activeThumbColor: Colors.white,
+                  activeTrackColor: CtsTheme.primary,
+                ),
+              ],
             ),
-            Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: AppColors.primary,
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -14,7 +14,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        "test",
+        "scripts",
+        "*.log",
+        "*.bak",
+        "*.md",
+        "*.example"
       ]
     }
   ],
@@ -29,5 +35,15 @@
         }
       }
     }
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }

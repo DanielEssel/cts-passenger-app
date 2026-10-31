@@ -3,11 +3,11 @@
 import 'package:flutter/material.dart';
 
 // ════════════════════════════════════════════════════════════
-//  CTS TRANSPORT — PREMIUM LIGHT FOREST PALETTE
+//  CTSGo — APPLE-GREEN PALETTE (legacy names)
 //
-//  Philosophy: premium daytime transport — clean, trustworthy,
-//  and alive. Crisp whites + rich forest green + warm gold.
-//  Every variable name preserved — zero breakage.
+//  Values mirror CtsTheme (lib/core/theme/cts_theme.dart), the
+//  source of truth. Names are kept so existing screens compile
+//  unchanged; new code should use CtsTheme / CtsText.
 // ════════════════════════════════════════════════════════════
 
 class AppColors {
@@ -16,11 +16,11 @@ class AppColors {
   // PRIMARY  —  Forest Green
   // Rich, confident green. Readable on white, premium on card.
   // ──────────────────────────────────────────────────────────
-  static const Color primary       = Color(0xFF00A86B); // forest emerald
-  static const Color primaryDark   = Color(0xFF007A4D); // deep pressed state
-  static const Color primaryLight  = Color(0xFF33C98A); // hover / highlight
-  static const Color primaryDim    = Color(0xFFE6F7F1); // 10% tint overlay
-  static const Color primaryGlow1  = Color(0x4000A86B); // glow shadow
+  static const Color primary       = Color(0xFF15803D); // CTSGo action green (CtsTheme.primary)
+  static const Color primaryDark   = Color(0xFF15803D); // deep pressed state
+  static const Color primaryLight  = Color(0xFF16A34A); // brand-green accent
+  static const Color primaryDim    = Color(0xFFDCFCE7); // selected tint
+  static const Color primaryGlow1  = Color(0x4015803D); // glow shadow
 
   // ──────────────────────────────────────────────────────────
   // SECONDARY  —  Warm Gold
@@ -37,15 +37,15 @@ class AppColors {
   // Pure white base stepping up to very faint sage tints.
   // Feels airy, clinical-clean, premium.
   // ──────────────────────────────────────────────────────────
-  static const Color background        = Color(0xFFF7FAF8); // off-white sage
-  static const Color backgroundAlt     = Color(0xFFF0F5F2); // slightly tinted
+  static const Color background        = Color(0xFFF7F9F7); // page
+  static const Color backgroundAlt     = Color(0xFFF0F3F0); // slightly tinted
   static const Color surface           = Color(0xFFFFFFFF); // pure white card
-  static const Color surfaceAlt        = Color(0xFFF3F8F5); // lifted card
-  static const Color surfaceElevated   = Color(0xFFECF4EF); // modal / sheet
+  static const Color surfaceAlt        = Color(0xFFF0F3F0); // inset / field
+  static const Color surfaceElevated   = Color(0xFFDCFCE7); // tinted panel
 
   // Dark-specific aliases — kept for headers / navbars
-  static const Color darkSurface = Color(0xFF0D3D24); // deep forest
-  static const Color darkNavy    = Color(0xFF0A2E1A); // richest forest black
+  static const Color darkSurface = Color(0xFF166534); // deep forest
+  static const Color darkNavy    = Color(0xFF0F3D24); // richest forest black
   static const Color deepBlue    = Color(0xFF0D3D24); // name preserved
   static const Color darkBlue    = Color(0xFF0F4A2C); // name preserved
 
@@ -54,46 +54,46 @@ class AppColors {
   // Deep charcoal stepping down to soft sage.
   // Excellent readability on white backgrounds.
   // ──────────────────────────────────────────────────────────
-  static const Color textPrimary     = Color(0xFF0D1F14); // deep forest black
-  static const Color textSecondary   = Color(0xFF4A6B57); // sage charcoal
-  static const Color textTertiary    = Color(0xFF8CA898); // muted sage
-  static const Color textDisabled    = Color(0xFFBDD4C7); // disabled
-  static const Color textOnDark      = Color(0xFFF7FAF8); // on dark surfaces
-  static const Color textOnDarkMuted = Color(0xFFADD4BE); // secondary on dark
+  static const Color textPrimary     = Color(0xFF17211B); // ink
+  static const Color textSecondary   = Color(0xFF667168); // secondary (5.1:1)
+  static const Color textTertiary    = Color(0xFF6B756D); // tertiary (4.8:1)
+  static const Color textDisabled    = Color(0xFF9AA39C); // disabled
+  static const Color textOnDark      = Color(0xFFF7F9F7); // on dark surfaces
+  static const Color textOnDarkMuted = Color(0xFFC9EDB8); // secondary on dark
 
   // ──────────────────────────────────────────────────────────
   // STATUS COLORS  —  Vivid, readable on white
   // ──────────────────────────────────────────────────────────
-  static const Color success      = Color(0xFF00A86B);
-  static const Color successLight = Color(0xFFE6F7F1);
-  static const Color successDark  = Color(0xFF007A4D);
+  static const Color success      = Color(0xFF15803D);
+  static const Color successLight = Color(0xFFDCFCE7);
+  static const Color successDark  = Color(0xFF15803D);
 
-  static const Color error        = Color(0xFFE53935);
-  static const Color errorLight   = Color(0xFFFFEBEA);
-  static const Color errorDark    = Color(0xFFC62828);
+  static const Color error        = Color(0xFFDC2626);
+  static const Color errorLight   = Color(0xFFFEF2F2);
+  static const Color errorDark    = Color(0xFFB91C1C);
 
-  static const Color warning      = Color(0xFFF59E0B);
-  static const Color warningLight = Color(0xFFFFF8E1);
-  static const Color warningDark  = Color(0xFFD97706);
+  static const Color warning      = Color(0xFFB45309); // readable amber
+  static const Color warningLight = Color(0xFFFFF7E6);
+  static const Color warningDark  = Color(0xFF92400E);
 
-  static const Color info         = Color(0xFF2196F3);
-  static const Color infoLight    = Color(0xFFE3F2FD);
-  static const Color infoDark     = Color(0xFF1565C0);
+  static const Color info         = Color(0xFF1D4ED8);
+  static const Color infoLight    = Color(0xFFEFF4FF);
+  static const Color infoDark     = Color(0xFF1E3A8A);
 
   // ──────────────────────────────────────────────────────────
   // BORDERS & DIVIDERS
   // Subtle on white — visible but never heavy.
   // ──────────────────────────────────────────────────────────
-  static const Color border       = Color(0xFFDDEBE4); // soft sage edge
-  static const Color borderLight  = Color(0xFFEEF5F1); // hairline
-  static const Color borderFocus  = Color(0x6600A86B); // active input ring
-  static const Color divider      = Color(0xFFE8F0EC); // section rule
+  static const Color border       = Color(0xFFE1E7E1); // card & field edge
+  static const Color borderLight  = Color(0xFFEDF1ED); // hairline
+  static const Color borderFocus  = Color(0x6615803D); // active input ring
+  static const Color divider      = Color(0xFFEDF1ED); // section rule
 
   // ──────────────────────────────────────────────────────────
   // COMPONENT TOKENS
   // ──────────────────────────────────────────────────────────
-  static const Color shimmerBase      = Color(0xFFEEF4F0);
-  static const Color shimmerHighlight = Color(0xFFF7FAF8);
+  static const Color shimmerBase      = Color(0xFFEDF1ED);
+  static const Color shimmerHighlight = Color(0xFFF7F9F7);
 
   // ──────────────────────────────────────────────────────────
   // MAP COLORS  —  Light map tile tones
@@ -107,10 +107,10 @@ class AppColors {
   // ──────────────────────────────────────────────────────────
   // RIDE TYPE ACCENT COLORS
   // ──────────────────────────────────────────────────────────
-  static const Color taxi     = Color(0xFF00A86B); // forest green — flagship
-  static const Color okada    = Color(0xFFD4A843); // gold — fast & agile
-  static const Color delivery = Color(0xFF2196F3); // sapphire — logistics
-  static const Color gas      = Color(0xFFFF7A35); // ember — energy
+  static const Color taxi     = Color(0xFF15803D); // brand green — flagship
+  static const Color okada    = Color(0xFFB45309); // amber — fast & agile
+  static const Color delivery = Color(0xFF0369A1); // sky — logistics
+  static const Color gas      = Color(0xFFC2410C); // ember — energy
 
   // ──────────────────────────────────────────────────────────
   // UTILITY

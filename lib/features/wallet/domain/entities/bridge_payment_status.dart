@@ -10,12 +10,17 @@ class BridgePaymentStatus extends Equatable {
     this.bridgeStatus,
     this.amount,
     this.transactionId,
+    this.awaitingVerification = false,
   });
 
   final BridgeLocalStatus localStatus;
   final String? bridgeStatus;   // Bridge raw code: "000", "001", "002", "003"
   final double? amount;
   final String? transactionId;
+
+  /// Bridge reported a result that the server cannot verify yet: the top-up
+  /// stays pending and is credited only once it is confirmed.
+  final bool awaitingVerification;
 
   bool get isSuccess   => localStatus == BridgeLocalStatus.success;
   bool get isFailed    => localStatus == BridgeLocalStatus.failed
@@ -37,9 +42,11 @@ class BridgePaymentStatus extends Equatable {
       bridgeStatus:  map['status'] as String?,
       amount:        (map['amount'] as num?)?.toDouble(),
       transactionId: map['transactionId'] as String?,
+      awaitingVerification: map['awaitingVerification'] == true,
     );
   }
 
   @override
-  List<Object?> get props => [localStatus, bridgeStatus, amount, transactionId];
+  List<Object?> get props =>
+      [localStatus, bridgeStatus, amount, transactionId, awaitingVerification];
 }

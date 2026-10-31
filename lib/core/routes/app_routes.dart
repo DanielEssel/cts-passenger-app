@@ -18,6 +18,9 @@ class AppRoutes {
   static const String delivery = '/delivery';
   static const String notifications = '/notifications';
   static const String rideTracking = '/ride-tracking';
+  // The "Trip completed" push (onTripStatusChanged). Opens the trip, which
+  // shows its summary, or the arrival question if it is still unconfirmed.
+  static const String tripComplete = '/trip-complete';
 
   // ── Profile sub-screens ──────────────────────────────────────────────────
   static const String editProfile = '/edit-profile';

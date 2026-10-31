@@ -1,0 +1,34 @@
+{
+  "_comment": "Delivery fare parity table. The passenger app's PricingService.calculateDeliveryFare (test/delivery/delivery_fare_parity_test.dart) and the server's delivery_fare_validation.js (functions/test/payments/delivery_integrity.test.js) must both produce `expected` for every case. `legacyExpected` is the server-only reading of legacy flat delivery.* keys, which the app ignores. Totals avoid half-cent values so both languages round identically.",
+  "settings": {
+    "defaults": {},
+    "custom": {
+      "delivery": {
+        "okada": { "baseFare": 6.0, "perKmRate": 3.0, "minimumFare": 12.0 },
+        "aboboya": { "baseFare": 16.0, "perKmRate": 4.5, "minimumFare": 22.0 },
+        "miniTruck": { "baseFare": 45.0, "perKmRate": 8.0, "minimumFare": 60.0 },
+        "weightSurchargeMedium": 6.0,
+        "weightSurchargeLarge": 18.0,
+        "fragileItemSurcharge": 7.0,
+        "helperSurcharge": 12.0
+      }
+    },
+    "legacyFlat": {
+      "delivery": { "baseFare": 20.0, "perKmRate": 5.0, "minimumFare": 30.0 }
+    }
+  },
+  "cases": [
+    { "settings": "defaults", "vehicle": "Okada", "km": 0.5, "weight": "Small", "fragile": false, "helpers": false, "expected": 10.0 },
+    { "settings": "defaults", "vehicle": "Okada", "km": 4.2, "weight": "Small", "fragile": false, "helpers": false, "expected": 15.5 },
+    { "settings": "defaults", "vehicle": "Okada", "km": 3.3, "weight": "Medium", "fragile": true, "helpers": false, "expected": 23.25 },
+    { "settings": "defaults", "vehicle": "Aboboya", "km": 7.5, "weight": "Large", "fragile": true, "helpers": true, "expected": 75.0 },
+    { "settings": "defaults", "vehicle": "Mini Truck", "km": 1.0, "weight": "Bulk", "fragile": false, "helpers": false, "expected": 50.0 },
+    { "settings": "defaults", "vehicle": "Mini Truck", "km": 12.4, "weight": "Bulk", "fragile": false, "helpers": true, "expected": 136.8 },
+    { "settings": "custom", "vehicle": "Okada", "km": 2.0, "weight": "Medium", "fragile": false, "helpers": false, "expected": 18.0 },
+    { "settings": "custom", "vehicle": "Aboboya", "km": 0.0, "weight": "Large", "fragile": false, "helpers": false, "expected": 34.0 },
+    { "settings": "custom", "vehicle": "Mini Truck", "km": 3.0, "weight": "Small", "fragile": true, "helpers": true, "expected": 88.0 },
+    { "settings": "custom", "vehicle": "Okada", "km": 1.0, "weight": "Small", "fragile": false, "helpers": false, "expected": 12.0 },
+    { "settings": "legacyFlat", "vehicle": "Okada", "km": 2.0, "weight": "Small", "fragile": false, "helpers": false, "expected": 10.0, "legacyExpected": 30.0 },
+    { "settings": "legacyFlat", "vehicle": "Aboboya", "km": 4.0, "weight": "Medium", "fragile": false, "helpers": false, "expected": 36.0, "legacyExpected": 45.0 }
+  ]
+}

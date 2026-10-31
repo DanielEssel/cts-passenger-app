@@ -1,19 +1,23 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../../core/services/escrow_service.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
-import '../../../widgets/common/shared_widgets.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_booking.dart';
+import '../../../core/widgets/cts_ui.dart';
+import '../../home/widgets/service_tile.dart';
+import '../../ride/models/service_type.dart';
 import 'delivery_matching_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../domain/delivery_quote.dart';
 import '../models/delivery_request.dart';
 import '../../delivery/providers/delivery_provider.dart';
-import 'package:geolocator/geolocator.dart';
 import '../../../core/services/pricing_service.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../../ride/services/route_service.dart';
 import 'package:flutter/services.dart';
 
 class DeliveryVehicleScreen extends ConsumerStatefulWidget {
@@ -64,122 +68,138 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
     Widget option(String value, IconData icon, String label, String sub) {
       final selected = _paymentMethod == value;
       return Expanded(
-        child: GestureDetector(
+        child: CtsSelectableCard(
+          selected: selected,
+          semanticLabel: '$label, $sub',
+          showCheck: false,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           onTap: () => setState(() => _paymentMethod = value),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            decoration: BoxDecoration(
-              color: selected
-                  ? const Color(0xFF16A34A).withValues(alpha: 0.08)
-                  : const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFF16A34A)
-                    : const Color(0xFFE5E7EB),
-                width: selected ? 1.5 : 1,
+          child: Row(children: [
+            Icon(icon,
+                size: 18,
+                color:
+                    selected ? CtsTheme.primaryDeep : CtsTheme.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: CtsTheme.textPrimary,
+                      )),
+                  Text(sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12, color: CtsTheme.textSecondary)),
+                ],
               ),
             ),
-            child: Row(children: [
-              Icon(icon,
-                  size: 18,
-                  color: selected
-                      ? const Color(0xFF16A34A)
-                      : const Color(0xFF6B7280)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: selected
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFF111827),
-                        )),
-                    const SizedBox(height: 1),
-                    Text(sub,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF9CA3AF))),
-                  ],
-                ),
-              ),
-            ]),
-          ),
+          ]),
         ),
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Row(children: [
-        option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
-            'Pay from balance'),
-        const SizedBox(width: 10),
-        option('cash', Icons.money_rounded, 'Cash', 'Pay driver directly'),
-      ]),
-    );
+    return Row(children: [
+      option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
+          'Pay from balance'),
+      const SizedBox(width: 10),
+      option('cash', Icons.payments_rounded, 'Cash', 'Pay driver directly'),
+    ]);
   }
 
   @override
   void initState() {
     super.initState();
-    PricingService.instance.fetch();
-    _calculateDistance();
+    _startQuote();
   }
 
-  Future<void> _calculateDistance() async {
-    try {
-      final result = await ref.read(routeServiceProvider).getRoute(
-            LatLng(widget.pickupGeoPoint.latitude,
-                widget.pickupGeoPoint.longitude),
-            LatLng(widget.dropoffGeoPoint.latitude,
-                widget.dropoffGeoPoint.longitude),
-          );
-      if (!mounted) return;
-      if (result != null) {
-        setState(() {
-          _distanceKm = result.distanceKm;
-          _distanceApproximate = false;
-          _calculatingDistance = false;
-        });
-        return;
-      }
-      _fallbackStraightLine(); // Directions returned null
-    } catch (_) {
-      _fallbackStraightLine();
+  @override
+  void didUpdateWidget(DeliveryVehicleScreen old) {
+    super.didUpdateWidget(old);
+    final routeChanged = old.pickupGeoPoint != widget.pickupGeoPoint ||
+        old.dropoffGeoPoint != widget.dropoffGeoPoint;
+    final parcelChanged = old.weightTier != widget.weightTier ||
+        old.isFragile != widget.isFragile ||
+        old.requiresHelpers != widget.requiresHelpers ||
+        !listEquals(old.eligibleVehicles, widget.eligibleVehicles);
+    if (routeChanged || parcelChanged) {
+      _selectedVehicleIndex = 0;
+      _startQuote(); // build() follows didUpdateWidget
     }
   }
 
-  void _fallbackStraightLine() {
-    if (!mounted) return;
-    final metres = Geolocator.distanceBetween(
-      widget.pickupGeoPoint.latitude,
-      widget.pickupGeoPoint.longitude,
-      widget.dropoffGeoPoint.latitude,
-      widget.dropoffGeoPoint.longitude,
-    );
+  // The price is the server's quote (functions/delivery_quotes.js): it
+  // measures the road route and prices it from the approved rates. Until it
+  // answers — or if it cannot (no route, prices unavailable) — nothing is
+  // priced or charged; there is no local or straight-line estimate. Each
+  // request carries a sequence number so an older answer that arrives late
+  // can never replace a newer quote.
+  int _quoteSeq = 0;
+  DeliveryQuote? _quote;
+  bool _quoteFailed = false;
+  String? _quoteError;
+
+  bool get _calculatingDistance => _quote == null && !_quoteFailed;
+  double get _distanceKm => _quote?.distanceKm ?? 0;
+
+  void _startQuote() {
+    _quote = null;
+    _quoteFailed = false;
+    _quoteError = null;
+    unawaited(_fetchQuote(++_quoteSeq));
+  }
+
+  /// Server quotes for every offered vehicle, for the current inputs.
+  Future<DeliveryQuote> _requestQuotes() async {
+    final service = ref.read(deliveryQuoteServiceProvider);
+    final entries = await Future.wait(_vehicles.map((v) async {
+      final key = v['key'] as String;
+      return MapEntry(
+          key,
+          await service.quote(
+            pickup: widget.pickupGeoPoint,
+            dropoff: widget.dropoffGeoPoint,
+            vehicleType: key,
+            weightTier: widget.weightTier,
+            isFragile: widget.isFragile,
+            requiresHelpers: widget.requiresHelpers,
+          ));
+    }));
+    return DeliveryQuote(fares: Map.fromEntries(entries));
+  }
+
+  Future<void> _fetchQuote(int seq) async {
+    // The surcharge labels in the chips read the configured prices; the
+    // payable amount never does.
+    unawaited(() async {
+      try {
+        await ref.read(deliveryPricingLoaderProvider)();
+      } catch (_) {}
+    }());
+    DeliveryQuote? quote;
+    String? error;
+    try {
+      quote = await _requestQuotes();
+    } on DeliveryQuoteException catch (e) {
+      error = e.message;
+    } catch (_) {
+      error = null;
+    }
+    if (!mounted || seq != _quoteSeq) return; // superseded
     setState(() {
-      _distanceKm = metres / 1000;
-      _distanceApproximate = true;
-      _calculatingDistance = false;
+      _quote = quote;
+      _quoteFailed = quote == null;
+      _quoteError = error;
     });
   }
 
-  double _distanceKm = 0.0;
-  bool _calculatingDistance = true;
-  bool _distanceApproximate = false;
-
-  // Driver surcharges (Aboboya / Mini Truck only)
-  final List<Map<String, dynamic>> _surchargeOptions = [
-    {'label': 'None', 'amount': 0.0},
-    {'label': 'Oversized load', 'amount': 15.0},
-    {'label': 'Difficult access', 'amount': 8.0},
-  ];
-  int _selectedSurcharge = 0;
+  void _retryQuote() => setState(_startQuote);
 
   // Display metadata only — pricing comes from PricingService, not these.
   final List<Map<String, dynamic>> _allVehicles = [
@@ -189,8 +209,6 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       'name': 'Okada',
       'desc': 'Fast · small parcels only',
       'capacity': '0–5 kg',
-      'eta': '2 min',
-      'etaColor': AppColors.success,
     },
     {
       'key': 'Aboboya',
@@ -198,8 +216,6 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       'name': 'Aboboya',
       'desc': 'Tricycle · medium loads',
       'capacity': '5–100 kg',
-      'eta': '5 min',
-      'etaColor': AppColors.success,
     },
     {
       'key': 'Mini Truck',
@@ -207,8 +223,6 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
       'name': 'Mini Truck',
       'desc': 'Bulk goods · furniture · materials',
       'capacity': '100 kg+',
-      'eta': '8 min',
-      'etaColor': AppColors.warning,
     },
   ];
 
@@ -218,278 +232,310 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
 
   Map<String, dynamic> get _selected => _vehicles[_selectedVehicleIndex];
 
-  // Full fare from PricingService (single source of truth, matches the CF).
-  // Includes vehicle base+perKm, weight tier, fragile, and helper surcharges.
-  double get _totalFare {
-    final pricing = PricingService.instance.calculateDeliveryFare(
-      _distanceKm,
-      vehicleType: _selected['key'] as String,
-      weightTier: widget.weightTier,
-      isFragile: widget.isFragile,
-      requiresHelpers: widget.requiresHelpers,
-    );
-    // Optional driver-requested surcharge (passenger-approved) adds on top.
-    return pricing + _surchargeAmount;
-  }
+  // The selected vehicle's server quote: base + per-km, weight, fragile and
+  // helper surcharges, minimum fare. The same figure is shown, held in escrow
+  // and stored on the order (which the server checks against the quote).
+  ServerDeliveryQuote get _selectedFare =>
+      _quote!.fares[_selected['key'] as String]!;
 
-  double get _surchargeAmount =>
-      _surchargeOptions[_selectedSurcharge]['amount'] as double;
+  double get _totalFare => _selectedFare.total;
 
+  // Step 2 of 2: what is being sent, the vehicles that can carry it with
+  // their fares (from PricingService), payment, and the total. The action
+  // stays disabled until the route is measured, so no price is shown or
+  // charged before it is known.
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: const CTSTransportAppBar(title: 'Choose vehicle'),
-      body: Column(
-        children: [
-          // ── Route summary strip ─────────────────────────────────────────
-          _buildRouteSummary(),
-
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: ctsBrandOverlay,
+      child: Scaffold(
+        backgroundColor: CtsTheme.canvas,
+        body: Column(
+          children: [
+            const CtsStatusBarStrip(),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 24),
                 children: [
-                  // Weight + parcel info row
-                  _buildInfoChips(),
-                  const SizedBox(height: 16),
-
-                  const Text('Available vehicles',
-                      style: AppTextStyles.heading4),
-                  const SizedBox(height: 10),
-
-                  // Vehicle cards
-                  ..._vehicles.asMap().entries.map((e) {
-                    final vfare = PricingService.instance.calculateDeliveryFare(
-                      _distanceKm,
-                      vehicleType: e.value['key'] as String,
-                      weightTier: widget.weightTier,
-                      isFragile: widget.isFragile,
-                      requiresHelpers: widget.requiresHelpers,
-                    );
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _VehicleCard(
-                        vehicle: e.value,
-                        isSelected: _selectedVehicleIndex == e.key,
-                        fare: vfare,
-                        onTap: () => setState(() {
-                          _selectedVehicleIndex = e.key;
-                          _selectedSurcharge = 0;
-                        }),
-                      ),
-                    );
-                  }),
-
-                  const SizedBox(height: 16),
-
-                  // Fare breakdown
-                  _buildFareBreakdown(),
-                  const SizedBox(height: 20),
+                  const CtsBrandHeader(
+                    eyebrow: 'Step 2 of 2 · Vehicle & price',
+                    title: 'Choose a vehicle',
+                    subtitle: 'Check your delivery, pick a vehicle and '
+                        'confirm the price.',
+                    icon: Icons.local_shipping_rounded,
+                  ),
+                  const SizedBox(height: 18),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        CtsFormSection(
+                          number: '1',
+                          title: 'Your delivery',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildRouteSummary(),
+                              const SizedBox(height: 12),
+                              _buildInfoChips(),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        CtsFormSection(
+                          number: '2',
+                          title: 'Vehicle',
+                          caption:
+                              'For ${widget.weightTier.toLowerCase()} parcels (${widget.weightRange})',
+                          child: Column(
+                            children: [
+                              for (final e in _vehicles.asMap().entries) ...[
+                                if (e.key > 0) const SizedBox(height: 8),
+                                _VehicleCard(
+                                  vehicle: e.value,
+                                  isSelected: _selectedVehicleIndex == e.key,
+                                  fare: _quote
+                                      ?.fares[e.value['key'] as String]?.total,
+                                  unavailable: _quoteFailed,
+                                  approximate: false,
+                                  onTap: () => setState(() {
+                                    _selectedVehicleIndex = e.key;
+                                  }),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        CtsFormSection(
+                          number: '3',
+                          title: 'Payment',
+                          child: _buildPaymentSelector(),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildFareBreakdown(),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          ),
-
-          // ── Payment method ─────────────────────────────────────────────
-          _buildPaymentSelector(),
-
-          // ── Confirm button ─────────────────────────────────────────────
-          _buildConfirmButton(),
-        ],
+            CtsBookingBar(
+              hint: _calculatingDistance
+                  ? 'Measuring your route to price the delivery…'
+                  : _quoteFailed
+                      ? (_quoteError ??
+                          'We couldn\'t price this delivery right now. '
+                              'Check your connection and try again.')
+                      : null,
+              action: _quoteFailed
+                  ? CtsPrimaryButton(
+                      label: 'Try again',
+                      icon: Icons.refresh_rounded,
+                      onPressed: _retryQuote,
+                    )
+                  : CtsPrimaryButton(
+                      label: _calculatingDistance
+                          ? 'Calculating fare…'
+                          : 'Find a delivery driver',
+                      trailingText: _quote == null
+                          ? null
+                          : 'GHS ${_totalFare.toStringAsFixed(2)}',
+                      icon: Icons.local_shipping_rounded,
+                      loading: _isCreating,
+                      onPressed: _quote == null || _isCreating
+                          ? null
+                          : _confirmDelivery,
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildRouteSummary() {
-    return ColoredBox(
-      color: AppColors.surfaceAlt,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: Column(
-          children: [
-            _RouteRow(dot: AppColors.success, label: widget.pickup),
-            Padding(
-              padding: const EdgeInsets.only(left: 4, top: 3, bottom: 3),
-              child: Row(children: [
-                Container(
-                    width: 2,
-                    height: 14,
-                    decoration: BoxDecoration(
-                        color: AppColors.border,
-                        borderRadius: BorderRadius.circular(1)))
-              ]),
-            ),
-            _RouteRow(dot: AppColors.primary, label: widget.dropoff),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _StatPill(
-                    icon: Icons.straighten_rounded,
-                    label: _distanceApproximate
-                        ? '~${_distanceKm.toStringAsFixed(1)} km'
-                        : '${_distanceKm.toStringAsFixed(1)} km'),
-                const SizedBox(width: 10),
-                _StatPill(icon: Icons.scale_rounded, label: widget.weightRange),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoChips() {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 6,
-      children: [
-        _Chip(
-            label: widget.parcelType,
-            icon: Icons.inventory_2_rounded,
-            color: AppColors.info),
-        _Chip(
-            label: widget.weightTier,
-            icon: Icons.scale_rounded,
-            color: AppColors.primary),
-        if (widget.isFragile)
-          _Chip(
-              label:
-                  'Fragile +GHS ${PricingService.instance.deliveryFragileSurcharge.toStringAsFixed(0)}',
-              icon: Icons.broken_image_rounded,
-              color: AppColors.warning),
-        if (widget.requiresHelpers)
-          _Chip(
-              label:
-                  'Helpers +GHS ${PricingService.instance.deliveryHelperSurcharge.toStringAsFixed(0)}',
-              icon: Icons.people_rounded,
-              color: AppColors.warning),
-        if (widget.hasPhoto)
-          const _Chip(
-              label: 'Photo attached',
-              icon: Icons.photo_camera_rounded,
-              color: AppColors.success),
-      ],
-    );
-  }
-
-  Widget _buildFareBreakdown() {
-    final pricing = PricingService.instance;
-    // Real component values from settings (same ones PricingService uses).
-    final fragileAmt =
-        widget.isFragile ? pricing.deliveryFragileSurcharge : 0.0;
-    final helperAmt =
-        widget.requiresHelpers ? pricing.deliveryHelperSurcharge : 0.0;
-    final weightAmt = switch (widget.weightTier.toLowerCase()) {
-      'medium' => pricing.deliveryWeightMedium,
-      'large' => pricing.deliveryWeightLarge,
-      _ => pricing.deliveryWeightSmall,
-    };
-    // Base = total minus the itemized add-ons (and minus optional surcharge).
-    final base =
-        _totalFare - _surchargeAmount - fragileAmt - helperAmt - weightAmt;
-
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: AppColors.darkNavy,
+        color: CtsTheme.mint,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CtsTheme.mintBorder),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _DarkRow(
-              label: 'Base fare (${_distanceKm.toStringAsFixed(1)} km)',
-              value: 'GHS ${base.toStringAsFixed(2)}'),
-          if (weightAmt > 0) ...[
-            const SizedBox(height: 8),
-            _DarkRow(
-                label: '${widget.weightTier} package',
-                value: '+GHS ${weightAmt.toStringAsFixed(2)}'),
-          ],
-          if (fragileAmt > 0) ...[
-            const SizedBox(height: 8),
-            _DarkRow(
-                label: 'Fragile handling',
-                value: '+GHS ${fragileAmt.toStringAsFixed(2)}'),
-          ],
-          if (helperAmt > 0) ...[
-            const SizedBox(height: 8),
-            _DarkRow(
-                label: 'Loading helpers',
-                value: '+GHS ${helperAmt.toStringAsFixed(2)}'),
-          ],
-          if (_surchargeAmount > 0) ...[
-            const SizedBox(height: 8),
-            _DarkRow(
-                label: _surchargeOptions[_selectedSurcharge]['label'],
-                value: '+GHS ${_surchargeAmount.toStringAsFixed(2)}'),
-          ],
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Container(
-                height: 0.5, color: Colors.white.withValues(alpha: 0.15)),
+          _RouteRow(caption: 'Pickup', label: widget.pickup, filled: false),
+          const Padding(
+            padding: EdgeInsets.only(left: 5, top: 2, bottom: 2),
+            child: SizedBox(
+              height: 12,
+              child: VerticalDivider(
+                  width: 2, thickness: 2, color: CtsTheme.mintBorder),
+            ),
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          _RouteRow(caption: 'Drop-off', label: widget.dropoff, filled: true),
+          const Divider(height: 22, color: CtsTheme.mintBorder),
+          Wrap(
+            spacing: 16,
+            runSpacing: 6,
             children: [
-              Text('Total estimate',
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.textOnDarkMuted)),
-              Text('GHS ${_totalFare.toStringAsFixed(2)}',
-                  style: AppTextStyles.heading3
-                      .copyWith(color: AppColors.background)),
+              _StatPill(
+                  icon: Icons.straighten_rounded,
+                  label: _calculatingDistance
+                      ? 'Measuring route…'
+                      : _quoteFailed
+                          ? 'Route not measured'
+                          : '${_distanceKm.toStringAsFixed(1)} km'),
+              _StatPill(icon: Icons.scale_rounded, label: widget.weightRange),
             ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _distanceApproximate
-                ? 'Distance is approximate — final fare may vary.'
-                : 'Final fare may vary slightly based on actual distance.',
-            style: AppTextStyles.caption
-                .copyWith(color: AppColors.textOnDarkMuted),
-            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
+  Widget _buildInfoChips() {
+    final pricing = PricingService.instance;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _Chip(label: widget.parcelType, icon: Icons.inventory_2_rounded),
+        _Chip(label: widget.weightTier, icon: Icons.scale_rounded),
+        if (widget.isFragile)
+          _Chip(
+              label:
+                  'Fragile +GHS ${pricing.deliveryFragileSurcharge.toStringAsFixed(0)}',
+              icon: Icons.wine_bar_rounded),
+        if (widget.requiresHelpers)
+          _Chip(
+              label:
+                  'Helpers +GHS ${pricing.deliveryHelperSurcharge.toStringAsFixed(0)}',
+              icon: Icons.people_rounded),
+        if (widget.hasPhoto)
+          const _Chip(
+              label: 'Photo attached', icon: Icons.photo_camera_rounded),
+      ],
+    );
+  }
+
+  Widget _buildFareBreakdown() {
+    if (_calculatingDistance) {
+      return const CtsPriceSummary(
+        lines: [],
+        totalLabel: 'Total estimate',
+        total: null,
+        pendingText: 'Measuring route…',
+        note: 'The price appears once your route is measured.',
+      );
+    }
+    if (_quoteFailed) {
+      return const CtsPriceSummary(
+        lines: [],
+        totalLabel: 'Total estimate',
+        total: null,
+        pendingText: 'Price unavailable',
+        note: 'We couldn\'t price this route, so no price is shown and '
+            'nothing can be charged. Try again to continue.',
+      );
+    }
+    // Every amount below is a component of the server's quote, so the lines
+    // add up to exactly what is charged.
+    final f = _selectedFare;
+    final km = '${_distanceKm.toStringAsFixed(1)} km';
+    final components = f.distanceFare +
+        f.weightSurcharge +
+        f.fragileSurcharge +
+        f.helperSurcharge;
+    final minimumTopUp = f.minimumApplied ? f.total - components : 0.0;
+
+    return CtsPriceSummary(
+      lines: [
+        CtsPriceLine('Distance fare ($km by road)',
+            'GHS ${f.distanceFare.toStringAsFixed(2)}'),
+        if (f.weightSurcharge > 0)
+          CtsPriceLine('${widget.weightTier} package',
+              '+GHS ${f.weightSurcharge.toStringAsFixed(2)}'),
+        if (f.fragileSurcharge > 0)
+          CtsPriceLine('Fragile handling',
+              '+GHS ${f.fragileSurcharge.toStringAsFixed(2)}'),
+        if (f.helperSurcharge > 0)
+          CtsPriceLine('Loading helpers',
+              '+GHS ${f.helperSurcharge.toStringAsFixed(2)}'),
+        if (minimumTopUp > 0)
+          CtsPriceLine('Minimum fare top-up',
+              '+GHS ${minimumTopUp.toStringAsFixed(2)}'),
+      ],
+      totalLabel: 'Total',
+      total: 'GHS ${_totalFare.toStringAsFixed(2)}',
+      note: [
+        if (f.minimumApplied)
+          'Short trip: the ${_selected['name']} minimum fare of '
+              'GHS ${f.minimumFare.toStringAsFixed(2)} applies.',
+        'This is the price you pay for this booking.',
+      ].join(' '),
+    );
+  }
+
   bool _isCreating = false;
 
-  String _paymentMethod =
-      'wallet'; // 'wallet' | 'cash'final deliveryId = await repo.createDelivery
-
-  Widget _buildConfirmButton() => Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
-        ),
-        child: PrimaryButton(
-          label: _calculatingDistance
-              ? 'Calculating fare…'
-              : _isCreating
-                  ? 'Placing order…'
-                  : 'Confirm ${_selected['name']} — GHS ${_totalFare.toStringAsFixed(2)}',
-          onTap: _calculatingDistance || _isCreating ? null : _confirmDelivery,
-        ),
-      );
+  String _paymentMethod = 'wallet'; // 'wallet' | 'cash'
 
   Future<void> _confirmDelivery() async {
     if (_isCreating) return; // re-entry guard
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    if (_quote == null) return; // never charge without a current quote
+    final uid = ref.read(deliveryCurrentUidProvider)();
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please sign in again to place this delivery.'),
+      ));
+      return;
+    }
 
     HapticFeedback.mediumImpact(); // instant tactile feedback
     setState(() => _isCreating = true); // immediate loading state
+
+    // ── Step 0: a current quote ───────────────────────────────────────────
+    // The server accepts the order only on an unexpired quote at its total.
+    // A quote about to expire is replaced first; if its price differs, the
+    // customer sees old → new and goes on only if they agree.
+    if (_selectedFare.expiresSoon(DateTime.now())) {
+      final shown = _totalFare;
+      final seq = ++_quoteSeq;
+      DeliveryQuote? fresh;
+      try {
+        fresh = await _requestQuotes();
+      } on DeliveryQuoteException catch (e) {
+        if (mounted) {
+          setState(() => _isCreating = false);
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+        return;
+      } catch (_) {
+        if (mounted) setState(() => _isCreating = false);
+        return;
+      }
+      if (!mounted || seq != _quoteSeq) return;
+      setState(() => _quote = fresh);
+      if (_totalFare != shown) {
+        final agreed = await ref.read(deliveryPriceChangeConfirmProvider)(
+            context, shown, _totalFare);
+        if (agreed != true || !mounted) {
+          if (mounted) setState(() => _isCreating = false);
+          return;
+        }
+      }
+    }
+    final quote = _selectedFare;
 
     // ── Step 1: Hold funds (wallet only — cash is collected by the driver) ──
     String? escrowId;
     if (_paymentMethod == 'wallet') {
       final escrowResult = await EscrowService.instance.holdBalance(
-        amount: _totalFare,
+        amount: quote.total,
         serviceType: 'delivery',
         referenceType: 'delivery',
       );
@@ -498,7 +544,7 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
           setState(() => _isCreating = false);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(escrowResult.shortfall != null
-                ? 'Need GH₵${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up your wallet.'
+                ? 'Need GHS ${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up your wallet.'
                 : escrowResult.error ?? 'Payment hold failed.'),
             backgroundColor: const Color(0xFFDC2626),
             action: SnackBarAction(
@@ -534,7 +580,10 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
         receiverPhone:
             widget.receiverPhone.isEmpty ? null : widget.receiverPhone,
         receiverName: widget.receiverName.isEmpty ? null : widget.receiverName,
-        estimatedFare: _totalFare,
+        // Exactly the quote's total, for its route and parcel (the server
+        // refuses anything else).
+        estimatedFare: quote.total,
+        deliveryQuoteId: quote.quoteId,
         createdAt: DateTime.now(),
         paymentMethod: _paymentMethod,
       );
@@ -564,7 +613,7 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
             deliveryId: deliveryId,
             vehicleName: _selected['name'],
             dropoff: widget.dropoff,
-            fare: 'GHS ${_totalFare.toStringAsFixed(2)}',
+            fare: 'GHS ${quote.total.toStringAsFixed(2)}',
           ),
         ),
       );
@@ -579,9 +628,11 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
           });
         } catch (_) {}
       }
+      debugPrint('Delivery creation failed: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.toString()),
+        content: const Text(
+            'We couldn\'t place your delivery. Check your connection and try again.'),
         backgroundColor: AppColors.error,
       ));
     } finally {
@@ -591,120 +642,196 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
 }
 
 // ─── Vehicle Card ─────────────────────────────────────────────────────────────
+/// The signed-in customer's uid, or null. Overridable in tests.
+final deliveryCurrentUidProvider = Provider<String? Function()>(
+    (ref) => () => FirebaseAuth.instance.currentUser?.uid);
+
+/// Asks the customer to accept a delivery price that changed from [was] to
+/// [now] since it was shown; true to go on at [now]. Overridable in tests.
+final deliveryPriceChangeConfirmProvider = Provider<
+    Future<bool?> Function(BuildContext context, double was, double now)>(
+  (ref) => (context, was, now) => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delivery price updated'),
+          content: Text('The price for this delivery is now '
+              'GHS ${now.toStringAsFixed(2)} (was GHS ${was.toStringAsFixed(2)}).'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text('Book for GHS ${now.toStringAsFixed(2)}')),
+          ],
+        ),
+      ),
+);
+
 class _VehicleCard extends StatelessWidget {
   final Map<String, dynamic> vehicle;
   final bool isSelected;
-  final double fare;
+  final double? fare; // null until the route and prices are both loaded
+  final bool unavailable; // prices failed to load
+  final bool approximate; // priced from straight-line distance
   final VoidCallback onTap;
 
   const _VehicleCard({
     required this.vehicle,
     required this.isSelected,
     required this.fare,
+    required this.unavailable,
+    required this.approximate,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final fareText = fare != null
+        ? '${approximate ? '~' : ''}GHS ${fare!.toStringAsFixed(2)}'
+        : unavailable
+            ? 'Unavailable'
+            : 'Calculating…';
+    final fareCaption = approximate ? 'Approximate' : 'Estimate';
+    return CtsSelectableCard(
+      selected: isSelected,
+      showCheck: false,
+      semanticLabel:
+          '${vehicle['name']}, ${vehicle['desc']}, ${vehicle['capacity']}, $fareText ${fareCaption.toLowerCase()}',
+      padding: const EdgeInsets.all(10),
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primary.withValues(alpha: 0.06)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : AppColors.border,
-            width: isSelected ? 1.5 : 0.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(vehicle['icon'],
-                  color:
-                      isSelected ? AppColors.primary : AppColors.textSecondary,
-                  size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(vehicle['name'], style: AppTextStyles.labelLarge),
-                  Text(vehicle['desc'], style: AppTextStyles.caption),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: vehicle['etaColor'],
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Text('${vehicle['eta']} away',
-                          style: AppTextStyles.caption.copyWith(
-                            color: vehicle['etaColor'],
-                            fontWeight: FontWeight.w600,
-                          )),
-                      const SizedBox(width: 8),
-                      Text('· ${vehicle['capacity']}',
-                          style: AppTextStyles.caption),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+      child: Row(
+        children: [
+          _VehicleThumb(vehicle: vehicle, isSelected: isSelected),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'GHS ${fare.toStringAsFixed(0)}',
-                  style: AppTextStyles.amountSmall.copyWith(fontSize: 15),
-                ),
-                const Text('est. fare', style: AppTextStyles.caption),
+                Text(vehicle['name'],
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: CtsTheme.textPrimary,
+                    )),
+                Text(vehicle['desc'],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12, color: CtsTheme.textSecondary)),
+                const SizedBox(height: 2),
+                Text('Carries ${vehicle['capacity']}',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: CtsTheme.textTertiary)),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 104),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(fareText,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: fare == null ? 12.5 : 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: fare == null
+                            ? CtsTheme.textSecondary
+                            : CtsTheme.textPrimary,
+                      )),
+                ),
+                Text(fareCaption,
+                    style: const TextStyle(
+                        fontSize: 12, color: CtsTheme.textSecondary)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
+/// Okada has a real photo; Aboboya and Mini Truck have none yet, so they get
+/// an icon tile of the same size rather than a photo of a different vehicle.
+class _VehicleThumb extends StatelessWidget {
+  final Map<String, dynamic> vehicle;
+  final bool isSelected;
+  const _VehicleThumb({required this.vehicle, required this.isSelected});
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 64,
+          height: 54,
+          child: vehicle['key'] == 'Okada'
+              ? const ServiceImage(
+                  service: ServiceType.okada, aspectRatio: 64 / 54)
+              : ColoredBox(
+                  color: isSelected ? CtsTheme.surface : CtsTheme.surfaceAlt,
+                  child: Icon(vehicle['icon'] as IconData,
+                      size: 26,
+                      color: isSelected
+                          ? CtsTheme.primaryDeep
+                          : CtsTheme.textSecondary),
+                ),
+        ),
+      );
+}
+
 // ─── Small shared widgets ─────────────────────────────────────────────────────
 class _RouteRow extends StatelessWidget {
-  final Color dot;
+  final String caption;
   final String label;
-  const _RouteRow({required this.dot, required this.label});
+  final bool filled;
+  const _RouteRow(
+      {required this.caption, required this.label, required this.filled});
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-        const SizedBox(width: 10),
+          margin: const EdgeInsets.only(top: 3),
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: filled ? CtsTheme.primary : CtsTheme.surface,
+            shape: BoxShape.circle,
+            border: Border.all(color: CtsTheme.primary, width: 2.5),
+          ),
+        ),
+        const SizedBox(width: 12),
         Expanded(
-            child: Text(label,
-                style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textPrimary, fontWeight: FontWeight.w500),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(caption,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: CtsTheme.textSecondary)),
+              Text(label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: CtsTheme.textPrimary,
+                  )),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -720,9 +847,16 @@ class _StatPill extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 12, color: AppColors.textSecondary),
-        const SizedBox(width: 4),
-        Text(label, style: AppTextStyles.caption),
+        Icon(icon, size: 15, color: CtsTheme.textSecondary),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(label,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: CtsTheme.textPrimary,
+              )),
+        ),
       ],
     );
   }
@@ -731,49 +865,32 @@ class _StatPill extends StatelessWidget {
 class _Chip extends StatelessWidget {
   final String label;
   final IconData icon;
-  final Color color;
-  const _Chip({required this.label, required this.icon, required this.color});
+  const _Chip({required this.label, required this.icon});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: CtsTheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: CtsTheme.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: color),
+          Icon(icon, size: 14, color: CtsTheme.textSecondary),
           const SizedBox(width: 5),
-          Text(label,
-              style: AppTextStyles.caption
-                  .copyWith(color: color, fontWeight: FontWeight.w600)),
+          Flexible(
+            child: Text(label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: CtsTheme.textPrimary,
+                )),
+          ),
         ],
       ),
-    );
-  }
-}
-
-class _DarkRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _DarkRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label,
-            style: AppTextStyles.bodySmall
-                .copyWith(color: AppColors.textOnDarkMuted)),
-        Text(value,
-            style: AppTextStyles.labelMedium
-                .copyWith(color: AppColors.background)),
-      ],
     );
   }
 }

@@ -53,7 +53,7 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
       final gasSnapshot = await FirebaseFirestore.instance
           .collection('gas_orders')
           .where('passengerId', isEqualTo: passenger.uid)
-          .where('status', whereIn: _activeGasStatuses)
+          .where('status', whereIn: GasOrderStatus.activeStatusNames)
           .limit(1)
           .get();
 
@@ -86,16 +86,6 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
     'packagePicked',
     'deliveryEnroute',
     'arrivedAtDropoff',
-  ];
-
-  static const _activeGasStatuses = [
-    'searchingDriver',
-    'driverAssigned',
-    'pickupEnroute',
-    'cylinderPicked',
-    'enrouteToStation',
-    'refilling',
-    'deliveryEnroute',
   ];
 }
 
@@ -197,29 +187,10 @@ class TripRequestCreator extends Notifier<void> {
         .collection('trips')
         .add(tripRequest.toFirestore());
 
-    await _broadcastToDrivers(docRef.id, pickupLocation, serviceType);
-
+    // Drivers are offered the trip by the server (onTripCreatedNotify,
+    // checked against the dispatch policy). The driver_alerts write that fed
+    // the retired onDriverAlertCreated dispatcher is gone.
     return docRef.id;
-  }
-
-  Future<void> _broadcastToDrivers(
-    String tripId,
-    GeoPoint pickup,
-    ServiceType serviceType,
-  ) async {
-    await FirebaseFirestore.instance
-        .collection('driver_alerts')
-        .doc(tripId)
-        .set({
-      'tripId':      tripId,
-      'pickupLat':   pickup.latitude,   // ← plain numbers avoid GeoPoint bug
-      'pickupLng':   pickup.longitude,
-      'serviceType': serviceType.name,
-      'timestamp':   FieldValue.serverTimestamp(),
-      'expiresAt':   Timestamp.fromDate(
-                       DateTime.now().add(const Duration(seconds: 120))),
-      'status':      'broadcasting',
-    });
   }
 }
 

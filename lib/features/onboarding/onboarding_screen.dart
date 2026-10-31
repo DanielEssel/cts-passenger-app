@@ -1,5 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+
+import '../../core/theme/cts_theme.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/routes/app_routes.dart';
 import 'onboarding_model.dart';
@@ -351,13 +353,7 @@ class _BottomGlassPanel extends StatelessWidget {
                     children: [
                       Text(
                         page.title,
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: -0.5,
-                          height: 1.2,
-                        ),
+                        style: CtsText.display.copyWith(color: Colors.white),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 12),
@@ -365,11 +361,9 @@ class _BottomGlassPanel extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
                           page.subtitle,
-                          style: TextStyle(
+                          style: CtsText.body.copyWith(
                             fontSize: 16,
-                            fontWeight: FontWeight.w400,
-                            color: Colors.white.withValues(alpha: 0.85),
-                            height: 1.4,
+                            color: CtsTheme.onForestMuted,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -448,17 +442,8 @@ class _MorphingIndicator extends StatelessWidget {
       height: 8,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.3),
+        color: isActive ? CtsTheme.apple : Colors.white.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(4),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  blurRadius: 8,
-                  spreadRadius: 0,
-                ),
-              ]
-            : null,
       ),
     );
   }
@@ -481,43 +466,34 @@ class _GlassButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        if (onPressed != null) {
-          // Haptic feedback for premium feel
-          // Uncomment if haptics are available:
-          // HapticFeedback.lightImpact();
-          onPressed!();
-        }
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 56,
-        decoration: BoxDecoration(
-          color: isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(28),
-          border: isPrimary
-              ? null
-              : Border.all(color: Colors.white.withValues(alpha: 0.3)),
-          boxShadow: isPrimary
-              ? [
-                  BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    blurRadius: 20,
-                    spreadRadius: 0,
-                    offset: const Offset(0, 8),
-                  ),
-                ]
-              : null,
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: isPrimary ? Colors.black : Colors.white,
-              letterSpacing: 0.5,
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      child: GestureDetector(
+        onTap: () {
+          if (onPressed != null) {
+            onPressed!();
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          height: CtsTheme.buttonHeight,
+          decoration: BoxDecoration(
+            // Apple green with dark ink (9.4:1) for the main action.
+            color: isPrimary
+                ? CtsTheme.apple
+                : Colors.white.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            border: isPrimary
+                ? null
+                : Border.all(color: Colors.white.withValues(alpha: 0.35)),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: CtsText.button.copyWith(
+                color: isPrimary ? CtsTheme.textPrimary : Colors.white,
+              ),
             ),
           ),
         ),

@@ -2,6 +2,7 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/cts_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -242,7 +243,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       error: (e, _) => Scaffold(
         backgroundColor: AppColors.background,
         appBar: const CTSTransportAppBar(title: 'Edit Profile'),
-        body: Center(child: Text('Error: $e')),
+        body: const CtsErrorState(
+          title: "Couldn't load your details",
+          message: 'Check your connection, then go back and open this page again.',
+        ),
       ),
       data: (user) {
         if (user != null) {

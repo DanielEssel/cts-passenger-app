@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../core/theme/cts_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -193,14 +194,11 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
     _pollCount++;
 
     if (_pollCount > _maxPolls) {
+      // The payment request reached Mobile Money but no confirmed result
+      // came back in time. The customer may still have approved it, so this
+      // is never shown as a failure to retry (that could charge them twice).
       _pollTimer?.cancel();
-      if (mounted) {
-        setState(() {
-          _stage = _Stage.failed;
-          _errorMessage =
-              'Payment timed out. Please check your MoMo and try again.';
-        });
-      }
+      if (mounted) setState(() => _stage = _Stage.awaitingConfirmation);
       return;
     }
 
@@ -215,6 +213,11 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
         // Refresh wallet balance
         await controller.onTopUpSuccess();
         if (mounted) setState(() => _stage = _Stage.success);
+      } else if (status.awaitingVerification) {
+        // A result was reported but is not confirmed yet: the wallet is
+        // credited only once it is.
+        _pollTimer?.cancel();
+        if (mounted) setState(() => _stage = _Stage.awaitingConfirmation);
       } else if (status.isFailed) {
         _pollTimer?.cancel();
         if (mounted) {
@@ -243,6 +246,45 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
     });
   }
 
+  // ── New request while one is waiting ───────────────────────────────────────
+  //
+  // The first prompt may still be on the customer's phone; if they approve
+  // it, it is still credited once confirmed. Starting again can therefore
+  // charge twice, so ask first. Status checks keep running while the
+  // question is open, and nothing is retried automatically.
+  Future<void> _confirmNewRequest() async {
+    final startOver = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        // Scrolls so the whole warning stays readable with large text.
+        scrollable: true,
+        title: const Text('Send a new request?'),
+        content: const Text(
+          'Your first payment request may still be on your phone. If you '
+          'approve it, it will still be added to your wallet once confirmed.\n\n'
+          'Only send a new request if you declined the first prompt or '
+          'didn’t receive it, or you may be charged twice.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep waiting'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send new request'),
+          ),
+        ],
+      ),
+    );
+    // The payment may have resolved while the question was open; only a
+    // request that is still waiting is abandoned.
+    if (startOver == true && mounted && _stage == _Stage.pending) {
+      _pollTimer?.cancel();
+      _reset();
+    }
+  }
+
   // ── Error extraction ───────────────────────────────────────────────────────
 
   String _extractError(dynamic e) {
@@ -267,9 +309,13 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
       ),
       child: switch (_stage) {
         _Stage.input => _buildInputStage(),
-        _Stage.pending => _buildPendingStage(),
-        _Stage.success => _buildSuccessStage(),
-        _Stage.failed => _buildFailedStage(),
+        // The result stages scroll so large text never pushes their
+        // actions off a small screen (the input stage scrolls already).
+        _Stage.pending => SingleChildScrollView(child: _buildPendingStage()),
+        _Stage.success => SingleChildScrollView(child: _buildSuccessStage()),
+        _Stage.failed => SingleChildScrollView(child: _buildFailedStage()),
+        _Stage.awaitingConfirmation =>
+          SingleChildScrollView(child: _buildAwaitingConfirmationStage()),
       },
     );
   }
@@ -278,7 +324,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
 
   Widget _buildInputStage() {
     return SingleChildScrollView(
-       child: Column(
+        child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -289,7 +335,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
             height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: CtsTheme.border,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -306,7 +352,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
                   Text(
                     'Pay via Mobile Money',
                     style: AppTextStyles.bodySmall
-                        .copyWith(color: Colors.grey[600]),
+                        .copyWith(color: CtsTheme.textSecondary),
                   ),
                 ],
               ),
@@ -336,7 +382,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
             children: [
               Text(
                 'Amount',
-                style: AppTextStyles.caption.copyWith(color: Colors.grey[600]),
+                style: AppTextStyles.caption
+                    .copyWith(color: CtsTheme.textSecondary),
               ),
               const SizedBox(height: 4),
               Text(
@@ -353,52 +400,52 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
         // Network selector
         Text('Select Network', style: AppTextStyles.labelLarge),
         const SizedBox(height: 10),
-        Row(
-          children: _networks.map((n) {
-            final isSelected = _selectedNetwork?.id == n.id;
-            return Expanded(
-              child: GestureDetector(
+        // Three across while the longest name fits; otherwise one per row
+        // so full names stay readable at large text sizes.
+        LayoutBuilder(builder: (context, box) {
+          final style = AppTextStyles.bodySmall.copyWith(
+            fontWeight: FontWeight.w700,
+          );
+          final scaler = MediaQuery.textScalerOf(context);
+          final widest = _networks
+              .map((n) => (TextPainter(
+                    text: TextSpan(text: n.id, style: style),
+                    textDirection: Directionality.of(context),
+                    textScaler: scaler,
+                    maxLines: 1,
+                  )..layout())
+                      .width)
+              .fold<double>(0, (a, b) => a > b ? a : b);
+          final columnWidth = (box.maxWidth - 16) / _networks.length;
+          final stacked = widest + 20 > columnWidth;
+
+          Widget chip(_MomoNetwork n) => _NetworkChip(
+                network: n,
+                selected: _selectedNetwork?.id == n.id,
+                stacked: stacked,
                 onTap: () => setState(() => _selectedNetwork = n),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? n.color.withValues(alpha: 0.12)
-                        : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected ? n.color : Colors.grey[300]!,
-                      width: isSelected ? 2 : 1,
-                    ),
+              );
+
+          if (stacked) {
+            return Column(
+              children: [
+                for (final n in _networks)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: chip(n),
                   ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: n.color,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        n.id,
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: isSelected ? n.color : Colors.grey[700],
-                          fontWeight:
-                              isSelected ? FontWeight.w700 : FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              ],
             );
-          }).toList(),
-        ),
+          }
+          return Row(
+            children: [
+              for (var i = 0; i < _networks.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(child: chip(_networks[i])),
+              ],
+            ],
+          );
+        }),
 
         const SizedBox(height: 20),
 
@@ -420,13 +467,13 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
                 ? 'Network detected: ${_selectedNetwork!.label}'
                 : 'Starts with ${_networks.map((n) => n.prefixes.first).join(', ')}...',
             helperStyle: AppTextStyles.caption.copyWith(
-              color: _selectedNetwork?.color ?? Colors.grey[600],
+              color: _selectedNetwork?.color ?? CtsTheme.textSecondary,
             ),
             filled: true,
-            fillColor: Colors.grey[50],
+            fillColor: CtsTheme.surfaceAlt,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey[300]!),
+              borderSide: BorderSide(color: CtsTheme.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -481,11 +528,14 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
         // Security note
         Row(
           children: [
-            Icon(Icons.lock_rounded, size: 14, color: Colors.grey[500]),
+            Icon(Icons.lock_rounded, size: 14, color: CtsTheme.textTertiary),
             const SizedBox(width: 6),
-            Text(
-              'Secured by Bridge · CTS does not store your MoMo PIN',
-              style: AppTextStyles.caption.copyWith(color: Colors.grey[500]),
+            Expanded(
+              child: Text(
+                'Secured by Bridge · CTSGo does not store your MoMo PIN',
+                style: AppTextStyles.caption
+                    .copyWith(color: CtsTheme.textTertiary),
+              ),
             ),
           ],
         ),
@@ -498,8 +548,9 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
           child: ElevatedButton(
             onPressed: _canSubmit ? _initiate : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              disabledBackgroundColor: Colors.grey[300],
+              backgroundColor: CtsTheme.vivid,
+              foregroundColor: CtsTheme.onVivid,
+              disabledBackgroundColor: CtsTheme.border,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -507,13 +558,12 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
             ),
             child: Text(
               'Send Payment Prompt  →',
-              style: AppTextStyles.button.copyWith(color: Colors.white),
+              style: AppTextStyles.button.copyWith(color: CtsTheme.onVivid),
             ),
           ),
         ),
       ],
-       )
-    );
+    ));
   }
 
   // ── Pending stage ─────────────────────────────────────────────────────────
@@ -556,24 +606,22 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
             'A payment prompt of GHS ${widget.amount.toStringAsFixed(2)} '
             'has been sent to ${formatGhanaPhone(phone)}.\n'
             'Open your MoMo app or dial *170# to approve.',
-            style: AppTextStyles.bodyMedium.copyWith(color: Colors.grey[600]),
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: CtsTheme.textSecondary),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
           Text(
             'Waiting… (${secondsLeft}s)',
-            style: AppTextStyles.caption.copyWith(color: Colors.grey[500]),
+            style: AppTextStyles.caption.copyWith(color: CtsTheme.textTertiary),
           ),
           const SizedBox(height: 20),
           TextButton(
-            onPressed: () {
-              _pollTimer?.cancel();
-              _reset();
-            },
+            onPressed: _confirmNewRequest,
             child: Text(
               'Cancel and try again',
               style: AppTextStyles.bodySmall.copyWith(
-                color: Colors.grey[600],
+                color: CtsTheme.textSecondary,
                 decoration: TextDecoration.underline,
               ),
             ),
@@ -595,12 +643,12 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: Colors.green[50],
+              color: CtsTheme.appleSoft, // #DCFCE7
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.check_circle_rounded,
-              color: Colors.green[600],
+              color: CtsTheme.primary, // #15803D
               size: 40,
             ),
           ),
@@ -608,8 +656,9 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
           Text('Wallet Topped Up! 🎉', style: AppTextStyles.heading3),
           const SizedBox(height: 10),
           Text(
-            'GHS ${widget.amount.toStringAsFixed(2)} has been added to your CTS wallet.',
-            style: AppTextStyles.bodyMedium.copyWith(color: Colors.grey[600]),
+            'GHS ${widget.amount.toStringAsFixed(2)} has been added to your CTSGo wallet.',
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: CtsTheme.textSecondary),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 32),
@@ -620,7 +669,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
                 if (Navigator.canPop(context)) Navigator.pop(context, true);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: CtsTheme.vivid,
+                foregroundColor: CtsTheme.onVivid,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -628,7 +678,7 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
               ),
               child: Text(
                 'Done',
-                style: AppTextStyles.button.copyWith(color: Colors.white),
+                style: AppTextStyles.button.copyWith(color: CtsTheme.onVivid),
               ),
             ),
           ),
@@ -663,8 +713,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 _errorMessage!,
-                style:
-                    AppTextStyles.bodyMedium.copyWith(color: Colors.grey[600]),
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: CtsTheme.textSecondary),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -674,8 +724,10 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
               Expanded(
                 child: OutlinedButton(
                   onPressed: () {
-  if (Navigator.canPop(context)) Navigator.pop(context, false);
-},
+                    if (Navigator.canPop(context)) {
+                      Navigator.pop(context, false);
+                    }
+                  },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -690,7 +742,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
                 child: ElevatedButton(
                   onPressed: _reset,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: CtsTheme.vivid,
+                    foregroundColor: CtsTheme.onVivid,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -698,7 +751,8 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
                   ),
                   child: Text(
                     'Try Again',
-                    style: AppTextStyles.button.copyWith(color: Colors.white),
+                    style:
+                        AppTextStyles.button.copyWith(color: CtsTheme.onVivid),
                   ),
                 ),
               ),
@@ -708,6 +762,149 @@ class _BridgeMomoSheetState extends ConsumerState<BridgeMomoSheet> {
       ),
     );
   }
+
+  // ── Awaiting confirmation stage ───────────────────────────────────────────
+  // Shown when the payment request went out but its result is not confirmed
+  // yet. No "Try again": a second payment could charge the customer twice.
+
+  Widget _buildAwaitingConfirmationStage() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: Colors.amber[50],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.hourglass_top_rounded,
+                color: Colors.amber[800], size: 40),
+          ),
+          const SizedBox(height: 20),
+          Text('Awaiting confirmation', style: AppTextStyles.heading3),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              "We haven't been able to confirm this payment yet. "
+              'Please do not pay again. If money has left your Mobile Money '
+              'account, it will be added to your wallet once the payment is '
+              'confirmed.',
+              style: AppTextStyles.bodyMedium
+                  .copyWith(color: CtsTheme.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          if (_transactionId != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Reference: $_transactionId',
+              style: AppTextStyles.bodySmall
+                  .copyWith(color: CtsTheme.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                if (Navigator.canPop(context)) Navigator.pop(context, false);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: CtsTheme.vivid,
+                foregroundColor: CtsTheme.onVivid,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Close',
+                style: AppTextStyles.button.copyWith(color: CtsTheme.onVivid),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-enum _Stage { input, pending, success, failed }
+enum _Stage { input, pending, success, failed, awaitingConfirmation }
+
+/// One Mobile Money network option. The network colour marks the dot and
+/// the selected border; the name stays in ink so it reads on any tint.
+class _NetworkChip extends StatelessWidget {
+  final _MomoNetwork network;
+  final bool selected;
+  final bool stacked;
+  final VoidCallback onTap;
+
+  const _NetworkChip({
+    required this.network,
+    required this.selected,
+    required this.stacked,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(color: network.color, shape: BoxShape.circle),
+    );
+    final name = Text(
+      network.id,
+      textAlign: stacked ? TextAlign.start : TextAlign.center,
+      style: AppTextStyles.bodySmall.copyWith(
+        color: selected ? CtsTheme.textPrimary : CtsTheme.textSecondary,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+    );
+    return Semantics(
+      button: true,
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      label: network.label,
+      excludeSemantics: true,
+      onTap: onTap,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: stacked
+              ? const EdgeInsets.symmetric(horizontal: 14, vertical: 12)
+              : const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? network.color.withValues(alpha: 0.12)
+                : CtsTheme.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? network.color : CtsTheme.border,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: stacked
+              ? Row(children: [
+                  dot,
+                  const SizedBox(width: 10),
+                  Expanded(child: name),
+                  if (selected)
+                    const Icon(Icons.check_circle_rounded,
+                        size: 20, color: CtsTheme.textPrimary),
+                ])
+              : Column(children: [dot, const SizedBox(height: 6), name]),
+        ),
+      ),
+    );
+  }
+}

@@ -5,16 +5,18 @@ import 'firebase_options.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/cupertino.dart';
 
 import 'package:cts_transport_app/features/profile/presentation/privacy_security_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'features/wallet/presentation/screens/wallet_standalone_screen.dart';
 import 'core/services/pricing_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Add this
 import 'core/constants/app_colors.dart';
+import 'core/theme/cts_theme.dart';
 import 'core/providers/navigation_providers.dart';
 import 'core/routes/app_routes.dart';
+import 'core/routes/deep_link.dart';
 import 'package:cts_transport_app/features/home/services/notification_service.dart';
 
 import 'features/delivery/presentation/delivery_tracking_screen.dart';
@@ -36,7 +38,7 @@ import 'features/ride/presentation/book_ride_screen.dart';
 import 'features/delivery/presentation/delivery_screen.dart';
 import 'features/delivery/presentation/delivery_vehicle_screen.dart'; // Add this
 // Add this
-import 'features/gas/presentation/screens/gas_order_screen.dart'; // Add this
+import 'features/gas_supplier/presentation/gas_entry_screen.dart';
 import 'features/notification/presentation/notifications_screen.dart';
 import 'features/ride_tracking/ride_tracking_screen.dart';
 
@@ -65,6 +67,11 @@ Future<void> main() async {
 
   await NotificationService.instance.initialize(appNavigatorKey); // ← ADD
 
+  LicenseRegistry.addLicense(() async* {
+    final ofl = await rootBundle.loadString('assets/fonts/inter/OFL.txt');
+    yield LicenseEntryWithLineBreaks(const ['Inter'], ofl);
+  });
+
   runApp(ProviderScope(child: RiderApp(navigatorKey: appNavigatorKey)));
 }
 
@@ -76,7 +83,7 @@ class RiderApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
-      title: 'CTS Passenger',
+      title: 'CTSGo',
       debugShowCheckedModeBanner: false,
       theme: _buildLightTheme(),
       themeMode: ThemeMode.light,
@@ -87,189 +94,9 @@ class RiderApp extends StatelessWidget {
     );
   }
 
-  ThemeData _buildLightTheme() {
-    // ... keep your existing theme setup exactly as is ...
-    const String primaryFont = 'Poppins';
-    const String secondaryFont = 'Inter';
-
-    return ThemeData(
-      fontFamily: secondaryFont,
-      primaryColor: AppColors.primaryColor,
-      scaffoldBackgroundColor: AppColors.background,
-      useMaterial3: true,
-      splashFactory: NoSplash.splashFactory,
-      highlightColor: Colors.transparent,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.primaryColor,
-        primary: AppColors.primaryColor,
-        secondary: AppColors.primaryColor,
-        brightness: Brightness.light,
-      ),
-      appBarTheme: const AppBarTheme(
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        centerTitle: false,
-        backgroundColor: Colors.transparent,
-        foregroundColor: AppColors.textPrimaryColor,
-      ),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(
-            fontFamily: primaryFont, fontSize: 32, fontWeight: FontWeight.bold),
-        headlineMedium: TextStyle(
-            fontFamily: primaryFont, fontSize: 28, fontWeight: FontWeight.w600),
-        headlineSmall: TextStyle(
-            fontFamily: primaryFont, fontSize: 24, fontWeight: FontWeight.w600),
-        bodyLarge: TextStyle(fontFamily: secondaryFont, fontSize: 16),
-        bodyMedium: TextStyle(fontFamily: secondaryFont, fontSize: 14),
-        bodySmall: TextStyle(fontFamily: secondaryFont, fontSize: 12),
-        labelLarge: TextStyle(
-            fontFamily: secondaryFont,
-            fontSize: 14,
-            fontWeight: FontWeight.w600),
-        labelMedium: TextStyle(
-            fontFamily: secondaryFont,
-            fontSize: 12,
-            fontWeight: FontWeight.w500),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          elevation: 0,
-          backgroundColor: AppColors.primaryColor,
-          foregroundColor: Colors.white,
-          textStyle: const TextStyle(
-            fontFamily: secondaryFont,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: AppColors.primaryColor,
-          textStyle: const TextStyle(
-            fontFamily: secondaryFont,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.primaryColor,
-          side: const BorderSide(color: AppColors.primaryColor),
-          textStyle: const TextStyle(
-            fontFamily: secondaryFont,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.primaryColor, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.errorColor),
-        ),
-        labelStyle: const TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-        ),
-        hintStyle: TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 14,
-          color: Colors.grey.shade400,
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        color: Colors.white,
-      ),
-      chipTheme: ChipThemeData(
-        labelStyle: const TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-        showSelectedLabels: true,
-        showUnselectedLabels: true,
-        selectedLabelStyle: TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 10,
-          fontWeight: FontWeight.w500,
-        ),
-        unselectedLabelStyle: TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 10,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-      tabBarTheme: const TabBarThemeData(
-        labelStyle: TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-        unselectedLabelStyle: TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 14,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-      dialogTheme: DialogThemeData(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        titleTextStyle: const TextStyle(
-          fontFamily: primaryFont,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: AppColors.textPrimaryColor,
-        ),
-        contentTextStyle: const TextStyle(
-          fontFamily: secondaryFont,
-          fontSize: 14,
-          color: AppColors.textSecondaryColor,
-        ),
-      ),
-      pageTransitionsTheme: const PageTransitionsTheme(
-        builders: {
-          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        },
-      ),
-    );
-  }
+  // CTSGo theme: Inter type scale and the apple-green palette. See
+  // lib/core/theme/cts_theme.dart.
+  ThemeData _buildLightTheme() => CtsTheme.light();
 
   Map<String, WidgetBuilder> _buildRoutes() {
     return {
@@ -296,14 +123,19 @@ class RiderApp extends StatelessWidget {
       // Ride & Delivery Screens - ADD THESE
       AppRoutes.bookRide: (_) => const BookRideScreen(),
       AppRoutes.delivery: (_) => const DeliveryScreen(),
-      AppRoutes.gasOrder: (_) => const GasOrderScreen(), // ADD THIS LINE
+      AppRoutes.gasOrder: (_) => const GasEntryScreen(), // ADD THIS LINE
 
       // Welcome Screen
       AppRoutes.welcome: (_) => const WelcomeScreen(),
     };
   }
 
-  Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
+  /// The root route generator, for tests of notification deep links.
+  @visibleForTesting
+  static Route<dynamic>? Function(RouteSettings) get generateRoute =>
+      _onGenerateRoute;
+
+  static Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
   debugPrint('🎯 Generating route: ${settings.name}');
 
   final uri = Uri.parse(settings.name ?? '');
@@ -346,13 +178,11 @@ class RiderApp extends StatelessWidget {
         settings: settings,
       );
 
+    // A completed trip opens the same screen: it shows the trip's summary,
+    // or asks the arrival question only while the trip is still unconfirmed.
     case AppRoutes.rideTracking:
-      final args = settings.arguments;
-      final tripId = args is String
-          ? args
-          : args is Map
-              ? (args['tripId'] ?? args['rideId'] ?? '') as String
-              : uri.queryParameters['tripId'] ?? '';
+    case AppRoutes.tripComplete:
+      final tripId = DeepLink.tripIdFrom(settings);
       return MaterialPageRoute(
         builder: (context) => RideTrackingScreen(tripId: tripId),
         settings: settings,
@@ -361,7 +191,7 @@ class RiderApp extends StatelessWidget {
     case AppRoutes.gasOrder:
       debugPrint('✅ Creating GasOrderScreen');
       return MaterialPageRoute(
-        builder: (context) => const GasOrderScreen(),
+        builder: (context) => const GasEntryScreen(),
         settings: settings,
       );
 

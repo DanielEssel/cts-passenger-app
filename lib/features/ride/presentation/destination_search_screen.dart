@@ -23,10 +23,14 @@ class _DestinationSearchScreenState
     extends ConsumerState<DestinationSearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  // Kept for dispose(): `ref` may not be used once the screen is unmounting
+  // (it throws, which skipped the disposals below on every close).
+  late final ProviderContainer _container;
 
   @override
   void initState() {
     super.initState();
+    _container = ProviderScope.containerOf(context, listen: false);
 
     debugPrint('🚀 DestinationSearchScreen OPENED');
 
@@ -62,7 +66,7 @@ class _DestinationSearchScreenState
   @override
   void dispose() {
     // ✅ Reset provider state so it's fresh next time the screen opens
-    ref.invalidate(destinationSearchProvider);
+    _container.invalidate(destinationSearchProvider);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();

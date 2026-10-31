@@ -1,6 +1,8 @@
 // Standalone wallet screen — used when navigating to /wallet from outside shell
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../../core/theme/cts_theme.dart';
+import '../../../../core/widgets/cts_ui.dart';
 import 'wallet_screen.dart';
 
 class WalletStandaloneScreen extends StatefulWidget {
@@ -22,15 +24,19 @@ class _WalletStandaloneScreenState extends State<WalletStandaloneScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: CtsTheme.background,
+      // Light bar with the shared back control; the Wallet page carries its
+      // own title below it.
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A56DB),
-        foregroundColor: Colors.white,
-        title: const Text(
-          'My Wallet',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        systemOverlayStyle: SystemUiOverlayStyle.light,
+        backgroundColor: CtsTheme.background,
+        foregroundColor: CtsTheme.textPrimary,
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
         elevation: 0,
+        leadingWidth: 64,
+        leading: const Padding(
+          padding: EdgeInsets.only(left: ctsGutter),
+          child: Center(child: CtsBackButton()),
+        ),
       ),
       body: WalletScreen(scrollController: _scrollController),
     );

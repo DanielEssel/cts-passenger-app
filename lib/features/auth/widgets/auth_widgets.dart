@@ -1,9 +1,8 @@
-
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/theme/cts_theme.dart';
 
 // =============================================================================
 // Country model
@@ -30,49 +29,49 @@ class Country {
 
 const List<Country> kAfricaCountries = [
   // West Africa
-  Country(name: 'Ghana',           code: 'GH', dial: '+233', flag: '🇬🇭'),
-  Country(name: 'Nigeria',         code: 'NG', dial: '+234', flag: '🇳🇬'),
-  Country(name: 'Côte d\'Ivoire',  code: 'CI', dial: '+225', flag: '🇨🇮'),
-  Country(name: 'Senegal',         code: 'SN', dial: '+221', flag: '🇸🇳'),
-  Country(name: 'Mali',            code: 'ML', dial: '+223', flag: '🇲🇱'),
-  Country(name: 'Burkina Faso',    code: 'BF', dial: '+226', flag: '🇧🇫'),
-  Country(name: 'Togo',            code: 'TG', dial: '+228', flag: '🇹🇬'),
-  Country(name: 'Benin',           code: 'BJ', dial: '+229', flag: '🇧🇯'),
-  Country(name: 'Guinea',          code: 'GN', dial: '+224', flag: '🇬🇳'),
-  Country(name: 'Sierra Leone',    code: 'SL', dial: '+232', flag: '🇸🇱'),
-  Country(name: 'Liberia',         code: 'LR', dial: '+231', flag: '🇱🇷'),
-  Country(name: 'Gambia',          code: 'GM', dial: '+220', flag: '🇬🇲'),
-  Country(name: 'Cape Verde',      code: 'CV', dial: '+238', flag: '🇨🇻'),
+  Country(name: 'Ghana', code: 'GH', dial: '+233', flag: '🇬🇭'),
+  Country(name: 'Nigeria', code: 'NG', dial: '+234', flag: '🇳🇬'),
+  Country(name: 'Côte d\'Ivoire', code: 'CI', dial: '+225', flag: '🇨🇮'),
+  Country(name: 'Senegal', code: 'SN', dial: '+221', flag: '🇸🇳'),
+  Country(name: 'Mali', code: 'ML', dial: '+223', flag: '🇲🇱'),
+  Country(name: 'Burkina Faso', code: 'BF', dial: '+226', flag: '🇧🇫'),
+  Country(name: 'Togo', code: 'TG', dial: '+228', flag: '🇹🇬'),
+  Country(name: 'Benin', code: 'BJ', dial: '+229', flag: '🇧🇯'),
+  Country(name: 'Guinea', code: 'GN', dial: '+224', flag: '🇬🇳'),
+  Country(name: 'Sierra Leone', code: 'SL', dial: '+232', flag: '🇸🇱'),
+  Country(name: 'Liberia', code: 'LR', dial: '+231', flag: '🇱🇷'),
+  Country(name: 'Gambia', code: 'GM', dial: '+220', flag: '🇬🇲'),
+  Country(name: 'Cape Verde', code: 'CV', dial: '+238', flag: '🇨🇻'),
   // East Africa
-  Country(name: 'Kenya',           code: 'KE', dial: '+254', flag: '🇰🇪'),
-  Country(name: 'Tanzania',        code: 'TZ', dial: '+255', flag: '🇹🇿'),
-  Country(name: 'Uganda',          code: 'UG', dial: '+256', flag: '🇺🇬'),
-  Country(name: 'Ethiopia',        code: 'ET', dial: '+251', flag: '🇪🇹'),
-  Country(name: 'Rwanda',          code: 'RW', dial: '+250', flag: '🇷🇼'),
-  Country(name: 'Burundi',         code: 'BI', dial: '+257', flag: '🇧🇮'),
+  Country(name: 'Kenya', code: 'KE', dial: '+254', flag: '🇰🇪'),
+  Country(name: 'Tanzania', code: 'TZ', dial: '+255', flag: '🇹🇿'),
+  Country(name: 'Uganda', code: 'UG', dial: '+256', flag: '🇺🇬'),
+  Country(name: 'Ethiopia', code: 'ET', dial: '+251', flag: '🇪🇹'),
+  Country(name: 'Rwanda', code: 'RW', dial: '+250', flag: '🇷🇼'),
+  Country(name: 'Burundi', code: 'BI', dial: '+257', flag: '🇧🇮'),
   // Southern Africa
-  Country(name: 'South Africa',    code: 'ZA', dial: '+27',  flag: '🇿🇦'),
-  Country(name: 'Zimbabwe',        code: 'ZW', dial: '+263', flag: '🇿🇼'),
-  Country(name: 'Zambia',          code: 'ZM', dial: '+260', flag: '🇿🇲'),
-  Country(name: 'Botswana',        code: 'BW', dial: '+267', flag: '🇧🇼'),
-  Country(name: 'Mozambique',      code: 'MZ', dial: '+258', flag: '🇲🇿'),
-  Country(name: 'Malawi',          code: 'MW', dial: '+265', flag: '🇲🇼'),
-  Country(name: 'Namibia',         code: 'NA', dial: '+264', flag: '🇳🇦'),
+  Country(name: 'South Africa', code: 'ZA', dial: '+27', flag: '🇿🇦'),
+  Country(name: 'Zimbabwe', code: 'ZW', dial: '+263', flag: '🇿🇼'),
+  Country(name: 'Zambia', code: 'ZM', dial: '+260', flag: '🇿🇲'),
+  Country(name: 'Botswana', code: 'BW', dial: '+267', flag: '🇧🇼'),
+  Country(name: 'Mozambique', code: 'MZ', dial: '+258', flag: '🇲🇿'),
+  Country(name: 'Malawi', code: 'MW', dial: '+265', flag: '🇲🇼'),
+  Country(name: 'Namibia', code: 'NA', dial: '+264', flag: '🇳🇦'),
   // North Africa
-  Country(name: 'Egypt',           code: 'EG', dial: '+20',  flag: '🇪🇬'),
-  Country(name: 'Morocco',         code: 'MA', dial: '+212', flag: '🇲🇦'),
-  Country(name: 'Tunisia',         code: 'TN', dial: '+216', flag: '🇹🇳'),
-  Country(name: 'Algeria',         code: 'DZ', dial: '+213', flag: '🇩🇿'),
+  Country(name: 'Egypt', code: 'EG', dial: '+20', flag: '🇪🇬'),
+  Country(name: 'Morocco', code: 'MA', dial: '+212', flag: '🇲🇦'),
+  Country(name: 'Tunisia', code: 'TN', dial: '+216', flag: '🇹🇳'),
+  Country(name: 'Algeria', code: 'DZ', dial: '+213', flag: '🇩🇿'),
   // Central Africa
-  Country(name: 'Cameroon',        code: 'CM', dial: '+237', flag: '🇨🇲'),
-  Country(name: 'DR Congo',        code: 'CD', dial: '+243', flag: '🇨🇩'),
-  Country(name: 'Congo',           code: 'CG', dial: '+242', flag: '🇨🇬'),
+  Country(name: 'Cameroon', code: 'CM', dial: '+237', flag: '🇨🇲'),
+  Country(name: 'DR Congo', code: 'CD', dial: '+243', flag: '🇨🇩'),
+  Country(name: 'Congo', code: 'CG', dial: '+242', flag: '🇨🇬'),
   // Diaspora
-  Country(name: 'United Kingdom',  code: 'GB', dial: '+44',  flag: '🇬🇧'),
-  Country(name: 'United States',   code: 'US', dial: '+1',   flag: '🇺🇸'),
-  Country(name: 'Canada',          code: 'CA', dial: '+1',   flag: '🇨🇦'),
-  Country(name: 'Germany',         code: 'DE', dial: '+49',  flag: '🇩🇪'),
-  Country(name: 'France',          code: 'FR', dial: '+33',  flag: '🇫🇷'),
+  Country(name: 'United Kingdom', code: 'GB', dial: '+44', flag: '🇬🇧'),
+  Country(name: 'United States', code: 'US', dial: '+1', flag: '🇺🇸'),
+  Country(name: 'Canada', code: 'CA', dial: '+1', flag: '🇨🇦'),
+  Country(name: 'Germany', code: 'DE', dial: '+49', flag: '🇩🇪'),
+  Country(name: 'France', code: 'FR', dial: '+33', flag: '🇫🇷'),
 ];
 
 // =============================================================================
@@ -108,26 +107,20 @@ InputDecoration authInputDecoration({
     prefixIcon: prefixIcon != null
         ? Container(
             margin: const EdgeInsets.only(left: 14, right: 10),
-            padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(
-              color: AppColors.primaryDim,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(prefixIcon, color: AppColors.primary, size: 16),
+            child: Icon(prefixIcon, color: CtsTheme.textSecondary, size: 20),
           )
         : null,
     prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
     filled: true,
     fillColor: AppColors.surface,
-    contentPadding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: AppColors.border, width: 0.5),
+      borderSide: const BorderSide(color: CtsTheme.border, width: 1),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: AppColors.border, width: 0.5),
+      borderSide: const BorderSide(color: CtsTheme.border, width: 1),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
@@ -187,20 +180,24 @@ class AuthBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: 'Back',
+      excludeSemantics: true,
+      // The child's tap is excluded above, so expose it here.
       onTap: () => Navigator.pop(context),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: const Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: AppColors.textPrimary,
-          size: 16,
+      child: Material(
+        color: CtsTheme.surface,
+        shape: const CircleBorder(side: BorderSide(color: CtsTheme.border)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.pop(context),
+          child: const SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(Icons.arrow_back_rounded,
+                color: CtsTheme.textPrimary, size: 22),
+          ),
         ),
       ),
     );
@@ -233,7 +230,7 @@ class AuthLogo extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Text(
-          'CTS',
+          'CTSGo',
           style: AppTextStyles.heading1.copyWith(
             color: AppColors.primary,
             fontWeight: FontWeight.w900,
@@ -255,14 +252,7 @@ class AuthFieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: AppTextStyles.overline.copyWith(
-        color: AppColors.textTertiary,
-        letterSpacing: 1.5,
-        fontWeight: FontWeight.w700,
-      ),
-    );
+    return Text(text, style: CtsText.label);
   }
 }
 
@@ -301,15 +291,7 @@ class AuthFormField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: AppTextStyles.overline.copyWith(
-            color: AppColors.textTertiary,
-            letterSpacing: 1.4,
-            fontWeight: FontWeight.w700,
-            fontSize: 10,
-          ),
-        ),
+        Text(label, style: CtsText.label),
         const SizedBox(height: 8),
         TextFormField(
           controller: controller,
@@ -355,21 +337,12 @@ class AuthCtaButton extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        height: CtsTheme.buttonHeight,
         decoration: BoxDecoration(
           color: isLoading
-              ? AppColors.primary.withValues(alpha: 0.6)
-              : AppColors.primary,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: isLoading
-              ? null
-              : [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.4),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+              ? CtsTheme.vivid.withValues(alpha: 0.7)
+              : CtsTheme.vivid,
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
         ),
         child: Center(
           child: isLoading
@@ -378,7 +351,7 @@ class AuthCtaButton extends StatelessWidget {
                   height: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
-                    color: Colors.white,
+                    color: CtsTheme.onVivid,
                   ),
                 )
               : Row(
@@ -387,7 +360,7 @@ class AuthCtaButton extends StatelessWidget {
                     Text(
                       label,
                       style: AppTextStyles.button.copyWith(
-                        color: Colors.white,
+                        color: CtsTheme.onVivid,
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
                       ),
@@ -395,7 +368,7 @@ class AuthCtaButton extends StatelessWidget {
                     const SizedBox(width: 8),
                     const Icon(
                       Icons.arrow_forward_rounded,
-                      color: Colors.white,
+                      color: CtsTheme.onVivid,
                       size: 18,
                     ),
                   ],
@@ -440,11 +413,11 @@ class PhoneInputFieldState extends State<PhoneInputField> {
 
 //for africa and ghana hardcoded//
   @override
-void initState() {
-  super.initState();
-  // Always default to Ghana — override locale detection
-  _selected = kAfricaCountries.first;
-}
+  void initState() {
+    super.initState();
+    // Always default to Ghana — override locale detection
+    _selected = kAfricaCountries.first;
+  }
 
   Country get selectedCountry => _selected;
 
@@ -457,9 +430,8 @@ void initState() {
     final digitsOnly =
         widget.controller.text.trim().replaceAll(RegExp(r'\D'), '');
     // Remove leading zeros common in local format (e.g. 0244... → 244...)
-    final local = digitsOnly.startsWith('0')
-        ? digitsOnly.substring(1)
-        : digitsOnly;
+    final local =
+        digitsOnly.startsWith('0') ? digitsOnly.substring(1) : digitsOnly;
     return '${_selected.dial}$local'; // e.g. +233244123456
   }
 
@@ -505,8 +477,7 @@ void initState() {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_selected.flag,
-                    style: const TextStyle(fontSize: 20)),
+                Text(_selected.flag, style: const TextStyle(fontSize: 20)),
                 const SizedBox(width: 6),
                 Text(
                   _selected.dial,
@@ -531,8 +502,7 @@ void initState() {
             ),
           ),
         ),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 0, minHeight: 0),
+        prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         filled: true,
         fillColor: AppColors.surface,
         contentPadding: const EdgeInsets.symmetric(
@@ -540,28 +510,24 @@ void initState() {
           vertical: 18,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide:
-              const BorderSide(color: AppColors.border, width: 0.5),
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+          borderSide: const BorderSide(color: CtsTheme.border, width: 1),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide:
-              const BorderSide(color: AppColors.border, width: 0.5),
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+          borderSide: const BorderSide(color: CtsTheme.border, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide:
-              const BorderSide(color: AppColors.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
           borderSide: const BorderSide(color: AppColors.error, width: 1),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide:
-              const BorderSide(color: AppColors.error, width: 1.5),
+          borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+          borderSide: const BorderSide(color: AppColors.error, width: 1.5),
         ),
       ),
     );
@@ -681,8 +647,8 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: AppColors.primary, width: 1.5),
+                    borderSide:
+                        const BorderSide(color: AppColors.primary, width: 1.5),
                   ),
                 ),
               ),
@@ -703,8 +669,7 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
                       itemCount: _filtered.length,
                       itemBuilder: (_, i) {
                         final country = _filtered[i];
-                        final isSelected =
-                            country.code == widget.selected.code;
+                        final isSelected = country.code == widget.selected.code;
 
                         return InkWell(
                           onTap: () => widget.onSelected(country),
@@ -723,14 +688,12 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
                             child: Row(
                               children: [
                                 Text(country.flag,
-                                    style:
-                                        const TextStyle(fontSize: 24)),
+                                    style: const TextStyle(fontSize: 24)),
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Text(
                                     country.name,
-                                    style:
-                                        AppTextStyles.bodyMedium.copyWith(
+                                    style: AppTextStyles.bodyMedium.copyWith(
                                       color: isSelected
                                           ? AppColors.primary
                                           : AppColors.textPrimary,
@@ -772,8 +735,7 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
                       },
                     ),
             ),
-            SizedBox(
-                height: MediaQuery.of(context).padding.bottom + 12),
+            SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
           ],
         ),
       ),

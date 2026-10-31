@@ -9,7 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
-        android:label="CTS Go"
+        android:label="CTSGo"
         android:name="${applicationName}"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher">
@@ -45,6 +45,16 @@
     <queries>
         <intent>
             <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <!-- url_launcher opens tel:/sms: links with ACTION_VIEW; Android 11+
+             package visibility needs these to find the dialer and SMS app. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />

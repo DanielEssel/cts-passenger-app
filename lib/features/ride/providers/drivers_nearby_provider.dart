@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../domain/ride_availability.dart';
 import 'ride_request_provider.dart';
 
 class NearbyDriver {
@@ -20,7 +21,44 @@ class NearbyDriver {
   });
 }
 
-// Streams ALL nearby ride-hailing drivers (okada + taxi) within 5km
+// Passengers may not read drivers/{id}. Map markers come from driver_map,
+// which the syncDriverMap function fills with only the rounded position and
+// vehicle type of online, approved, available drivers.
+const _driverMapCollection = 'driver_map';
+const _radiusKm = 5.0;
+const _rideServiceTypes = {'okada', 'taxi', 'pragyia'};
+
+/// Converts driver_map documents within [_radiusKm] of [pickup] to markers.
+List<NearbyDriver> nearbyDriversFrom(
+  Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  GeoPoint pickup, {
+  bool Function(String serviceType)? includeType,
+}) {
+  final result = <NearbyDriver>[];
+  for (final doc in docs) {
+    final data = doc.data();
+    final loc = data['location'];
+    if (loc is! GeoPoint) continue;
+    final sType = data['serviceType'] as String? ?? '';
+    if (includeType != null && !includeType(sType)) continue;
+    final km = _haversineKm(
+      pickup.latitude,
+      pickup.longitude,
+      loc.latitude,
+      loc.longitude,
+    );
+    if (km > _radiusKm) continue;
+    result.add(NearbyDriver(
+      id: doc.id,
+      name: 'Driver',
+      location: LatLng(loc.latitude, loc.longitude),
+      serviceType: sType,
+    ));
+  }
+  return result;
+}
+
+// Streams ALL nearby ride-hailing drivers (okada + taxi + pragyia) within 5km
 // Used for map markers — shows all available drivers
 final driversNearbyProvider =
     StreamProvider.autoDispose<List<NearbyDriver>>((ref) {
@@ -31,43 +69,13 @@ final driversNearbyProvider =
   if (pickup == null) return Stream.value(const []);
 
   return FirebaseFirestore.instance
-      .collection('drivers')
-      .where('isOnline', isEqualTo: true)
-      .where('isApproved', isEqualTo: true)
-      .where('isAvailable', isEqualTo: true)
+      .collection(_driverMapCollection)
       .snapshots()
-      .map((snap) {
-    const radiusKm = 5.0;
-    return snap.docs.where((doc) {
-      final data = doc.data();
-      // Only show ride-hailing drivers on map
-      final sType = data['serviceType'] as String? ?? '';
-      if (sType != 'okada' && sType != 'taxi' && sType != 'pragyia') {
-        return false;
-      }
-      // Filter by location
-      final loc = data['location'] ?? data['currentLocation'];
-      if (loc is! GeoPoint) return false;
-      return _haversineKm(
-            pickup.latitude,
-            pickup.longitude,
-            loc.latitude,
-            loc.longitude,
-          ) <=
-          radiusKm;
-    }).map((doc) {
-      final data = doc.data();
-      final loc = (data['location'] ?? data['currentLocation']) as GeoPoint;
-      return NearbyDriver(
-        id: doc.id,
-        name: data['displayName'] as String? ??
-            data['name'] as String? ??
-            'Driver',
-        location: LatLng(loc.latitude, loc.longitude),
-        serviceType: data['serviceType'] as String? ?? '',
-      );
-    }).toList();
-  });
+      .map((snap) => nearbyDriversFrom(
+            snap.docs,
+            pickup,
+            includeType: _rideServiceTypes.contains,
+          ));
 });
 
 // Streams drivers filtered by SELECTED service type
@@ -81,54 +89,34 @@ final driversNearbyForTypeProvider = StreamProvider.autoDispose
   if (pickup == null) return Stream.value(const []);
 
   return FirebaseFirestore.instance
-      .collection('drivers')
-      .where('isOnline', isEqualTo: true)
-      .where('isApproved', isEqualTo: true)
-      .where('isAvailable', isEqualTo: true)
+      .collection(_driverMapCollection)
       .where('serviceType', isEqualTo: serviceType)
       .snapshots()
-      .map((snap) {
-    const radiusKm = 5.0;
-    return snap.docs.where((doc) {
-      final data = doc.data();
-      final loc = data['location'] ?? data['currentLocation'];
-      if (loc is! GeoPoint) return false;
-      return _haversineKm(
-            pickup.latitude,
-            pickup.longitude,
-            loc.latitude,
-            loc.longitude,
-          ) <=
-          radiusKm;
-    }).map((doc) {
-      final data = doc.data();
-      final loc = (data['location'] ?? data['currentLocation']) as GeoPoint;
-      return NearbyDriver(
-        id: doc.id,
-        name: data['displayName'] as String? ??
-            data['name'] as String? ??
-            'Driver',
-        location: LatLng(loc.latitude, loc.longitude),
-        serviceType: data['serviceType'] as String? ?? serviceType,
-      );
-    }).toList();
-  });
+      .map((snap) => nearbyDriversFrom(snap.docs, pickup));
 });
 
-// Add to drivers_nearby_provider.dart
-
-// Count per service type
-final driversNearbyByTypeProvider =
-    StreamProvider.autoDispose.family<int, String>((ref, serviceType) {
-  final all = ref.watch(driversNearbyProvider);
-  return all.when(
-    data: (drivers) => Stream.value(
-      drivers.where((d) => d.serviceType == serviceType).length,
-    ),
-    loading: () => Stream.value(0),
-    error: (_, __) => Stream.value(0),
-  );
-});
+/// What a ride card shows for [serviceType]: computed from the same
+/// driver_map stream as the map markers, so cards and markers always agree.
+/// The count is a hint only; the backend's search decides the match.
+({RideAvailability status, int count}) rideAvailabilityFrom(
+  AsyncValue<List<NearbyDriver>> drivers,
+  String serviceType,
+) {
+  if (drivers.hasValue) {
+    final count =
+        drivers.requireValue.where((d) => d.serviceType == serviceType).length;
+    return (
+      status: count > 0
+          ? RideAvailability.available
+          : RideAvailability.unavailable,
+      count: count,
+    );
+  }
+  if (drivers.hasError) {
+    return (status: RideAvailability.checkFailed, count: 0);
+  }
+  return (status: RideAvailability.checking, count: 0);
+}
 
 double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
   const r = 6371.0;

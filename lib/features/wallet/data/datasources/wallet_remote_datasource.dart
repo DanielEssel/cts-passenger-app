@@ -271,41 +271,6 @@ Future<WalletModel> getWallet() async {
   }
 
   // ─────────────────────────────────────────────
-  // Payments
-  // ─────────────────────────────────────────────
-
-  Future<Map<String, dynamic>> initializePaystackPayment({
-    required double amount,
-    required String paymentMethod,
-    required String email,
-  }) async {
-    try {
-      final result = await _functions
-          .httpsCallable('initializePaystackPayment')
-          .call({
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        'email': email,
-        'userId': _requireUid,
-      });
-      return result.data as Map<String, dynamic>;
-    } catch (e) {
-      throw _handleException(e);
-    }
-  }
-
-  Future<bool> verifyPayment(String reference) async {
-    try {
-      final result = await _functions
-          .httpsCallable('verifyPaystackPayment')
-          .call({'reference': reference});
-      return result.data['success'] as bool? ?? false;
-    } catch (e) {
-      throw _handleException(e);
-    }
-  }
-
-  // ─────────────────────────────────────────────
   // Bridge — top-up (collection)
   // ─────────────────────────────────────────────
 

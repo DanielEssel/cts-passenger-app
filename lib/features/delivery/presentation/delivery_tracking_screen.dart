@@ -1,32 +1,31 @@
-// lib/features/delivery/delivery_tracking_screen_refactored.dart
+// lib/features/delivery/presentation/delivery_tracking_screen.dart
+//
+// The passenger's live delivery screen. What it says and offers comes only
+// from the delivery's stored status (deliveryTrackingView). Ended, unknown
+// and missing deliveries get their own screen with no tracking controls.
 
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import 'package:flutter/material.dart';
+import '../../../core/theme/cts_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../tracking/data/completion_code_provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../core/utils/phone_launcher.dart';
 import '../../../core/services/marker_service.dart';
-import '../../../widgets/common/shared_widgets.dart';
 import '../../ride/services/route_service.dart';
 import '../../ride/presentation/trip_complete_screen.dart';
+import '../../tracking/domain/tracking_view.dart';
+import '../../tracking/widgets/passenger_tracking_panel.dart';
 import '../../tracking/widgets/tracking_constants.dart';
-import '../../tracking/widgets/driver_info_card.dart';
-import '../../tracking/widgets/tracking_action_button.dart';
-import '../../tracking/widgets/tracking_drag_handle.dart';
 import '../../tracking/widgets/tracking_map.dart';
-import '../../tracking/widgets/tracking_status_banner.dart';
-import '../../tracking/widgets/tracking_timeline.dart';
 import '../models/delivery_request.dart';
 import '../providers/delivery_provider.dart';
-
-extension DeliveryRequestVehiclePlate on DeliveryRequest {
-  String? get vehiclePlate => null;
-}
 
 class DeliveryTrackingScreen extends ConsumerWidget {
   final String deliveryId;
@@ -65,10 +64,27 @@ class DeliveryTrackingScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       body: deliveryAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => CtsErrorState(
+          title: "Can't load your delivery",
+          message: 'Check your connection. Your delivery request is not '
+              'affected.',
+          onRetry: () => ref.invalidate(deliveryStreamProvider(deliveryId)),
+          onBack: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+        ),
         data: (delivery) {
           if (delivery == null) {
-            return const Center(child: Text('Delivery not found'));
+            return TrackingEndedScreen(
+              view: const TrackingView(
+                phase: TrackingPhase.ended,
+                icon: Icons.search_off_rounded,
+                headline: 'Delivery not found',
+                detail: 'This delivery may have been removed. You can '
+                    'check your past deliveries in History.',
+              ),
+              onHome: () => Navigator.of(context, rootNavigator: true)
+                  .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false),
+            );
           }
           return _DeliveryTrackingBody(
             delivery: delivery,
@@ -95,29 +111,13 @@ class _DeliveryTrackingBody extends ConsumerStatefulWidget {
 }
 
 class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
+  /// The receiver's completion code: the order's own (older orders) or the
+  /// server-held one (completion_code_provider.dart). Set in build.
+  String? _code;
+
   late final RouteService _routeService;
   Set<Polyline> _polylines = {};
   bool _routeFetched = false;
-
-  static const _steps = [
-    DeliveryStatus.driverAssigned,
-    DeliveryStatus.pickupEnroute,
-    DeliveryStatus.arrivedAtPickup,
-    DeliveryStatus.packagePicked,
-    DeliveryStatus.deliveryEnroute,
-    DeliveryStatus.arrivedAtDropoff,
-    DeliveryStatus.completed,
-  ];
-
-  static const _stepIcons = <DeliveryStatus, IconData>{
-    DeliveryStatus.driverAssigned: Icons.person_rounded,
-    DeliveryStatus.pickupEnroute: Icons.directions_rounded,
-    DeliveryStatus.arrivedAtPickup: Icons.location_on_rounded,
-    DeliveryStatus.packagePicked: Icons.inventory_2_rounded,
-    DeliveryStatus.deliveryEnroute: Icons.local_shipping_rounded,
-    DeliveryStatus.arrivedAtDropoff: Icons.location_on_rounded,
-    DeliveryStatus.completed: Icons.check_circle_rounded,
-  };
 
   @override
   void initState() {
@@ -165,11 +165,33 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
     }
   }
 
+  void _goHome() => Navigator.of(context, rootNavigator: true)
+      .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false);
+
+  void _getHelp() => Navigator.of(context, rootNavigator: true)
+      .pushNamed(AppRoutes.helpSupport);
+
+  void _callDriver() => openPhoneAction(
+        action: PhoneAction.call,
+        number: widget.delivery.driverPhone,
+        label: 'your driver',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      );
+
   @override
   Widget build(BuildContext context) {
     final delivery = widget.delivery;
-    final isCompleted = delivery.status == DeliveryStatus.completed;
-    final isCancelled = delivery.status == DeliveryStatus.cancelled;
+    _code = completionCodeFor(ref, 'deliveries', delivery.id, delivery.deliveryOtp);
+    final hasOtp = (_code ?? '').isNotEmpty;
+    final view = deliveryTrackingView(
+      delivery.rawStatus ?? delivery.status.firestoreValue,
+      hasOtp: hasOtp,
+    );
+
+    if (view.phase == TrackingPhase.ended ||
+        view.phase == TrackingPhase.unknown) {
+      return TrackingEndedScreen(view: view, onHome: _goHome);
+    }
 
     final pickup = LatLng(
       delivery.pickupLocation.latitude,
@@ -185,94 +207,117 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
             delivery.driverLocation!.longitude,
           )
         : null;
+    final showDriver = view.hasDriver && delivery.driverId != null;
+    final phone = (delivery.driverPhone ?? '').trim();
+    final showCode = hasOtp && !view.isOver;
 
     SystemChrome.setSystemUIOverlayStyle(TrackingConstants.lightStatusBar);
 
-    return Stack(
-      children: [
-        // Full-bleed map
-        Positioned.fill(
-          child: _buildTrackingMap(pickup, dropoff, driverLocation),
-        ),
-
-        // Status header
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 12,
-          left: 16,
-          right: 16,
-          child: _buildStatusHeader(delivery),
-        ),
-
-        // Draggable bottom sheet
-        DraggableScrollableSheet(
-          initialChildSize: TrackingConstants.initialSheetSize,
-          minChildSize: TrackingConstants.minSheetSize,
-          maxChildSize: TrackingConstants.maxSheetSize,
-          snap: true,
-          snapSizes: TrackingConstants.snapSizes,
-          builder: (context, scrollController) => Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 20,
-                  offset: const Offset(0, -6),
-                ),
-              ],
+    return TrackingLayout(
+      map: Stack(
+        children: [
+          Positioned.fill(
+            child: _buildTrackingMap(pickup, dropoff, driverLocation),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 16,
+            child: TrackingMapButton(
+              icon: Icons.arrow_back_rounded,
+              label: 'Back',
+              onTap: () => Navigator.of(context).maybePop(),
             ),
-            child: Column(
-              children: [
-                const TrackingDragHandle(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Column(
-                      children: [
-                        if (isCancelled)
-                          _buildCancelledBanner()
-                        else ...[
-                          _buildTimeline(delivery),
-                          const SizedBox(height: 14),
-                          if (isCompleted) ...[
-                            _buildCompletedBanner(),
-                            const SizedBox(height: 14),
-                          ],
-                        ],
-                        _buildOtpCard(context),
-                        const SizedBox(height: 12),
-                        _buildDriverInfoCard(context),
-                        const SizedBox(height: 12),
-                        if (!isCompleted && !isCancelled)
-                          _buildActionRow(context),
-                        if (isCompleted || isCancelled) ...[
-                          const SizedBox(height: 12),
-                          PrimaryButton(
-                            label: 'Back to home',
-                            onTap: () =>
-                                Navigator.of(context, rootNavigator: true)
-                                    .pushNamedAndRemoveUntil(
-                                        AppRoutes.shell, (_) => false),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                      ],
-                    ),
-                  ),
+          ),
+          if (view.tracksDriver)
+            Positioned(
+              left: 16,
+              right: 80,
+              bottom: 12,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TrackingLocationNote(
+                  hasLocation: driverLocation != null,
+                  updatedAt: delivery.driverLocationAt,
                 ),
-              ],
+              ),
+            ),
+        ],
+      ),
+      actions: showDriver && view.phase == TrackingPhase.active
+          ? TrackingActionBar(
+              primary: TrackingAction(
+                label: 'Call driver',
+                icon: Icons.phone_rounded,
+                onTap: phone.isEmpty ? null : _callDriver,
+              ),
+              secondary: showCode
+                  ? TrackingAction(
+                      label: 'Share code',
+                      icon: Icons.share_rounded,
+                      onTap: () => Share.share(_otpShareMessage(),
+                          subject: 'Your CTSGo delivery code'),
+                    )
+                  : null,
+            )
+          : null,
+      children: [
+        TrackingStatusHeader(view: view),
+        const SizedBox(height: 18),
+        TrackingProgressBar(steps: view.steps, current: view.stepIndex),
+        const SizedBox(height: 18),
+        if (showDriver) ...[
+          TrackingDriverCard(
+            name: delivery.driverName,
+            rating: delivery.driverRating,
+            vehicle: delivery.vehicleType,
+          ),
+          if (phone.isEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              "Your driver's phone number isn't available.",
+              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+            ),
+          ],
+          const SizedBox(height: 12),
+        ],
+        if (showCode) ...[
+          _buildOtpCard(context),
+          const SizedBox(height: 12),
+        ],
+        TrackingRouteSummary(
+          fromLabel: 'Pickup',
+          fromAddress: delivery.pickupAddress,
+          toLabel: 'Drop-off',
+          toAddress: delivery.dropoffAddress,
+          emphasiseTo: view.heading == TrackingHeading.dropoff,
+          priceLabel: 'GHS ${delivery.estimatedFare.toStringAsFixed(2)}',
+        ),
+        const SizedBox(height: 12),
+        Text(
+          [
+            delivery.parcelType,
+            if (delivery.weightRange.trim().isNotEmpty) delivery.weightRange,
+            if (delivery.isFragile) 'Fragile',
+          ].join('  ·  '),
+          style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: _getHelp,
+            icon: const Icon(Icons.support_agent_rounded, size: 20),
+            label: const Text('Get help with this delivery'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textPrimary,
+              minimumSize: const Size(48, 48),
+              textStyle:
+                  const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
           ),
         ),
       ],
     );
   }
-
-  // In delivery_tracking_screen.dart - update the map usage
 
   Widget _buildTrackingMap(
     LatLng pickup,
@@ -286,8 +331,8 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
       driverHeading: widget.delivery.driverHeading ?? 0,
       polylines: _polylines,
       additionalMarkers: _buildMarkers(),
-      padding: const EdgeInsets.only(bottom: 160),
-      controlsBottomOffset: 180, // Controls above bottom sheet
+      padding: const EdgeInsets.only(bottom: 48),
+      controlsBottomOffset: 12,
       myLocationEnabled: true,
       showControls: true,
     );
@@ -310,12 +355,14 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
         position: pickup,
         icon: markerService.pickup(),
         anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Pickup'),
       ),
       Marker(
         markerId: const MarkerId('dropoff'),
         position: dropoff,
         icon: markerService.dropoff(),
         anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Drop-off'),
       ),
       if (widget.delivery.driverLocation != null)
         Marker(
@@ -333,93 +380,15 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
     };
   }
 
-  Widget _buildStatusHeader(DeliveryRequest delivery) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(
-      color: AppColors.darkNavy,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.15),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    child: Row(
-      children: [
-        const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 18),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            delivery.status.passengerDisplayName,
-            style: AppTextStyles.labelLarge.copyWith(color: Colors.white),
-          ),
-        ),
-        if (delivery.status.isActive &&
-            delivery.status != DeliveryStatus.completed)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Text(
-              'Live',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
-  Widget _buildTimeline(DeliveryRequest delivery) {
-    final currentIndex = _steps.indexOf(delivery.status);
-
-    final timelineItems = _steps.asMap().entries.map((entry) {
-      final index = entry.key;
-      final status = entry.value;
-      return TrackingTimelineItem(
-        icon: _stepIcons[status] ?? Icons.circle_outlined,
-        label: status.passengerDisplayName,
-        isCompleted: index < currentIndex,
-        isCurrent: index == currentIndex,
-      );
-    }).toList();
-
-    return TrackingTimeline(
-      items: timelineItems,
-      currentIndex: currentIndex,
-    );
-  }
-
-  Widget _buildCompletedBanner() {
-    return TrackingStatusBanner(
-      icon: Icons.check_circle_rounded,
-      color: AppColors.success,
-      title: 'Parcel delivered!',
-      subtitle: 'Delivered to ${widget.delivery.dropoffAddress}',
-    );
-  }
-
-  Widget _buildCancelledBanner() {
-    return TrackingStatusBanner(
-      icon: Icons.cancel_rounded,
-      color: AppColors.error,
-      title: 'Delivery cancelled',
-      subtitle: 'Your wallet will be refunded if charged.',
-      backgroundColor: AppColors.errorLight,
-    );
+  String _otpShareMessage() {
+    final receiverName = widget.delivery.receiverName ?? 'Recipient';
+    return 'Hi $receiverName, your delivery OTP is: *$_code*\n\n'
+        'Please give this code to the delivery rider when they arrive. '
+        'CTSGo Delivery';
   }
 
   Widget _buildOtpCard(BuildContext context) {
-    final otp = widget.delivery.deliveryOtp;
+    final otp = _code;
     if (otp == null || otp.isEmpty) return const SizedBox.shrink();
     if (widget.delivery.status == DeliveryStatus.completed ||
         widget.delivery.status == DeliveryStatus.cancelled) {
@@ -429,9 +398,7 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
     final receiverName = widget.delivery.receiverName ?? 'Recipient';
     final receiverPhone = widget.delivery.receiverPhone ?? '';
 
-    final shareMsg = 'Hi $receiverName, your delivery OTP is: *$otp*\n\n'
-        'Please give this code to the delivery rider when they arrive. '
-        'CTSTransport Delivery';
+    final shareMsg = _otpShareMessage();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -466,15 +433,15 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Delivery OTP',
+                  const Text('Delivery code',
                       style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
                       )),
-                  const Text('Share this code with the recipient',
+                  const Text('Share this code with the receiver',
                       style: TextStyle(
-                          fontSize: 11, color: AppColors.textSecondary)),
+                          fontSize: 14, color: AppColors.textSecondary)),
                 ],
               ),
             ),
@@ -525,18 +492,17 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF7ED),
+              color: CtsTheme.warningTint,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(children: [
               const Icon(Icons.info_outline_rounded,
-                  color: Color(0xFFD97706), size: 14),
+                  color: CtsTheme.warning, size: 14),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'The rider will ask $receiverName for this code to complete delivery.',
-                  style:
-                      const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                  'The driver will ask $receiverName for this code to complete delivery.',
+                  style: const TextStyle(fontSize: 14, color: CtsTheme.warning),
                 ),
               ),
             ]),
@@ -559,17 +525,22 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
                     color: const Color(0xFF25D366),
                     borderRadius: BorderRadius.circular(10),
                   ),
+                  // Forest on WhatsApp green is 6.2:1 (white was 2.0:1).
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.chat_rounded, color: Colors.white, size: 15),
+                      Icon(Icons.chat_rounded,
+                          color: CtsTheme.onVivid, size: 15),
                       SizedBox(width: 6),
-                      Text('Send via WhatsApp',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          )),
+                      Flexible(
+                        child: Text('Send via WhatsApp',
+                            semanticsLabel: 'Send code via WhatsApp',
+                            style: TextStyle(
+                              color: CtsTheme.onVivid,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            )),
+                      ),
                     ],
                   ),
                 ),
@@ -577,8 +548,8 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
             ),
             const SizedBox(width: 8),
             GestureDetector(
-              onTap: () => Share.share(shareMsg,
-                  subject: 'Your CTSTransport Delivery OTP'),
+              onTap: () =>
+                  Share.share(shareMsg, subject: 'Your CTSGo Delivery OTP'),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -602,132 +573,6 @@ class _DeliveryTrackingBodyState extends ConsumerState<_DeliveryTrackingBody> {
             ),
           ]),
         ],
-      ),
-    );
-  }
-
-  Widget _buildDriverInfoCard(BuildContext context) {
-    final delivery = widget.delivery;
-    final name = delivery.driverName ?? 'Your rider';
-    final rating = delivery.driverRating ?? 0.0;
-
-    IconData vehicleIcon;
-    if (delivery.vehicleType == 'Aboboya') {
-      vehicleIcon = Icons.electric_rickshaw_rounded;
-    } else if (delivery.vehicleType == 'Mini Truck') {
-      vehicleIcon = Icons.local_shipping_rounded;
-    } else {
-      vehicleIcon = Icons.two_wheeler_rounded;
-    }
-
-    return DriverInfoCard(
-      name: name,
-      rating: rating,
-      vehicleType: delivery.vehicleType,
-      vehiclePlate: delivery.vehiclePlate,
-      price: 'GHS ${delivery.estimatedFare.toStringAsFixed(2)}',
-      vehicleIcon: vehicleIcon,
-      onCall: () async {
-        final phone = delivery.driverPhone;
-        if (phone == null) return;
-        final uri = Uri(scheme: 'tel', path: phone);
-        if (await canLaunchUrl(uri)) launchUrl(uri);
-      },
-      onChat: () {
-        // Implement chat functionality
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Chat feature coming soon'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      },
-      onEmergency: () => _showReportSheet(context),
-    );
-  }
-
-  Widget _buildActionRow(BuildContext context) {
-    return Row(
-      children: [
-        TrackingActionButton(
-          icon: Icons.phone_rounded,
-          label: 'Call rider',
-          onTap: () async {
-            final phone = widget.delivery.driverPhone;
-            if (phone == null) return;
-            final uri = Uri(scheme: 'tel', path: phone);
-            if (await canLaunchUrl(uri)) launchUrl(uri);
-          },
-        ),
-        const SizedBox(width: 10),
-        TrackingActionButton(
-          icon: Icons.share_rounded,
-          label: 'Share',
-          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Tracking link copied'),
-              duration: Duration(seconds: 2),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        TrackingActionButton(
-          icon: Icons.report_problem_rounded,
-          label: 'Report',
-          backgroundColor: AppColors.errorLight,
-          iconColor: AppColors.error,
-          onTap: () => _showReportSheet(context),
-        ),
-      ],
-    );
-  }
-
-  void _showReportSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const TrackingDragHandle(),
-            const SizedBox(height: 20),
-            const Text('Report an issue', style: AppTextStyles.heading3),
-            const SizedBox(height: 16),
-            ...[
-              'Rider not moving',
-              'Wrong pickup location',
-              'Parcel damaged',
-              'Rider unreachable',
-              'Other',
-            ].map((issue) => GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                            child:
-                                Text(issue, style: AppTextStyles.bodyMedium)),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: AppColors.textTertiary, size: 16),
-                      ],
-                    ),
-                  ),
-                )),
-          ],
-        ),
       ),
     );
   }

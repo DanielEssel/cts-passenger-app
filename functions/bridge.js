@@ -13,25 +13,43 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const axios = require("axios");
 
+const {
+  PaymentConfigError,
+  bridgeApiBase,
+  bridgeCallbackUrl,
+} = require("./config");
+
 const getDb = () => admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 // ── Bridge secrets ─────────────────────────────────────────────────────────────
-// Set these before first deploy:
-//   firebase functions:secrets:set BRIDGE_CLIENT_KEY --project ctstransportapp
-//   firebase functions:secrets:set BRIDGE_SECRET_KEY --project ctstransportapp
-//   firebase functions:secrets:set BRIDGE_SERVICE_ID --project ctstransportapp
+// Set per project (Secret Manager is project-scoped); see PAYMENTS-STAGING.md:
+//   firebase functions:secrets:set BRIDGE_CLIENT_KEY --project <projectId>
+//   firebase functions:secrets:set BRIDGE_SECRET_KEY --project <projectId>
+//   firebase functions:secrets:set BRIDGE_SERVICE_ID --project <projectId>
 const BRIDGE_CLIENT_KEY = defineSecret("BRIDGE_CLIENT_KEY");
 const BRIDGE_SECRET_KEY = defineSecret("BRIDGE_SECRET_KEY");
 const BRIDGE_SERVICE_ID = defineSecret("BRIDGE_SERVICE_ID");
 
-const BRIDGE_BASE = "https://api.bridgeagw.com";
-// Update after first deploy — run: firebase functions:log --project ctstransportapp
-// to get the exact Cloud Run URLs for the two webhook functions
-const CALLBACK_TOP_UP =
-  "https://europe-west2-ctstransportapp.cloudfunctions.net/bridgeTopUpCallback";
-const CALLBACK_PAYOUT =
-  "https://europe-west2-ctstransportapp.cloudfunctions.net/bridgePayoutCallback";
+// Gateway host and callback URLs come from per-environment config
+// (functions/.env.<projectId>), checked by the guard in config.js.
+
+// Resolves where a Bridge request may go, before anything is written.
+// Misconfiguration fails closed with a generic message to the caller.
+function resolveBridgeTarget(callbackFunctionName) {
+  try {
+    return {
+      apiBase: bridgeApiBase(),
+      callbackUrl: bridgeCallbackUrl(callbackFunctionName),
+    };
+  } catch (err) {
+    if (err instanceof PaymentConfigError) {
+      console.error("[bridge] Payment request blocked by config guard:", err.message);
+      throw new HttpsError("failed-precondition", "Payments are temporarily unavailable.");
+    }
+    throw err;
+  }
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -85,10 +103,48 @@ function toInternational(phone) {
   return null;
 }
 
-// Mirrors paystackWebhook's writeLedger — keeps ledger consistent
+// Same ledger entry shape as escrow.js writeLedger — keeps the ledger consistent
 async function writeLedger(tx, entry) {
   const ref = getDb().collection("ledger").doc();
   tx.set(ref, { ...entry, createdAt: FieldValue.serverTimestamp() });
+}
+
+// ── Callback authenticity ─────────────────────────────────────────────────────
+// Bridge has not documented any way to authenticate a callback: no
+// signature, shared secret, IP allow-list or transaction-status API is known
+// (functions/PAYMENTS-STAGING.md, "Open questions for Bridge"). An
+// unauthenticated callback can be sent by anyone who knows a reference, so it
+// must never credit a wallet, refund a payout or mark one paid. Until Bridge
+// confirms a mechanism, every callback is recorded for operators and money
+// moves only through admin reconciliation (resolveUnconfirmedPayout). Do not
+// replace this with an invented check.
+function verifyBridgeCallback(/* req, payment */) {
+  return { verified: false, reason: "no_supported_verification_mechanism" };
+}
+
+async function recordUnverifiedCallback(kind, req, paymentRef, reason) {
+  const db = getDb();
+  const { trans_ref, trans_status, trans_id, amount } = req.body;
+  await db.collection("bridge_callbacks").add({
+    kind, transactionId: trans_ref, transStatus: String(trans_status),
+    transId: trans_id ?? null, amount: amount ?? null,
+    verified: false, reason, payload: req.body,
+    receivedAt: FieldValue.serverTimestamp(),
+  });
+  await paymentRef.update({
+    lastCallbackStatus: String(trans_status),
+    lastCallbackAt: FieldValue.serverTimestamp(),
+    callbackCount: FieldValue.increment(1),
+  });
+  // One alert per payment however many callbacks arrive.
+  try {
+    await db.collection("admin_alerts").doc(`bridge_callback_unverified_${trans_ref}`).create({
+      type: "bridge_callback_unverified", kind, transactionId: trans_ref,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    if (e.code !== 6) throw e; // ALREADY_EXISTS: already alerted
+  }
 }
 
 // ── initiateBridgeTopUp ────────────────────────────────────────────────────────
@@ -103,7 +159,10 @@ exports.initiateBridgeTopUp = onCall(
   },
   async (request) => {
     const uid = requireAuth(request);
-    const { amount, phone, network } = request.data;
+    // Top-ups are open. Each one is credited only when its result is
+    // confirmed through a documented, authenticated mechanism
+    // (verifyBridgeCallback); until then it stays pending.
+    const { amount, phone, network } = request.data ?? {};
 
     // ── Validate ──────────────────────────────────────────────────────────────
     if (!amount || typeof amount !== "number" || amount < 1) {
@@ -126,6 +185,9 @@ exports.initiateBridgeTopUp = onCall(
     if (!intlPhone) {
       throw new HttpsError("invalid-argument", "Invalid Ghana mobile number");
     }
+
+    // ── Where this environment may send the request (fails closed) ──────────
+    const target = resolveBridgeTarget("bridgeTopUpCallback");
 
     // ── Ensure wallet exists ──────────────────────────────────────────────────
     const walletRef = getDb().collection("wallets").doc(uid);
@@ -182,7 +244,7 @@ exports.initiateBridgeTopUp = onCall(
 
     try {
       bridgeResponse = await axios.post(
-        `${BRIDGE_BASE}/make_payment`,
+        `${target.apiBase}/make_payment`,
         {
           service_id: Number(BRIDGE_SERVICE_ID.value()),
           reference: userName,
@@ -195,7 +257,7 @@ exports.initiateBridgeTopUp = onCall(
           payment_option: "MOM",
           currency_code: "GHS",
           currency_val: amount,
-          callback_url: CALLBACK_TOP_UP,
+          callback_url: target.callbackUrl,
           request_time: requestTime,
         },
         {
@@ -257,7 +319,7 @@ exports.initiateBridgeTopUp = onCall(
 // ── bridgeTopUpCallback ────────────────────────────────────────────────────────
 // HTTP webhook — Bridge calls this when the MoMo transaction settles
 // Atomically credits wallets/{uid}.balance on trans_status "000"
-// Matches the exact same wallet credit pattern as paystackWebhook in escrow.js
+// Credits only after verifyBridgeCallback confirms the callback (see below)
 
 exports.bridgeTopUpCallback = onRequest(
   { region: "europe-west2", cors: false },
@@ -294,7 +356,20 @@ exports.bridgeTopUpCallback = onRequest(
 
     const payment = paymentSnap.data();
 
-    // ── 3. Duplicate guard ────────────────────────────────────────────────────
+    // ── 3. Authenticity: unverified callbacks are recorded, never applied ────
+    const verification = verifyBridgeCallback(req, payment);
+    if (!verification.verified) {
+      try {
+        await recordUnverifiedCallback("topup", req, paymentRef, verification.reason);
+      } catch (err) {
+        console.error("[bridgeTopUpCallback] record failed:", err);
+        return res.status(500).json({ success: false, message: "Database write failed" });
+      }
+      console.warn(`[bridgeTopUpCallback] ${trans_ref}: unverified callback recorded, not applied`);
+      return res.status(200).json({ success: true, note: "recorded_unverified" });
+    }
+
+    // ── 3b. Duplicate guard ───────────────────────────────────────────────────
     if (payment.status === "success" && payment.bridgeTransId === trans_id) {
       console.log(`[bridgeTopUpCallback] ${trans_ref} already processed`);
       return res.status(200).json({ success: true, note: "already_processed" });
@@ -303,12 +378,42 @@ exports.bridgeTopUpCallback = onRequest(
     // ── 4. Write Firestore FIRST, respond to Bridge, then send FCM ───────────
     try {
       if (trans_status === "000") {
-        // SUCCESS — atomically credit wallet (mirrors paystackWebhook logic)
+        // SUCCESS — atomically credit wallet
         const userId = payment.userId;
-        const amountGhs = Number(amount) || payment.amount;
+        // Credit the amount recorded when the top-up was initiated, never a
+        // figure taken from the callback body (PT-02). A callback reporting a
+        // different amount credits nothing and is held for review.
+        const recorded = Number(payment.amount);
+        const reported = amount === undefined || amount === null || amount === ""
+          ? null : Number(amount);
+        if (!(recorded > 0) ||
+            (reported !== null && Math.round(reported * 100) !== Math.round(recorded * 100))) {
+          await paymentRef.update({
+            status: "amount_mismatch",
+            bridgeStatus: trans_status,
+            bridgeTransId: trans_id ?? null,
+            callbackPayload: req.body,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          await getDb().collection("admin_alerts").add({
+            type: "topup_amount_mismatch",
+            transactionId: trans_ref,
+            recordedAmount: Number.isFinite(recorded) ? recorded : null,
+            reportedAmount: Number.isFinite(reported) ? reported : null,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+          console.warn(`[bridgeTopUpCallback] ${trans_ref}: amount mismatch, not credited`);
+          return res.status(200).json({ success: true, note: "amount_mismatch" });
+        }
+        const amountGhs = recorded;
         const walletRef = getDb().collection("wallets").doc(userId);
 
         await getDb().runTransaction(async (tx) => {
+          // Terminal guard inside the transaction: a concurrent or replayed
+          // success callback (even with a different trans_id) sees "success".
+          const fresh = await tx.get(paymentRef);
+          if (fresh.data()?.status === "success") return;
+
           // Ledger-level idempotency check
           const idempotencyKey = `bridge_topup_${trans_ref}`;
           const existing = await getDb()
@@ -353,7 +458,7 @@ exports.bridgeTopUpCallback = onRequest(
             updatedAt: FieldValue.serverTimestamp(),
           });
 
-          // Immutable ledger — same structure as paystackWebhook
+          // Immutable ledger entry
           await writeLedger(tx, {
             type: "TOPUP",
             status: "COMPLETED",
@@ -403,12 +508,18 @@ exports.bridgeTopUpCallback = onRequest(
       } else {
         // FAILED (001) / PENDING (002) / CANCELLED (003)
         const localStatus = STATUS_MAP[trans_status] ?? "unknown";
-        await paymentRef.update({
-          status: localStatus,
-          bridgeStatus: trans_status,
-          bridgeTransId: trans_id ?? null,
-          callbackPayload: req.body,
-          updatedAt: FieldValue.serverTimestamp(),
+        // A success is terminal: a later failure or pending callback never
+        // overwrites it (PT-06).
+        await getDb().runTransaction(async (tx) => {
+          const fresh = await tx.get(paymentRef);
+          if (fresh.data()?.status === "success") return;
+          tx.update(paymentRef, {
+            status: localStatus,
+            bridgeStatus: trans_status,
+            bridgeTransId: trans_id ?? null,
+            callbackPayload: req.body,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
         });
         console.log(`[bridgeTopUpCallback] ${trans_ref} → ${localStatus}`);
         res.status(200).json({ success: true });
@@ -456,6 +567,10 @@ exports.checkBridgeTopUpStatus = onCall(
       status: payment.bridgeStatus, // Bridge raw code e.g. "000"
       amount: payment.amountPaid ?? null,
       transactionId: payment.bridgeTransId ?? transactionId,
+      // Bridge has reported a result for this top-up that cannot be
+      // verified yet: it stays pending and is credited only once confirmed.
+      // The app must tell the customer not to pay again.
+      awaitingVerification: payment.status === "pending" && payment.lastCallbackStatus != null,
     };
   },
 );
@@ -496,6 +611,11 @@ exports.initiateBridgePayout = onCall(
     if (!intlPhone) {
       throw new HttpsError("invalid-argument", "Invalid Ghana mobile number");
     }
+
+    // ── Where this environment may send the payout (fails closed) ───────────
+    // Checked before any read-modify-write: a refused environment must never
+    // hold funds it cannot pay out. _sendBridgePayout checks again at send.
+    resolveBridgeTarget("bridgePayoutCallback");
 
     const db = getDb();
 
@@ -601,7 +721,24 @@ exports.initiateBridgePayout = onCall(
         if (isDriver) {
           const driver = await tx.get(driverDoc.ref);
           const d = driver.data() ?? {};
-          const walletBalance  = d.walletBalance ?? d.totalEarnings ?? 0;
+          // One open withdrawal per driver, enforced atomically: the pending
+          // query above is only a fast path, and concurrent requests both
+          // pass it. activeWithdrawalId is server-only (drivers rules) and
+          // is cleared when the withdrawal is rejected, refunded or paid.
+          if (d.activeWithdrawalId) {
+            throw new HttpsError(
+              "failed-precondition",
+              "You have a withdrawal in progress. Please wait for it to complete.",
+            );
+          }
+          // Only walletBalance can be paid out: it is credited server-side
+          // when a wallet-paid job settles (releaseEscrow, legacy wallet
+          // settlement) and is the withdrawable figure the Driver app shows.
+          // totalEarnings is a lifetime counter that also includes the full
+          // fare of every cash job, cash the driver already holds, so it
+          // never stands in for a missing walletBalance.
+          const walletBalance  = typeof d.walletBalance === "number" &&
+            Number.isFinite(d.walletBalance) ? d.walletBalance : 0;
           const commissionOwed = d.commissionOwed ?? 0;
 
           // ── Settle outstanding cash-job commission BEFORE withdrawal ──────
@@ -625,6 +762,7 @@ exports.initiateBridgePayout = onCall(
             totalEarnings:     FieldValue.increment(-amount),
             commissionOwed:    FieldValue.increment(-settled),
             pendingWithdrawal: FieldValue.increment(amount),
+            activeWithdrawalId: withdrawalRef.id,
             updatedAt:         FieldValue.serverTimestamp(),
           });
 
@@ -660,9 +798,18 @@ exports.initiateBridgePayout = onCall(
           network: mappedNetwork,
           method: "mobile_money",
           status: "pending",
+          // Every payout is reviewed by an admin (approveWithdrawal /
+          // rejectWithdrawal); nothing is paid automatically.
+          needsReview: true,
+          reviewReason: "admin_review_required",
           bridgeTransId: transactionId,
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.set(db.collection("audit_log").doc(), {
+          action: "withdrawal_requested", withdrawalId: withdrawalRef.id,
+          driverId: uid, amount, createdAt: FieldValue.serverTimestamp(),
         });
 
         // Transaction record — visible in history immediately
@@ -688,28 +835,17 @@ exports.initiateBridgePayout = onCall(
       );
     }
 
-   // Money is HELD (walletBalance debited, pendingWithdrawal incremented above).
-// Decide: auto-approve and pay now, or queue for admin review.
-const { review, reason } = await _needsManualReview({
-  db, uid, amount, intlPhone, dData, settings: settingsDoc.data(),
-});
-
-if (review) {
-  await withdrawalRef.update({ reviewReason: reason, needsReview: true });
-  return {
-    success: true,
-    status: "pending_review",
-    withdrawalId: withdrawalRef.id,
-    message: "Withdrawal submitted for review. You'll be paid once approved.",
-  };
-}
-
-await _sendBridgePayout({
-  db, uid, userName, amount, intlPhone, mappedNetwork,
-  transactionId, withdrawalRef, txRef, isDriver: true,
-});
-await withdrawalRef.update({ autoApproved: true });
-return { success: true, status: "processing", transactionId };
+    // Money is HELD (walletBalance debited, pendingWithdrawal incremented,
+    // activeWithdrawalId set) and the request is queued for admin review in
+    // the same transaction. Payouts are reviewed only: there is no automatic
+    // payout path (the previous one called helpers that were never defined
+    // here, and failed after holding the funds, PT-12).
+    return {
+      success: true,
+      status: "pending_review",
+      withdrawalId: withdrawalRef.id,
+      message: "Withdrawal submitted for review. You'll be paid once approved.",
+    };
   },
 );
 
@@ -751,6 +887,19 @@ exports.bridgePayoutCallback = onRequest(
 
     const payment = paymentSnap.data();
 
+    // Authenticity: unverified callbacks are recorded, never applied.
+    const verification = verifyBridgeCallback(req, payment);
+    if (!verification.verified) {
+      try {
+        await recordUnverifiedCallback("payout", req, paymentRef, verification.reason);
+      } catch (err) {
+        console.error("[bridgePayoutCallback] record failed:", err);
+        return res.status(500).json({ success: false, message: "Database write failed" });
+      }
+      console.warn(`[bridgePayoutCallback] ${trans_ref}: unverified callback recorded, not applied`);
+      return res.status(200).json({ success: true, note: "recorded_unverified" });
+    }
+
     // Duplicate guard — already in terminal state
     if (["success", "failed"].includes(payment.status)) {
       return res.status(200).json({ success: true, note: "already_processed" });
@@ -762,6 +911,9 @@ exports.bridgePayoutCallback = onRequest(
       if (trans_status === "000") {
         // ── SUCCESS — mark withdrawal complete ────────────────────────────────
         await db.runTransaction(async (tx) => {
+          // Re-checked inside the transaction: concurrent duplicates settle once.
+          const fresh = await tx.get(paymentRef);
+          if (["success", "failed"].includes(fresh.data()?.status)) return;
           tx.update(paymentRef, {
             status: "success",
             bridgeStatus: trans_status,
@@ -846,6 +998,10 @@ exports.bridgePayoutCallback = onRequest(
       } else if (["001", "003"].includes(trans_status)) {
         // ── FAILED or CANCELLED — refund atomically ───────────────────────────
         await db.runTransaction(async (tx) => {
+          // Re-checked inside the transaction: concurrent duplicate failure
+          // callbacks refund once (PT-08).
+          const fresh = await tx.get(paymentRef);
+          if (["success", "failed"].includes(fresh.data()?.status)) return;
           tx.update(paymentRef, {
             status: "failed",
             bridgeStatus: trans_status,
@@ -946,49 +1102,10 @@ exports.bridgePayoutCallback = onRequest(
   },
 );
 
-// ── Private: refund a payout that failed before Bridge accepted it ─────────────
-
-async function _refundFailedPayout(
-  db,
-  uid,
-  isDriver,
-  amount,
-  withdrawalId,
-  txId,
-) {
-  await db.runTransaction(async (tx) => {
-    if (isDriver) {
-      tx.update(db.collection("drivers").doc(uid), {
-        totalEarnings: FieldValue.increment(amount),
-        walletBalance: FieldValue.increment(amount),
-        pendingWithdrawal: FieldValue.increment(-amount),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    } else {
-      tx.update(db.collection("wallets").doc(uid), {
-        balance: FieldValue.increment(amount),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
-    if (withdrawalId) {
-      tx.update(db.collection("withdrawals").doc(withdrawalId), {
-        status: "failed",
-        failedAt: FieldValue.serverTimestamp(),
-      });
-    }
-    if (txId) {
-      tx.update(db.collection("transactions").doc(txId), {
-        status: "failed",
-        failedAt: FieldValue.serverTimestamp(),
-      });
-    }
-  });
-}
-
 // ── Shared internals for withdrawal_approval.js ──
 exports._bridgeShared = {
   BRIDGE_CLIENT_KEY, BRIDGE_SECRET_KEY, BRIDGE_SERVICE_ID,
-  BRIDGE_BASE, CALLBACK_PAYOUT,
-  getBridgeHeaders, _refundFailedPayout,
+  resolveBridgeTarget,
+  getBridgeHeaders,
 };
 

@@ -156,7 +156,7 @@ class AppTextStyles {
 
   static const TextStyle captionSmall = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.w500,
     color: AppColors.textTertiary,
     height: 1.5,
@@ -174,7 +174,7 @@ class AppTextStyles {
 
   static const TextStyle overline = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: FontWeight.w700,
     color: AppColors.textSecondary,
     height: 1.5,
@@ -551,7 +551,7 @@ class AppTextStyles {
 
   static const TextStyle statusBadge = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.w700,
     color: AppColors.white,
     height: 1.4,
@@ -622,7 +622,7 @@ class AppTextStyles {
 
   static const TextStyle badge = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.w700,
     color: AppColors.white,
     height: 1.4,
@@ -663,7 +663,7 @@ class AppTextStyles {
 
   static const TextStyle timestamp = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: FontWeight.w400,
     color: AppColors.textTertiary,
     height: 1.5,
@@ -701,7 +701,7 @@ class AppTextStyles {
 
   static const TextStyle bottomNavLabel = TextStyle(
     fontFamily: _fontFamily,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
     height: 1.4,

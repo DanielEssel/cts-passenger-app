@@ -1,5 +1,3 @@
-
-
 import 'package:flutter/material.dart';
 
 class OnboardingModel {
@@ -27,9 +25,9 @@ final List<OnboardingModel> onboardingPages = [
         'Book trusted rides in seconds and enjoy safe, comfortable journeys wherever life takes you.',
     imagePath: 'assets/images/step1.png',
     backgroundGradient: const [
-      Color(0xFF0F2027),
-      Color(0xFF203A43),
-      Color(0xFF2C5364),
+      Color(0xFF0A2416), // CTSGo deep greens
+      Color(0xFF0F3D24),
+      Color(0xFF166534),
     ],
   ),
 
@@ -41,9 +39,9 @@ final List<OnboardingModel> onboardingPages = [
         'Send parcels, food, and everyday essentials with fast, reliable delivery right to the doorstep.',
     imagePath: 'assets/images/step2.png',
     backgroundGradient: const [
-      Color(0xFF1A0A2E),
-      Color(0xFF355C7D),
-      Color(0xFF6C3B5B),
+      Color(0xFF0B2A1A),
+      Color(0xFF124A2C),
+      Color(0xFF1B6B3A),
     ],
   ),
 
@@ -55,9 +53,9 @@ final List<OnboardingModel> onboardingPages = [
         'Order LPG safely and have it delivered to your home with real-time tracking and dependable service.',
     imagePath: 'assets/images/step3.png',
     backgroundGradient: const [
-      Color(0xFF0A1F1C),
-      Color(0xFF0D3B2E),
-      Color(0xFF11614E),
+      Color(0xFF0A2416),
+      Color(0xFF0F3D24),
+      Color(0xFF15803D),
     ],
   ),
 ];

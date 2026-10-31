@@ -1,0 +1,44 @@
+--- firestore.rules	2026-10-12 08:26:53.654849580 +0000
++++ rules-tests/proposed/firestore.trip-status.rules	2026-10-13 19:47:08.008462092 +0000
+@@ -24,6 +24,31 @@
+     // An approved driver who is not suspended. isApproved is admin-only
+     // (drivers update allow-list). NOTE: signupStep is still owner-writable,
+     // so the suspension check is only as strong as DRV-S04's fix.
++    // PROPOSED (TRIP-STATUS): a party may change a trip's status only along
++    // the ride lifecycle. Writes that keep the status (location, rating,
++    // confirmation) are unaffected; Cloud Functions use the Admin SDK and
++    // are not subject to rules; acceptance keeps its own branch below.
++    //   driver:    tripAccepted → driverArrived → tripStarted → completed,
++    //              or cancelledByDriver before completion
++    //   passenger: searching → noDriversAvailable (search timeout),
++    //              or cancelledByPassenger before completion
++    function tripStatusChangeAllowed() {
++      let from = resource.data.status;
++      // A removed status reads as null, which matches no transition.
++      let to = request.resource.data.get('status', null);
++      let open = ['tripAccepted', 'driverArrived', 'tripStarted'];
++      return to == from
++        || (request.auth.uid == resource.data.get('driverId', null) && (
++              (from == 'tripAccepted' && to == 'driverArrived')
++           || (from == 'driverArrived' && to == 'tripStarted')
++           || (from == 'tripStarted' && to == 'completed')
++           || (from in open && to == 'cancelledByDriver')))
++        || (request.auth.uid == resource.data.passengerId && (
++              (from == 'searching' && to == 'noDriversAvailable')
++           || ((from == 'searching' || from in open)
++                 && to == 'cancelledByPassenger')));
++    }
++
+     function isActiveDriver() {
+       return isAuth()
+         && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+@@ -349,7 +374,8 @@
+                 && request.resource.data.get('driverId', null)
+                      == resource.data.get('driverId', null)
+                 && request.resource.data.get('passengerId', null)
+-                     == resource.data.get('passengerId', null))
++                     == resource.data.get('passengerId', null)
++                && tripStatusChangeAllowed())
+             || (resource.data.get('driverId', null) == null
+                 && resource.data.status == 'searching'
+                 && isActiveDriver()

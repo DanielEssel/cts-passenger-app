@@ -1,6 +1,7 @@
 // lib/features/auth/presentation/screens/welcome_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -55,75 +56,83 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-          child: Column(
-            children: [
-              const Spacer(flex: 2),
+        child: CtsFillScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+            child: Column(
+              children: [
+                const Spacer(flex: 2),
 
-              // Celebratory mark
-              Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
+                // Celebratory mark
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.celebration_rounded,
+                      size: 46, color: AppColors.primary),
                 ),
-                child: const Icon(Icons.celebration_rounded,
-                    size: 46, color: AppColors.primary),
-              ),
-              const SizedBox(height: 28),
+                const SizedBox(height: 28),
 
-              Text(
-                _firstName.isEmpty ? 'Welcome! 🎉' : 'Welcome, $_firstName! 🎉',
-                style: AppTextStyles.display,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Rides, deliveries and gas — all in one place, across Ghana.',
-                style: AppTextStyles.bodyMedium
-                    .copyWith(color: AppColors.textSecondary),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 32),
-
-              // Value chips
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 10,
-                children: const [
-                  _ValueChip(
-                      icon: Icons.two_wheeler_rounded, label: 'Fast rides'),
-                  _ValueChip(
-                      icon: Icons.inventory_2_rounded, label: 'Deliveries'),
-                  _ValueChip(
-                      icon: Icons.local_fire_department_rounded,
-                      label: 'Gas refills'),
-                  _ValueChip(
-                      icon: Icons.account_balance_wallet_rounded,
-                      label: 'Wallet · MoMo · Cash'),
-                ],
-              ),
-
-              const Spacer(flex: 3),
-
-              PrimaryButton(
-                label: "Let's go",
-                onTap: () => _finish(route: AppRoutes.shell),
-              ),
-              const SizedBox(height: 10),
-              TextButton(
-                onPressed: () => _finish(route: AppRoutes.savedPlaces),
-                child: Text(
-                  'Set your home address first',
+                Semantics(
+                  header: true,
+                  child: CtsWholeWordText(
+                    _firstName.isEmpty
+                        ? 'Welcome! 🎉'
+                        : 'Welcome, $_firstName! 🎉',
+                    style: AppTextStyles.display,
+                    textAlign: TextAlign.center,
+                    horizontalInset: 48, // page padding 24 + 24
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Rides, deliveries and gas — all in one place, across Ghana.',
                   style: AppTextStyles.bodyMedium
-                      .copyWith(color: AppColors.primary),
+                      .copyWith(color: AppColors.textSecondary),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 32),
+
+                // Value chips
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: const [
+                    _ValueChip(
+                        icon: Icons.two_wheeler_rounded, label: 'Fast rides'),
+                    _ValueChip(
+                        icon: Icons.inventory_2_rounded, label: 'Deliveries'),
+                    _ValueChip(
+                        icon: Icons.local_fire_department_rounded,
+                        label: 'Gas refills'),
+                    _ValueChip(
+                        icon: Icons.account_balance_wallet_rounded,
+                        label: 'Wallet · MoMo · Cash'),
+                  ],
+                ),
+
+                const Spacer(flex: 3),
+
+                PrimaryButton(
+                  label: "Let's go",
+                  onTap: () => _finish(route: AppRoutes.shell),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () => _finish(route: AppRoutes.savedPlaces),
+                  child: Text(
+                    'Set your home address first',
+                    style: AppTextStyles.bodyMedium
+                        .copyWith(color: AppColors.primary),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -149,9 +158,11 @@ class _ValueChip extends StatelessWidget {
           children: [
             Icon(icon, size: 15, color: AppColors.primary),
             const SizedBox(width: 7),
-            Text(label,
-                style: AppTextStyles.bodySmall
-                    .copyWith(fontWeight: FontWeight.w600)),
+            Flexible(
+              child: Text(label,
+                  style: AppTextStyles.bodySmall
+                      .copyWith(fontWeight: FontWeight.w600)),
+            ),
           ],
         ),
       );

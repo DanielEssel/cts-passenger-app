@@ -2,52 +2,54 @@
 
 import 'package:flutter/material.dart';
 
-class GasTheme {
-  // ── Brand colors — premium forest green ──
-  static const Color primary       = Color(0xFF00A86B); // forest green
-  static const Color primaryDark   = Color(0xFF007A4D); // deep forest
-  static const Color primaryLight  = Color(0xFF33C98A); // soft green
-  static const Color primaryDim    = Color(0xFFE6F7F1); // green tint
+import '../../../core/theme/cts_theme.dart';
 
-  static const Color accent        = Color(0xFF00C566); // electric green
-  static const Color accentDim     = Color(0xFFF0FDF9); // accent tint
+// Values come from CtsTheme so Gas matches the rest of the app.
+class GasTheme {
+  static const Color primary       = CtsTheme.primary;
+  static const Color primaryDark   = CtsTheme.primaryDeep;
+  static const Color primaryLight  = CtsTheme.apple;
+  static const Color primaryDim    = CtsTheme.primaryTint;
+
+  static const Color accent        = CtsTheme.apple;
+  static const Color accentDim     = CtsTheme.primaryTint;
 
   // ── Surfaces ──
-  static const Color background    = Color(0xFFF7FAF8);
-  static const Color surface       = Color(0xFFFFFFFF);
-  static const Color surfaceAlt    = Color(0xFFF3F8F5);
+  static const Color background    = CtsTheme.background;
+  static const Color surface       = CtsTheme.surface;
+  static const Color surfaceAlt    = CtsTheme.surfaceAlt;
 
   // ── Text ──
-  static const Color textPrimary   = Color(0xFF0D1F14);
-  static const Color textSecondary = Color(0xFF4A6B57);
-  static const Color textTertiary  = Color(0xFF8CA898);
+  static const Color textPrimary   = CtsTheme.textPrimary;
+  static const Color textSecondary = CtsTheme.textSecondary;
+  static const Color textTertiary  = CtsTheme.textTertiary;
 
   // ── Status ──
-  static const Color success       = Color(0xFF00A86B);
-  static const Color error         = Color(0xFFE53935);
-  static const Color warning       = Color(0xFFF59E0B);
+  static const Color success       = CtsTheme.success;
+  static const Color error         = CtsTheme.error;
+  static const Color warning       = CtsTheme.warning;
 
   // ── Border ──
-  static const Color border        = Color(0xFFDDEBE4);
+  static const Color border        = CtsTheme.border;
 
   // ── Gradients ──
   static const LinearGradient heroGradient = LinearGradient(
-    colors: [Color(0xFF007A4D), Color(0xFF00A86B), Color(0xFF00C566)],
+    colors: [CtsTheme.brand, CtsTheme.primary], // #16A34A → #15803D
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient cardGradient = LinearGradient(
-    colors: [Color(0xFFE6F7F1), Color(0xFFF0FDF9)],
+    colors: [CtsTheme.primaryTint, CtsTheme.background],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static List<BoxShadow> get primaryGlow => [
     BoxShadow(
-      color: const Color(0xFF00A86B).withValues(alpha: 0.3),
-      blurRadius: 20,
-      offset: const Offset(0, 8),
+      color: CtsTheme.primary.withValues(alpha: 0.18),
+      blurRadius: 10,
+      offset: const Offset(0, 4),
     ),
   ];
 
@@ -56,8 +58,8 @@ class GasTheme {
 
   static List<BoxShadow> get cardShadow => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.06),
-      blurRadius: 16,
+      color: Colors.black.withValues(alpha: 0.05),
+      blurRadius: 8,
       offset: const Offset(0, 4),
     ),
   ];

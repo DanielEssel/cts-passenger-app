@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../widgets/auth_widgets.dart';
 import '../../../core/routes/app_routes.dart';
 import '../providers/auth_providers.dart';
 
@@ -128,57 +130,57 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   String get _currentOtp => _controllers.map((c) => c.text).join();
 
   Future<void> _verifyOtp() async {
-  if (_verificationSubmitted) {
-    debugPrint('⚠️ OTP SCREEN: duplicate verification prevented');
-    return;
+    if (_verificationSubmitted) {
+      debugPrint('⚠️ OTP SCREEN: duplicate verification prevented');
+      return;
+    }
+
+    final code = _currentOtp;
+
+    if (code.length < _otpLength) {
+      _showError('Please enter the complete $_otpLength-digit code');
+      return;
+    }
+
+    _verificationSubmitted = true;
+
+    HapticFeedback.mediumImpact();
+
+    final success = await ref.read(authProvider.notifier).verifyOtp(
+          smsCode: code,
+          pendingProfile: _pendingProfile,
+          onAuthenticated: () {
+            if (!mounted) return;
+
+            HapticFeedback.heavyImpact();
+
+            if (_isSignUp) {
+              Navigator.of(context).pushNamedAndRemoveUntil(
+                AppRoutes.welcome,
+                (_) => false,
+              );
+            } else {
+              Navigator.of(context).pushNamedAndRemoveUntil(
+                AppRoutes.shell,
+                (_) => false,
+              );
+            }
+          },
+          onError: (msg) {
+            if (mounted) {
+              _showError(msg);
+            }
+          },
+        );
+
+    if (!mounted) return;
+
+    if (!success) {
+      // Allow the user to try the same current session again if the
+      // authentication attempt itself did not complete.
+      _verificationSubmitted = false;
+    }
   }
-
-  final code = _currentOtp;
-
-  if (code.length < _otpLength) {
-    _showError('Please enter the complete $_otpLength-digit code');
-    return;
-  }
-
-  _verificationSubmitted = true;
-
-  HapticFeedback.mediumImpact();
-
-  final success = await ref.read(authProvider.notifier).verifyOtp(
-        smsCode: code,
-        pendingProfile: _pendingProfile,
-        onAuthenticated: () {
-          if (!mounted) return;
-
-          HapticFeedback.heavyImpact();
-
-          if (_isSignUp) {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.welcome,
-              (_) => false,
-            );
-          } else {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.shell,
-              (_) => false,
-            );
-          }
-        },
-        onError: (msg) {
-          if (mounted) {
-            _showError(msg);
-          }
-        },
-      );
-
-  if (!mounted) return;
-
-  if (!success) {
-    // Allow the user to try the same current session again if the
-    // authentication attempt itself did not complete.
-    _verificationSubmitted = false;
-  }
-}
 
   Future<void> _resendOtp() async {
     if (_countdown > 0) return;
@@ -295,24 +297,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                       const SizedBox(height: 18),
 
                       // Back button
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                                color: AppColors.border.withValues(alpha: 0.3)),
-                          ),
-                          child: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: AppColors.textPrimary,
-                            size: 16,
-                          ),
-                        ),
-                      ),
+                      const AuthBackButton(),
 
                       const SizedBox(height: 40),
 
@@ -332,13 +317,12 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                       const SizedBox(height: 20),
 
                       Center(
-                        child: Text(
-                          'Verify your phone',
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.heading1.copyWith(
-                            fontSize: 34,
-                            height: 1.1,
-                            fontWeight: FontWeight.w700,
+                        child: Semantics(
+                          header: true,
+                          child: const Text(
+                            'Verify your phone',
+                            textAlign: TextAlign.center,
+                            style: CtsText.title1,
                           ),
                         ),
                       ),
@@ -373,32 +357,36 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                       // OTP fields
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: List.generate(
-                              _otpLength,
-                              (i) => _OtpDigitField(
-                                controller: _controllers[i],
-                                focusNode: _focusNodes[i],
-                                enabled: !isLoading,
-                                onChanged: (val) {
-                                  if (val.isNotEmpty && i < _otpLength - 1) {
-                                    _focusNodes[i + 1].requestFocus();
-                                  } else if (val.isEmpty && i > 0) {
-                                    _focusNodes[i - 1].requestFocus();
-                                  }
-                                  // Auto-submit when last digit entered
-                                  if (i == _otpLength - 1 &&
-                                      val.isNotEmpty &&
-                                      _currentOtp.length == _otpLength) {
-                                    _verifyOtp();
-                                  }
-                                },
+                        children: List.generate(
+                          _otpLength,
+                          (i) => Flexible(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 52),
+                                child: _OtpDigitField(
+                                  controller: _controllers[i],
+                                  focusNode: _focusNodes[i],
+                                  enabled: !isLoading,
+                                  onChanged: (val) {
+                                    if (val.isNotEmpty && i < _otpLength - 1) {
+                                      _focusNodes[i + 1].requestFocus();
+                                    } else if (val.isEmpty && i > 0) {
+                                      _focusNodes[i - 1].requestFocus();
+                                    }
+                                    // Auto-submit when last digit entered
+                                    if (i == _otpLength - 1 &&
+                                        val.isNotEmpty &&
+                                        _currentOtp.length == _otpLength) {
+                                      _verifyOtp();
+                                    }
+                                  },
+                                ),
                               ),
                             ),
-                          )
-                        ],
+                          ),
+                        ),
                       ),
 
                       const SizedBox(height: 32),
@@ -430,15 +418,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                                   ],
                                 ),
                               )
-                            : GestureDetector(
-                                onTap: _resendOtp,
-                                child: Text(
-                                  'Resend code',
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
+                            : TextButton(
+                                onPressed: _resendOtp,
+                                child: const Text('Resend code'),
                               ),
                       ),
 
@@ -474,8 +456,7 @@ class _OtpDigitField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 54,
-      height: 64,
+      height: 60,
       child: TextField(
         controller: controller,
         focusNode: focusNode,
@@ -484,32 +465,31 @@ class _OtpDigitField extends StatelessWidget {
         textAlign: TextAlign.center,
         maxLength: 1,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: TextStyle(
-          fontSize: 26,
-          fontWeight: FontWeight.w800,
-          color: AppColors.textPrimary,
+        style: CtsText.title2.copyWith(
+          fontWeight: FontWeight.w700,
+          fontFeatures: const [FontFeature.tabularFigures()],
         ),
         decoration: InputDecoration(
           counterText: '',
           filled: true,
-          fillColor: AppColors.surfaceAlt,
+          fillColor: CtsTheme.surface,
+          isDense: false,
           contentPadding: EdgeInsets.zero,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide(color: AppColors.border, width: 0.5),
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            borderSide: const BorderSide(color: CtsTheme.border, width: 1.2),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide(color: AppColors.border, width: 1.5),
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            borderSide: const BorderSide(color: CtsTheme.border, width: 1.2),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: AppColors.primary, width: 2),
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            borderSide: const BorderSide(color: CtsTheme.primary, width: 2),
           ),
           disabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide(
-                color: AppColors.border.withValues(alpha: 0.4), width: 0.5),
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            borderSide: const BorderSide(color: CtsTheme.borderLight),
           ),
         ),
         onChanged: onChanged,
@@ -528,51 +508,47 @@ class _VerifyButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: isLoading ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        decoration: BoxDecoration(
-          color: isLoading
-              ? AppColors.primary.withValues(alpha: 0.6)
-              : AppColors.primary,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: isLoading
-              ? null
-              : [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.4),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-        ),
-        child: Center(
-          child: isLoading
-              ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: Colors.white),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Verify & Continue',
-                      style: AppTextStyles.button.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
+    return Semantics(
+      button: true,
+      enabled: !isLoading,
+      child: GestureDetector(
+        onTap: isLoading ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: CtsTheme.buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isLoading
+                ? CtsTheme.vivid.withValues(alpha: 0.7)
+                : CtsTheme.vivid,
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+          ),
+          child: Center(
+            child: isLoading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: CtsTheme.onVivid),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'Verify & Continue',
+                          textAlign: TextAlign.center,
+                          style:
+                              CtsText.button.copyWith(color: CtsTheme.onVivid),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward_rounded,
-                        color: Colors.white, size: 18),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.arrow_forward_rounded,
+                          color: CtsTheme.onVivid, size: 18),
+                    ],
+                  ),
+          ),
         ),
       ),
     );

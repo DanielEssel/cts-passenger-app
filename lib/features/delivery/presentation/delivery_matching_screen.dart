@@ -1,6 +1,8 @@
 // lib/features/delivery/presentation/delivery_matching_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../models/delivery_request.dart';
@@ -128,6 +130,7 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.error,
+            foregroundColor: Colors.white,
             ),
             child: const Text('Cancel'),
           ),
@@ -156,13 +159,15 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
         navigator.pop();
       }
     } catch (e) {
+      debugPrint('Delivery cancel failed: $e');
       if (!mounted) return;
 
       setState(() => _cancelling = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not cancel: $e'),
+          content: const Text(
+              "Couldn't cancel. Check your connection and try again."),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
@@ -369,7 +374,7 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
                         icon: Icons.account_balance_wallet_rounded,
                         iconColor: AppColors.info,
                         label: 'Payment',
-                        value: 'CTSTransport Wallet',
+                        value: 'CTSGo Wallet',
                       ),
                     ],
                   ),
@@ -388,7 +393,8 @@ class _DeliveryMatchingScreenState extends ConsumerState<DeliveryMatchingScreen>
                               child: FilledButton(
                                 onPressed: _retry,
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: _kPrimary,
+                                  backgroundColor: CtsTheme.vivid,
+            foregroundColor: CtsTheme.onVivid,
                                   padding:
                                       const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(
@@ -442,27 +448,10 @@ class _CancelBtn extends StatelessWidget {
   const _CancelBtn({required this.onTap, required this.loading});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: loading ? null : onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: loading
-              ? const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.error,
-                  ),
-                )
-              : const Icon(Icons.close_rounded,
-                  size: 18, color: AppColors.textSecondary),
-        ),
+  Widget build(BuildContext context) => CtsCloseButton(
+        label: 'Cancel request',
+        loading: loading,
+        onTap: onTap,
       );
 }
 
@@ -506,7 +495,8 @@ class _SummaryRow extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary,
                 ),
-                maxLines: 1,
+                textAlign: TextAlign.end,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis),
           ),
         ],
