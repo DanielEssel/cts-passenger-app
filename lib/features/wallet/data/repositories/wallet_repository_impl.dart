@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 
 import '../../domain/entities/wallet.dart';
 import '../../domain/entities/transaction.dart';
-import '../../domain/entities/paystack_init_response.dart';
 import '../../domain/failures/wallet_failures.dart';
 import '../../../../features/wallet/data/repositories/wallet_repository.dart';
 
@@ -52,47 +51,6 @@ Future<Either<WalletFailure, List<Transaction>>> getTransactionHistory({
 Stream<List<Transaction>> watchRecentTransactions({int limit = 5}) {
   return _remoteDataSource.watchRecentTransactions(); // ✅ already Stream<List<Transaction>>
 }
-
-  @override
-  Future<Either<WalletFailure, PaystackInitResponse>>
-      initializeTopUp({
-    required double amount,
-    required String paymentMethod,
-    required String email,
-  }) async {
-    try {
-      final result =
-          await _remoteDataSource
-              .initializePaystackPayment(
-        amount: amount,
-        paymentMethod: paymentMethod,
-        email: email,
-      );
-
-      return Right(
-        PaystackInitResponse(
-          authorizationUrl:
-              result['authorization_url'] ?? '',
-          reference: result['reference'] ?? '',
-          accessCode: result['access_code'] ?? '',
-        ),
-      );
-    } catch (e) {
-      return Left(
-        PaymentInitializationFailure(
-          "Payment initialization failed.",
-        ),
-      );
-    }
-  }
-
-  @override
-  Future<bool> verifyPaystackPayment({
-    required String reference,
-  }) async {
-    return await _remoteDataSource
-        .verifyPayment(reference);
-  }
 
   @override
   Future<bool> transferFunds({

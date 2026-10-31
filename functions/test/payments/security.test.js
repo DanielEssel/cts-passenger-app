@@ -37,13 +37,16 @@ async function seedPendingTopUp() {
 }
 
 async function seedPendingPayout({ withPaymentDoc = true } = {}) {
-  await h.seed("admins/adm1", { active: true, email: "admin@test" });
+  await h.seed("admins/adm1", { active: true, role: "super_admin", email: "admin@test" });
   await h.seed("drivers/drv1", {
     displayName: "Driver One",
     isApproved: true,
     walletBalance: 0,
     totalEarnings: 0,
     pendingWithdrawal: 50, // the 50 was held when the withdrawal was requested
+    // ...by this withdrawal: initiateBridgePayout sets the lock in the same
+    // transaction as the hold (Phase 2B), and approval requires it.
+    activeWithdrawalId: "W1",
   });
   await h.seed("withdrawals/W1", {
     userId: "drv1",
@@ -176,10 +179,18 @@ describe("payout approval and initiation", () => {
     assert.equal(stub.requests.length, 1);
   });
 
-  test("PT-11 pendingWithdrawal returns to zero after approval plus success callback", async () => {
+  test("PT-11 pendingWithdrawal returns to zero after approval plus confirmed success", async () => {
+    // Updated in Phase 2B: Bridge callbacks cannot be authenticated, so a
+    // success callback alone must not settle a payout (the same rule PT-07
+    // applies to failures). Success is confirmed by an admin
+    // (resolveUnconfirmedPayout). The invariant is unchanged: approval plus
+    // one confirmed success clears the hold exactly once (no double count).
     await seedPendingPayout({ withPaymentDoc: false });
     await h.callCallable(approval.approveWithdrawal, "adm1", { withdrawalId: "W1" });
     await payoutCallback({ trans_ref: PAYOUT_REF, trans_status: "000", trans_id: "B1", amount: 50 });
+    assert.equal((await h.read("drivers/drv1")).pendingWithdrawal, 50, "an unverified callback settles nothing");
+    await h.callCallable(approval.resolveUnconfirmedPayout, "adm1",
+      { withdrawalId: "W1", outcome: "paid", evidence: "Bridge ref B1" });
     assert.equal((await h.read("drivers/drv1")).pendingWithdrawal, 0);
   });
 

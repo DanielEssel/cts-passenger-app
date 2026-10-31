@@ -7,11 +7,11 @@ class RideOptionsService {
     RideOption(
       serviceType: ServiceType.taxi,
       icon: Icons.directions_car_rounded,
-      name: 'CTSTransport Taxi',
+      name: 'CTSGo Taxi',
       badge: 'Most popular',
       description: 'Comfortable · 4 seats',
       eta: '3 min',
-      etaColor: Color(0xFF10B981),
+      etaColor: Color(0xFF15803D),
       basePrice: 28.0,
       duration: '~18 min',
       perks: [
@@ -31,7 +31,7 @@ class RideOptionsService {
       badge: 'Fastest',
       description: 'Agile · 1 seat',
       eta: '1 min',
-      etaColor: Color(0xFF10B981),
+      etaColor: Color(0xFF15803D),
       basePrice: 12.0,
       duration: '~14 min',
       perks: [
@@ -51,7 +51,7 @@ class RideOptionsService {
       badge: 'Eco-friendly',
       description: 'Electric · 3 seat',
       eta: '2 min',
-      etaColor: Color(0xFF10B981),
+      etaColor: Color(0xFF15803D),
       basePrice: 15.0,
       duration: '~16 min',
       perks: [

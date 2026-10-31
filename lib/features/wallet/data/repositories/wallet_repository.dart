@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../domain/entities/wallet.dart';
 import '../../domain/entities/transaction.dart';
 import '../../domain/failures/wallet_failures.dart';
-import '../../domain/entities/paystack_init_response.dart';
 
 abstract class WalletRepository {
 
@@ -19,17 +18,6 @@ abstract class WalletRepository {
 
   Stream<List<Transaction>> watchRecentTransactions({
     int limit = 5,
-  });
-
-  Future<Either<WalletFailure, PaystackInitResponse>>
-      initializeTopUp({
-    required double amount,
-    required String paymentMethod,
-    required String email,
-  });
-
-  Future<bool> verifyPaystackPayment({
-    required String reference,
   });
 
   Future<bool> transferFunds({

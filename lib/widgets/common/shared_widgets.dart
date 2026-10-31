@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/cts_theme.dart';
+import '../buttons/primary_button.dart' as base;
 import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_text_styles.dart';
@@ -20,49 +22,15 @@ class PrimaryButton extends StatelessWidget {
     this.color,
   });
 
+  // Same look as the shared CTSGo button; this class keeps its API.
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: isLoading ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: color ?? AppColors.primary,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: (color ?? AppColors.primary).withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: isLoading
-            ? const Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    color: AppColors.background,
-                    strokeWidth: 2,
-                  ),
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, color: AppColors.background, size: 18),
-                    const SizedBox(width: 8),
-                  ],
-                  Text(label, style: AppTextStyles.button),
-                ],
-              ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => base.PrimaryButton(
+        label: label,
+        onTap: onTap,
+        icon: icon,
+        isLoading: isLoading,
+        color: color,
+      );
 }
 
 // ─── Custom AppBar ─────────────────────────────────────────────────────────
@@ -102,8 +70,8 @@ class CTSTransportAppBar extends StatelessWidget
           : null,
       title: Text(
         title,
-        style: AppTextStyles.heading3.copyWith(
-          color: titleColor ?? AppColors.textPrimary,
+        style: CtsText.title3.copyWith(
+          color: titleColor ?? CtsTheme.textPrimary,
         ),
       ),
       actions: actions,
@@ -139,17 +107,11 @@ class SectionHeader extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(title, style: AppTextStyles.heading4),
+        Text(title, style: CtsText.section),
         if (actionLabel != null)
-          GestureDetector(
-            onTap: onAction,
-            child: Text(
-              actionLabel!,
-              style: AppTextStyles.labelMedium.copyWith(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          TextButton(
+            onPressed: onAction,
+            child: Text(actionLabel!),
           ),
       ],
     );
@@ -163,49 +125,16 @@ class StatusBadge extends StatelessWidget {
 
   const StatusBadge({super.key, required this.label, required this.type});
 
+  // One pill style app-wide; see CtsStatusPill.
   @override
-  Widget build(BuildContext context) {
-    Color bg;
-    Color text;
-
-    switch (type) {
-      case StatusType.success:
-        bg = AppColors.successLight;
-        text = const Color(0xFF16A34A);
-        break;
-      case StatusType.error:
-        bg = AppColors.errorLight;
-        text = const Color(0xFFDC2626);
-        break;
-      case StatusType.warning:
-        bg = AppColors.warningLight;
-        text = const Color(0xFFB45309);
-        break;
-      case StatusType.info:
-        bg = AppColors.infoLight;
-        text = const Color(0xFF1D4ED8);
-        break;
-      case StatusType.primary:
-        bg = AppColors.primary.withValues();
-        text = AppColors.primaryDark;
-        break;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: AppTextStyles.caption.copyWith(
-          color: text,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => CtsStatusPill(label,
+      tone: switch (type) {
+        StatusType.success => CtsTone.success,
+        StatusType.error => CtsTone.error,
+        StatusType.warning => CtsTone.warning,
+        StatusType.info => CtsTone.info,
+        StatusType.primary => CtsTone.brand,
+      });
 }
 
 enum StatusType { success, error, warning, info, primary }

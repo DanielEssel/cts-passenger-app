@@ -174,7 +174,7 @@ class _RouteRow extends StatelessWidget {
               Text(caption,
                   style: const TextStyle(
                     color: CtsTheme.textSecondary,
-                    fontSize: 11.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w500,
                   )),
               const SizedBox(height: 1),

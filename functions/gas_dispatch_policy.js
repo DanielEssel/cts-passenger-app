@@ -11,6 +11,10 @@
  * - Do not add capacity limits until the business rules explicitly define them.
  */
 
+// Business rule (2026-10-28): motorbikes take standard Gas orders only;
+// aboboyaa (tricycle) and mini trucks take standard and bulk orders;
+// pragyia, taxi and quadricycle take none. Standard = exchangeEmpty,
+// newCylinder, pickupAndReturn; bulk = commercialBulk.
 const GAS_CAPABILITIES = Object.freeze({
   motorcycle: new Set([
     'exchangeEmpty',
@@ -21,12 +25,14 @@ const GAS_CAPABILITIES = Object.freeze({
   tricycle: new Set([
     'exchangeEmpty',
     'newCylinder',
+    'pickupAndReturn',
     'commercialBulk',
   ]),
 
   miniTruck: new Set([
     'exchangeEmpty',
     'newCylinder',
+    'pickupAndReturn',
     'commercialBulk',
   ]),
 

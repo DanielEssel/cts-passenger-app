@@ -1,6 +1,7 @@
 // features/ride/screens/trip_complete_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/theme/cts_theme.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
@@ -168,7 +169,7 @@ class _TripCompleteScreenState extends State<TripCompleteScreen>
               const SizedBox(height: 8),
               Text(
                 'Your $_selectedStars-star rating helps keep '
-                '${widget.driverName} and CTS at their best.',
+                '${widget.driverName} and CTSGo at their best.',
                 style: AppTextStyles.bodyMedium
                     .copyWith(color: AppColors.textSecondary),
                 textAlign: TextAlign.center,
@@ -398,13 +399,16 @@ class _FareCard extends StatelessWidget {
               ),
               Row(
                 children: [
+                  // Brand-green icon on the forest card is 3.7:1 (icons
+                  // need 3:1); the caption uses light green (12.9:1).
                   const Icon(Icons.account_balance_wallet_rounded,
-                      color: AppColors.success, size: 13),
+                      color: CtsTheme.apple, size: 14),
                   const SizedBox(width: 4),
                   Text(
-                    'CTSTransport Wallet',
-                    style: AppTextStyles.caption
-                        .copyWith(color: AppColors.success),
+                    'CTSGo Wallet',
+                    style: AppTextStyles.caption.copyWith(
+                        color: CtsTheme.appleSoft,
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
               ),

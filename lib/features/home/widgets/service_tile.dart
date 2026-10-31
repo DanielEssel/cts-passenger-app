@@ -149,12 +149,9 @@ class ServiceTile extends StatelessWidget {
                               service.displayName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                color: HomeTheme.textPrimary,
-                                fontSize: large ? 15.5 : 13.5,
+                              style: CtsText.cardTitle.copyWith(
+                                fontSize: large ? 16 : 14,
                                 fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
                               ),
                             ),
                             const SizedBox(height: 1),
@@ -162,10 +159,9 @@ class ServiceTile extends StatelessWidget {
                               serviceTagline(service),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
+                              style: CtsText.caption.copyWith(
+                                fontSize: large ? 12.5 : 12,
                                 color: HomeTheme.textSecondary,
-                                fontSize: large ? 12 : 11,
-                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ],
@@ -173,15 +169,15 @@ class ServiceTile extends StatelessWidget {
                       ),
                       if (large)
                         Container(
-                          width: 28,
-                          height: 28,
+                          width: 30,
+                          height: 30,
                           margin: const EdgeInsets.only(left: 6),
-                          decoration: BoxDecoration(
-                            color: HomeTheme.primary.withValues(alpha: 0.1),
+                          decoration: const BoxDecoration(
+                            color: HomeTheme.appleSoft,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.arrow_forward_rounded,
-                              size: 16, color: HomeTheme.primary),
+                              size: 17, color: HomeTheme.primaryDeep),
                         ),
                     ],
                   ),

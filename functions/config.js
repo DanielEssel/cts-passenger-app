@@ -174,16 +174,11 @@ function bridgeCallbackUrl(functionName) {
   return url.href;
 }
 
-/**
- * Paystack is retired. Its remaining production endpoints keep working
- * unchanged until a separate removal change, but no other environment may
- * call Paystack.
- */
-function assertPaystackRequestAllowed() {
-  if (isLocalRun() || currentProjectId() !== PRODUCTION_PROJECT_ID) {
-    throw new PaymentConfigError("Paystack is retired and disabled outside production.");
-  }
-}
+// The Bridge Solutions is the only payment provider (Paystack was removed).
+// There is no global payment switch; safety is per transaction. A top-up is
+// credited only when its result is confirmed through a documented,
+// authenticated mechanism (bridge.js verifyBridgeCallback); until then it
+// stays pending.
 
 module.exports = {
   PRODUCTION_PROJECT_ID,
@@ -191,7 +186,6 @@ module.exports = {
   expectedCallbackHost,
   PaymentConfigError,
   assertBridgeRequestAllowed,
-  assertPaystackRequestAllowed,
   bridgeApiBase,
   bridgeCallbackUrl,
   currentProjectId,

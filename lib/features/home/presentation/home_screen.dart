@@ -21,7 +21,9 @@ import '../../../features/notification/providers/notification_providers.dart';
 import '../../home/extensions/service_type_extensions.dart';
 import '../../home/services/location_services.dart';
 import '../../home/theme/home_theme.dart';
+import '../../ride/models/book_ride_args.dart';
 import '../../ride/models/service_type.dart';
+import '../../ride/services/last_vehicle_store.dart';
 import '../services/driver_availability_service.dart';
 import '../widgets/home_promo_card.dart';
 import '../widgets/service_tile.dart';
@@ -333,10 +335,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // ─────────────────────────────────────────────
   // NAVIGATION — the single booking seam
   // ────────────────────────────────────────────
+  //
+  // Ride bookings (no service, or Taxi / Okada / Pragyia) open BookRideScreen
+  // with BookRideArgs; Delivery and Gas open their own screens as before.
+  // [args] fills in what this entry knows; Home adds the current location.
   void _openBooking({
-    String? destinationLabel,
-    String? destinationAddress,
     ServiceType? service,
+    BookRideArgs args = const BookRideArgs(),
   }) {
     if (_openingService) return;
     if (!_servicesReady) {
@@ -345,20 +350,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     HapticFeedback.lightImpact();
 
-    final ServiceType svc = service ?? ServiceType.taxi;
+    final isRide = service == null || BookRideArgs.rideServices.contains(service);
+    final route = isRide ? AppRoutes.bookRide : service.route;
+    final current = _hasRealLocation ? _userLocation : null;
 
     _openingService = true;
     Navigator.pushNamed(
       context,
-      svc.route,
-      arguments: {
-        'service': svc,
-        if (_hasRealLocation) 'pickup': _userLocation,
-        if (destinationLabel != null) 'destinationLabel': destinationLabel,
-        if (destinationAddress != null)
-          'destinationAddress': destinationAddress,
-      },
+      route,
+      arguments: isRide
+          ? BookRideArgs(
+              service: service,
+              currentLocation: args.hasPickup ? null : current,
+              pickupAddress: args.pickupAddress,
+              pickupLocation: args.pickupLocation,
+              destinationAddress: args.destinationAddress,
+              destinationLocation: args.destinationLocation,
+              openSearch: args.openSearch,
+            ).toMap()
+          : {
+              'service': service,
+              if (current != null) 'pickup': current,
+            },
     ).whenComplete(() => _openingService = false);
+  }
+
+  /// Search bar: straight to destination entry, no vehicle chosen.
+  void _openSearch() => _openBooking(args: homeSearchArgs);
+
+  /// A vehicle tile: Taxi / Okada / Pragyia go straight to destination entry
+  /// with that vehicle chosen (and remembered); Delivery and Gas open their
+  /// own screens.
+  void _onServiceTap(ServiceType service) {
+    if (BookRideArgs.rideServices.contains(service)) {
+      if (_servicesReady) ref.read(lastVehicleStoreProvider).save(service);
+      _openBooking(service: service, args: vehicleTileArgs(service));
+    } else {
+      _openBooking(service: service);
+    }
   }
 
   void _snack(String msg) {
@@ -456,22 +485,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Text(_greeting,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: HomeTheme.textSecondary,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                    )),
-                const SizedBox(height: 1),
-                Text(firstName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      color: HomeTheme.textPrimary,
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    )),
+                    style: CtsText.bodySmall
+                        .copyWith(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Semantics(
+                  header: true,
+                  child: Text(firstName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: CtsText.title1.copyWith(fontSize: 24)),
+                ),
               ],
             ),
           ),
@@ -531,9 +554,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _buildWalletChip() {
     final balanceAsync = ref.watch(walletBalanceProvider);
     final label = switch (balanceAsync) {
-      AsyncData(:final value) => '₵${value.toStringAsFixed(2)}',
-      AsyncLoading() => '₵—',
-      _ => '₵0.00',
+      AsyncData(:final value) => 'GHS ${value.toStringAsFixed(2)}',
+      AsyncLoading() => 'GHS —',
+      _ => 'GHS 0.00',
     };
     return Semantics(
       button: true,
@@ -546,8 +569,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           height: 42,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: HomeTheme.primary.withValues(alpha: 0.08),
+            color: HomeTheme.primaryTint,
             borderRadius: BorderRadius.circular(21),
+            border: Border.all(color: HomeTheme.mintBorder),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -556,11 +580,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   color: HomeTheme.primaryDeep, size: 16),
               const SizedBox(width: 6),
               Text(label,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
+                  style: CtsText.label.copyWith(
                     color: HomeTheme.primaryDeep,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   )),
             ],
           ),
@@ -570,7 +593,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _avatarFallback(String name) => Container(
-        color: HomeTheme.primary.withValues(alpha: 0.12),
+        color: HomeTheme.appleSoft,
         alignment: Alignment.center,
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : 'U',
@@ -590,25 +613,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: Text(title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Inter',
-                  color: HomeTheme.textPrimary,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                )),
+                style: CtsText.section.copyWith(fontSize: 17)),
           ),
           if (action != null)
             InkWell(
               onTap: onAction,
               borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
                 child: Text(action,
-                    style: const TextStyle(
-                      color: HomeTheme.primaryDeep,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                    style: CtsText.label.copyWith(
+                      color: HomeTheme.primary,
+                      fontSize: 14,
                     )),
               ),
             ),
@@ -624,7 +641,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: HomeTheme.surface,
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(HomeTheme.radiusXl),
           border: Border.all(color: HomeTheme.borderLight),
           boxShadow: HomeTheme.cardShadow,
         ),
@@ -654,17 +671,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ? 'Where to? Search your destination'
             : 'Getting your location',
         excludeSemantics: true,
-        onTap: _servicesReady
-            ? () => _openBooking(service: ServiceType.taxi)
-            : null,
+        onTap: _servicesReady ? _openSearch : null,
         child: Material(
           color: HomeTheme.surfaceAlt,
           borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: _servicesReady
-                ? () => _openBooking(service: ServiceType.taxi)
-                : null,
+            onTap: _servicesReady ? _openSearch : null,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
               child: Row(
@@ -682,13 +695,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               : 'Finding your location…',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Inter',
-                            color: HomeTheme.textPrimary,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
+                          style: CtsText.title3,
                         ),
                         const SizedBox(height: 1),
                         Text(
@@ -697,10 +704,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               : 'This takes a few seconds',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: HomeTheme.textSecondary,
-                            fontSize: 12.5,
-                          ),
+                          style: CtsText.bodySmall.copyWith(fontSize: 13),
                         ),
                       ],
                     ),
@@ -710,14 +714,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     duration: const Duration(milliseconds: 200),
                     opacity: _servicesReady ? 1 : 0.4,
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 44,
+                      height: 44,
                       decoration: const BoxDecoration(
-                        color: HomeTheme.primary,
+                        color: HomeTheme.apple,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.arrow_forward_rounded,
-                          color: Colors.white, size: 20),
+                          color: HomeTheme.textPrimary, size: 22),
                     ),
                   ),
                 ],
@@ -748,23 +752,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               children: [
                 _PulsingDot(color: HomeTheme.primary),
                 const SizedBox(width: 10),
-                const Text('Pickup',
-                    style: TextStyle(
-                      color: HomeTheme.textSecondary,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                    )),
+                const Text('Pickup', style: CtsText.caption),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _locationLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: HomeTheme.textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: CtsText.label,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -791,9 +786,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               child: _sectionTitle('What do you need today?'),
             ),
             const SizedBox(height: 10),
-            HomeServicesSection(
-              onSelect: (svc) => _openBooking(service: svc),
-            ),
+            HomeServicesSection(onSelect: _onServiceTap),
           ],
         ),
       );
@@ -848,10 +841,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Positioned.fill(
                     child: Material(
                       color: Colors.transparent,
+                      // Opens booking as before: no vehicle chosen (the
+                      // booking screen never used this tap's Taxi hint).
                       child: InkWell(
-                        onTap: _servicesReady
-                            ? () => _openBooking(service: ServiceType.taxi)
-                            : null,
+                        onTap: _servicesReady ? () => _openBooking() : null,
                       ),
                     ),
                   ),
@@ -973,17 +966,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   // ── Saved places (chips inside the search card) ───────────────────────────
+  // Placeholders until the passenger saves a Home / Work: their text is a
+  // prompt, not an address (configured: false).
   static const List<_SavedPlace> _defaultPlaces = [
     _SavedPlace(
         id: 'home',
         label: 'Home',
         address: 'Set home address',
-        icon: Icons.home_rounded),
+        icon: Icons.home_rounded,
+        configured: false),
     _SavedPlace(
         id: 'work',
         label: 'Work',
         address: 'Set work address',
-        icon: Icons.work_rounded),
+        icon: Icons.work_rounded,
+        configured: false),
   ];
 
   List<_SavedPlace> _placeChipsFor(List<_SavedPlace> places) {
@@ -996,7 +993,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           id: 'add',
           label: saved.isEmpty ? 'Add place' : 'All places',
           address: '',
-          icon: saved.isEmpty ? Icons.add_rounded : Icons.bookmarks_rounded),
+          icon: saved.isEmpty ? Icons.add_rounded : Icons.bookmarks_rounded,
+          configured: false),
     ];
   }
 
@@ -1011,15 +1009,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
 
-  void _onSavedPlaceTap(_SavedPlace place) {
-    if (place.id == 'add' || place.address.isEmpty) {
+  /// A saved place is the destination, with its saved coordinates when it
+  /// has them, and the passenger's last vehicle (if any) chosen. A Home or
+  /// Work placeholder opens Saved Places to set it up instead.
+  Future<void> _onSavedPlaceTap(_SavedPlace place) async {
+    if (savedPlaceArgs(configured: place.configured, address: place.address) ==
+        null) {
       Navigator.pushNamed(context, AppRoutes.savedPlaces);
       return;
     }
-    _openBooking(
-      destinationLabel: place.label,
-      destinationAddress: place.address,
-    );
+    if (_openingService) return;
+    final vehicle = await ref.read(lastVehicleStoreProvider).read();
+    if (!mounted) return;
+    final args = savedPlaceArgs(
+      configured: place.configured,
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+      lastVehicle: vehicle,
+    )!;
+    _openBooking(service: args.service, args: args);
   }
 
   // ── Recent trips ──────────────────────────────────────────────────────────
@@ -1057,17 +1066,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               final ts = d['createdAt'] as Timestamp?;
               final date =
                   ts != null ? DateFormat('MMM d').format(ts.toDate()) : '';
-              final originalService =
-                  _serviceFromString(d['serviceType'] as String?);
+              final rebook = rebookArgsFromTrip(d);
               return _RecentTripTile(
                 from: d['pickupAddress'] as String? ?? '—',
                 to: d['dropoffAddress'] as String? ?? '—',
                 fare: (d['actualFare'] as num?)?.toDouble() ?? 0,
                 date: date,
-                onRebook: () => _openBooking(
-                  service: originalService,
-                  destinationAddress: d['dropoffAddress'] as String?,
-                ),
+                // Rebook: the trip's own pickup, destination and vehicle.
+                onRebook: () =>
+                    _openBooking(service: rebook.service, args: rebook),
               );
             }),
           ],
@@ -1075,11 +1082,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       },
     );
   }
-
-  ServiceType _serviceFromString(String? v) => ServiceType.values.firstWhere(
-        (e) => e.name == v,
-        orElse: () => ServiceType.taxi,
-      );
 
   Widget _buildEmptyState() => Padding(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
@@ -1166,7 +1168,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
 
   Widget _buildDefaultPromo() => HomePromoCard(
-        eyebrow: 'CTS Gas',
+        eyebrow: 'CTSGo Gas',
         title: 'Cooking gas, delivered',
         subtitle: 'Order a refill and track it to your door.',
         ctaLabel: 'Order gas',
@@ -1279,12 +1281,12 @@ class _TopIconButton extends StatelessWidget {
                             Border.all(color: HomeTheme.surface, width: 1.5),
                       ),
                       constraints:
-                          const BoxConstraints(minWidth: 14, minHeight: 14),
+                          const BoxConstraints(minWidth: 16, minHeight: 16),
                       child: Text(
                         badgeCount > 9 ? '9+' : '$badgeCount',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 8,
+                          fontSize: 10,
                           fontWeight: FontWeight.w700,
                           height: 1,
                         ),
@@ -1413,7 +1415,7 @@ class _RecentTripTile extends StatelessWidget {
                       Text(date,
                           style: const TextStyle(
                             color: HomeTheme.textTertiary,
-                            fontSize: 11,
+                            fontSize: 12,
                           )),
                     ],
                   ),
@@ -1425,7 +1427,7 @@ class _RecentTripTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 if (fare > 0)
-                  Text('₵${fare.toStringAsFixed(2)}',
+                  Text('GHS ${fare.toStringAsFixed(2)}',
                       style: const TextStyle(
                         fontFamily: 'Inter',
                         color: HomeTheme.textPrimary,
@@ -1449,7 +1451,7 @@ class _RecentTripTile extends StatelessWidget {
                         style: TextStyle(
                           fontFamily: 'Inter',
                           color: HomeTheme.primary,
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: FontWeight.w700,
                         )),
                   ),
@@ -1495,12 +1497,22 @@ class _SavedPlace {
   final String label;
   final String address;
   final IconData icon;
+  final double? lat;
+  final double? lng;
+  final String? placeId;
+
+  /// False for the Home / Work placeholders and the "Add place" chip.
+  final bool configured;
 
   const _SavedPlace({
     required this.id,
     required this.label,
     required this.address,
     this.icon = Icons.place_rounded,
+    this.lat,
+    this.lng,
+    this.placeId,
+    this.configured = true,
   });
 
   factory _SavedPlace.fromFirestore(DocumentSnapshot doc) {
@@ -1510,6 +1522,9 @@ class _SavedPlace {
       label: d['label'] as String? ?? 'Place',
       address: d['address'] as String? ?? '',
       icon: _homeIconFor(d['iconKey'] as String? ?? 'place'),
+      lat: (d['lat'] as num?)?.toDouble(),
+      lng: (d['lng'] as num?)?.toDouble(),
+      placeId: d['placeId'] as String?,
     );
   }
 }

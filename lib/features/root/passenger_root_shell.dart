@@ -1,5 +1,6 @@
-import 'package:cts_transport_app/features/gas/presentation/screens/gas_order_screen.dart';
+import 'package:cts_transport_app/features/gas_supplier/presentation/gas_entry_screen.dart';
 import 'package:flutter/material.dart';
+import '../../core/theme/cts_theme.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
 
@@ -106,7 +107,7 @@ class _PassengerRootShellState extends ConsumerState<PassengerRootShell> {
             ),
           ),
         ),
-        bottomNavigationBar: _BottomNavBar(
+        bottomNavigationBar: PassengerBottomNavBar(
           currentIndex: _currentIndex,
           unreadCount: ref.watch(unreadNotifCountProvider).value ?? 0,
           onTap: (index) {
@@ -152,31 +153,31 @@ class _PassengerRootShellState extends ConsumerState<PassengerRootShell> {
         );
 
       case AppRoutes.deliveryMatching:
-  final args = settings.arguments as Map<String, dynamic>?;
-  return MaterialPageRoute(
-    builder: (_) => DeliveryMatchingScreen(
-      deliveryId:  args?['deliveryId']  ?? '',
-      vehicleName: args?['vehicleName'] ?? '',
-      dropoff:     args?['dropoff']     ?? '',
-      fare:        args?['fare']        ?? '',
-    ),
-    settings: settings,
-  );
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => DeliveryMatchingScreen(
+            deliveryId: args?['deliveryId'] ?? '',
+            vehicleName: args?['vehicleName'] ?? '',
+            dropoff: args?['dropoff'] ?? '',
+            fare: args?['fare'] ?? '',
+          ),
+          settings: settings,
+        );
 
-case AppRoutes.deliveryTracking:
-  final args = settings.arguments as Map<String, dynamic>?;
-  return MaterialPageRoute(
-    builder: (_) => DeliveryTrackingScreen(
-      deliveryId: args?['deliveryId'] ?? '',
-    ),
-    settings: settings,
-  );
+      case AppRoutes.deliveryTracking:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return MaterialPageRoute(
+          builder: (_) => DeliveryTrackingScreen(
+            deliveryId: args?['deliveryId'] ?? '',
+          ),
+          settings: settings,
+        );
 
       // ADD THIS GAS ORDER ROUTE
       case AppRoutes.gasOrder:
         debugPrint('✅ Navigating to Gas Order Screen');
         return MaterialPageRoute(
-          builder: (context) => const GasOrderScreen(),
+          builder: (context) => const GasEntryScreen(),
           settings: settings,
         );
 
@@ -192,7 +193,7 @@ case AppRoutes.deliveryTracking:
             ? args
             : args is Map
                 ? (args['rideId'] ?? args['tripId'] ?? '') as String
-            : '';
+                : '';
         return MaterialPageRoute<void>(
           builder: (context) => RideTrackingScreen(
             tripId: tripId,
@@ -259,13 +260,15 @@ case AppRoutes.deliveryTracking:
 }
 
 // ─── Bottom Nav Bar ────────────────────────────────────────────────────────
+// Public so its tab semantics can be tested; used only by this shell.
 
-class _BottomNavBar extends StatelessWidget {
+class PassengerBottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final int unreadCount; // ← ADD
 
-  const _BottomNavBar({
+  const PassengerBottomNavBar({
+    super.key,
     required this.currentIndex,
     required this.onTap,
     required this.unreadCount, // ← ADD
@@ -284,7 +287,7 @@ class _BottomNavBar extends StatelessWidget {
       decoration: const BoxDecoration(
         color: AppColors.surface,
         border: Border(
-          top: BorderSide(color: AppColors.border, width: 0.5),
+          top: BorderSide(color: CtsTheme.border),
         ),
       ),
       child: SafeArea(
@@ -327,72 +330,89 @@ class _NavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
+      child: Semantics(
+        button: true,
+        selected: isActive,
+        label: showBadge ? '${item.label}, $badgeCount unread' : item.label,
+        excludeSemantics: true,
+        // The child's tap is excluded above, so expose it here.
         onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Icon with optional badge ──
-            Stack(
-              clipBehavior: Clip.none,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: CtsTheme.minTouch),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  item.icon,
-                  size: 22,
-                  color: isActive ? AppColors.primary : AppColors.textSecondary,
-                ),
-                if (showBadge)
-                  Positioned(
-                    top: -4,
-                    right: -6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 1),
+                // ── Icon with optional badge ──
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Apple-green pill marks the current tab.
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      width: 52,
+                      height: 30,
                       decoration: BoxDecoration(
-                        color: AppColors.error,
-                        borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: AppColors.surface, width: 1.5),
+                        color:
+                            isActive ? CtsTheme.appleSoft : Colors.transparent,
+                        borderRadius: BorderRadius.circular(15),
                       ),
-                      constraints:
-                          const BoxConstraints(minWidth: 16, minHeight: 16),
-                      child: Text(
-                        badgeCount > 99 ? '99+' : '$badgeCount',
-                        style: const TextStyle(
-                          fontFamily: 'Inter',
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          height: 1,
-                        ),
-                        textAlign: TextAlign.center,
+                      child: Icon(
+                        item.icon,
+                        size: 22,
+                        color: isActive
+                            ? CtsTheme.primaryDeep
+                            : CtsTheme.textSecondary,
                       ),
                     ),
+                    if (showBadge)
+                      Positioned(
+                        top: -4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: AppColors.surface, width: 1.5),
+                          ),
+                          constraints:
+                              const BoxConstraints(minWidth: 18, minHeight: 18),
+                          child: Text(
+                            badgeCount > 99 ? '99+' : '$badgeCount',
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              height: 1,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: CtsText.navLabel.copyWith(
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                    color: isActive
+                        ? CtsTheme.textPrimary
+                        : CtsTheme.textSecondary,
                   ),
+                ),
               ],
             ),
-            const SizedBox(height: 3),
-            Text(
-              item.label,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                color: isActive ? AppColors.primary : AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 3),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: isActive ? 4 : 0,
-              height: isActive ? 4 : 0,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

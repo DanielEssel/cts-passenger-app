@@ -24,55 +24,22 @@
 const DELIVERY_REFERENCE_TYPE = "delivery";
 const DELIVERY_RELEASE_REASON = "delivery_completed";
 
-const round2 = (n) => Math.round(n * 100) / 100;
+const { verifyOrderEscrow, SettlementBlockedError } = require("./order_settlement");
 
 /**
- * Decides whether a delivery's escrow may be settled. Pure.
+ * Decides whether a delivery's escrow may be settled. Pure. The shared
+ * check (order_settlement.js) with the delivery's reference type and
+ * release reason; estimatedFare only feeds the observe-only amount check.
  * @param {{deliveryId: string, passengerId: string, estimatedFare: any,
  *          escrowId: string, escrow: object|null}} input
  * @returns {{ok: true, mode: "release"|"already_released",
  *            amountMismatch: boolean} | {ok: false, reason: string}}
  */
 function verifyDeliveryEscrow({ deliveryId, passengerId, estimatedFare, escrow }) {
-  if (!escrow) return { ok: false, reason: "escrow_missing" };
-  if (escrow.userId !== passengerId) return { ok: false, reason: "escrow_owner_mismatch" };
-  if (escrow.referenceId == null || escrow.referenceId === "") {
-    return { ok: false, reason: "escrow_unattached" };
-  }
-  if (escrow.referenceId !== deliveryId) return { ok: false, reason: "escrow_reference_mismatch" };
-  if (escrow.referenceType !== DELIVERY_REFERENCE_TYPE) {
-    return { ok: false, reason: "escrow_reference_type_mismatch" };
-  }
-  if (typeof escrow.amount !== "number" || !(escrow.amount > 0)) {
-    return { ok: false, reason: "escrow_amount_invalid" };
-  }
-
-  const fare = typeof estimatedFare === "number" ? estimatedFare : Number(estimatedFare);
-  const amountMismatch = !Number.isFinite(fare) || round2(fare) !== round2(escrow.amount);
-
-  switch (escrow.status) {
-    case "HELD":
-      return { ok: true, mode: "release", amountMismatch };
-    case "RELEASED":
-      // Released for this very delivery by an earlier attempt that stopped
-      // before marking the order: finish the bookkeeping, release nothing.
-      return escrow.releaseReason === DELIVERY_RELEASE_REASON
-        ? { ok: true, mode: "already_released", amountMismatch }
-        : { ok: false, reason: "escrow_released_elsewhere" };
-    case "REFUNDED":
-      return { ok: false, reason: "escrow_refunded" };
-    default:
-      return { ok: false, reason: "escrow_unexpected_status" };
-  }
-}
-
-/** A delivery settlement that must not go ahead; carries a stable reason. */
-class SettlementBlockedError extends Error {
-  constructor(reason, detail) {
-    super(detail ? `${reason}: ${detail}` : reason);
-    this.name = "SettlementBlockedError";
-    this.reason = reason;
-  }
+  return verifyOrderEscrow({
+    orderId: deliveryId, passengerId, escrow, expectedFare: estimatedFare,
+    referenceType: DELIVERY_REFERENCE_TYPE, releaseReason: DELIVERY_RELEASE_REASON,
+  });
 }
 
 module.exports = {

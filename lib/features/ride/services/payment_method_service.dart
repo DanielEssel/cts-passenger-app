@@ -5,7 +5,7 @@ class PaymentMethodService {
   static final List<PaymentMethod> availableMethods = [
     PaymentMethod(
       type: PaymentType.wallet, 
-      name: 'CTS Wallet', 
+      name: 'CTSGo Wallet', 
       icon: Icons.account_balance_wallet_rounded, 
       subtitle: 'Balance: ', 
       isRecommended: true

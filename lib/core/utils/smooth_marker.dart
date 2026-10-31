@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/animation.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 double geoDistance(LatLng a, LatLng b) {

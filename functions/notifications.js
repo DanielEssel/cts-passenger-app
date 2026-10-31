@@ -5,24 +5,183 @@ const {
 } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
-const { canHandleGasOrder } = require("./gas_dispatch_policy");
+const { jobRejection, selectRecipients } = require("./dispatch_policy");
+const { releaseDriverIfCurrent } = require("./active_job");
+const { ensureCompletionCode } = require("./completion_codes");
+const { secureTripPayment, cancelOrderForPayment, cancelIfAssignedUnpaid } = require("./escrow");
+const { verifyGasOrderPrice, verifiedPriceStamp, stampedPrice } = require("./gas_pricing");
+const { verifyAndStampDeliveryPrice } = require("./delivery_quotes");
+const { publishOffer, withdrawOfferIfTaken, isOpenUnassigned, areaLabel } = require("./order_offers");
+const { verifyAndStampRefillStation } = require("./gas_refill_station");
 
 // Lazy getters — avoids calling before admin.initializeApp()
 const getDb = () => admin.firestore();
 const getFcm = () => admin.messaging();
 
-// ── Haversine distance formula ────────────────────────────────────────────────
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+// ── Offering a request to drivers ────────────────────────────────────────────
+// The one path by which Ride, Delivery and Gas requests reach drivers' bells
+// and devices. dispatch_policy.js decides who is eligible; a request that
+// fails its own checks (no valid location, unknown service, vehicle that
+// cannot carry the load) is offered to nobody.
+
+/** FCM errors that mean the token will never work again. */
+const DEAD_TOKEN_CODES = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+]);
+
+const DRIVER_QUERIES = {
+  ride: (job) => getDb().collection("drivers")
+    .where("isAvailable", "==", true)
+    .where("isOnline", "==", true)
+    .where("isApproved", "==", true)
+    .where("role", "==", "driver_hailing")
+    .where("serviceType", "==", job.serviceType),
+  delivery: () => getDb().collection("drivers")
+    .where("isAvailable", "==", true)
+    .where("isOnline", "==", true)
+    .where("isApproved", "==", true)
+    .where("role", "==", "driver_delivery"),
+};
+DRIVER_QUERIES.gas = DRIVER_QUERIES.delivery;
+
+/** Removes a dead token from a driver, unless the driver has since saved a new one. */
+async function dropDeadToken(driverId, token) {
+  const ref = getDb().collection("drivers").doc(driverId);
+  await getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists && snap.get("fcmToken") === token) {
+      tx.update(ref, { fcmToken: admin.firestore.FieldValue.delete() });
+    }
+  });
+}
+
+/**
+ * Cancels a delivery no vehicle may carry, while it is still pending and
+ * unassigned, with the reason in statusReason (the convention driver
+ * cancellations use). The existing triggers then do the rest:
+ * onDeliveryStatusChanged tells the passenger why, and onDeliveryCancelled
+ * returns a wallet hold. Returns true when this call cancelled it.
+ */
+async function endUndeliverableDelivery(deliveryId, reason) {
+  const ref = getDb().collection("deliveries").doc(deliveryId);
+  return getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get("status") !== "pending" || snap.get("driverId") != null) return false;
+    tx.update(ref, {
+      status: "cancelled",
+      statusReason: reason,
+      cancelledBy: "system",
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+}
+
+/** What the passenger is told when a delivery ends with `cancelled`. */
+function deliveryCancelledMessage(d) {
+  if (d.statusReason === "vehicle_cannot_carry_weight_tier") {
+    return `${d.vehicleType ?? "That vehicle"} can't carry a ${String(d.weightTier ?? "").toLowerCase()} delivery. ` +
+      "Any payment held for it is being returned. Please book again and choose a larger vehicle.";
+  }
+  if (d.statusReason === "unknown_delivery_vehicle") {
+    return "We couldn't match this delivery to a vehicle. Any payment held for it is being returned. Please book again.";
+  }
+  if (d.cancellationReason === "price_changed" || d.cancellationReason === "quote_not_verified") {
+    return "Your delivery was not placed because its price needs to be confirmed again. " +
+      "Nothing was charged. Please get a new price and book again.";
+  }
+  return "Your delivery was cancelled. Contact support if you need help.";
+}
+
+/**
+ * Notifies the eligible drivers of one request: an inbox entry each, and one
+ * push per eligible device. Returns the ids of the drivers notified. Logs
+ * counts only (no tokens, names or locations). Never throws.
+ */
+async function offerToDrivers(service, jobId, job, { inbox, push }) {
+  const label = `${service} ${jobId}`;
+  try {
+    const rejection = jobRejection(service, job);
+    if (rejection) {
+      console.warn(`${label}: not dispatched (${rejection})`);
+      if (rejection === "vehicle_cannot_carry_weight_tier" || rejection === "unknown_delivery_vehicle") {
+        // No driver may take it (older Passenger builds offered Okada for
+        // Medium): end it now so the passenger is told, rather than left
+        // waiting on a request nobody can accept.
+        await endUndeliverableDelivery(jobId, rejection)
+          .catch((e) => console.error(`${label}: ending it failed:`, e.message));
+        await getDb().collection("admin_alerts").add({
+          type: "dispatch_rejected", service, jobId, reason: rejection,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch((e) => console.error(`${label}: alert write failed:`, e.message));
+      }
+      return [];
+    }
+
+    const snap = await DRIVER_QUERIES[service](job).get();
+    const { recipients, rejected } = selectRecipients(
+      service, job, snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    console.log(`${label}: ${recipients.length} eligible of ${snap.size}`, rejected);
+    if (recipients.length === 0) return [];
+
+    const batch = getDb().batch();
+    for (const r of recipients) {
+      batch.set(getDb().collection("drivers").doc(r.id).collection("notifications").doc(), {
+        ...inbox,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit()
+      .catch((e) => console.error(`${label}: inbox write failed:`, e.message));
+
+    const sendable = recipients.filter((r) => r.token);
+    if (sendable.length === 0) return recipients.map((r) => r.id);
+    const response = await getFcm().sendEachForMulticast({
+      tokens: sendable.map((r) => r.token),
+      android: {
+        priority: "high", // immediate delivery even in Doze
+        notification: { channelId: "driver_trips", sound: "default" },
+      },
+      apns: { payload: { aps: { sound: "default" } } },
+      data: push,
+    });
+    console.log(`${label}: FCM success=${response.successCount} failure=${response.failureCount}`);
+    await Promise.all(response.responses.map((r, i) =>
+      !r.success && DEAD_TOKEN_CODES.has(r.error?.code)
+        ? dropDeadToken(sendable[i].id, sendable[i].token)
+          .catch((e) => console.error(`${label}: token cleanup failed:`, e.message))
+        : null));
+    return recipients.map((r) => r.id);
+  } catch (e) {
+    console.error(`${label}: driver notification failed:`, e.message);
+    return [];
+  }
+}
+
+// ── Freeing the driver when a job ends ──────────────────────────────────────
+// currentTripId/currentTripType are server-owned (active_job.js): acceptance
+// sets them, and these triggers clear both when the job they name ends.
+// The driver is freed only while the pointer is still this job, so ending an
+// older job never clears a newer one, and a repeat run changes nothing.
+// Rides are freed here on completion; Delivery and Gas completion is left to
+// settlement (trips.js, escrow.js), which applies the same check.
+// 'flagged' (held for review: fraud check, completion code missing or
+// mismatched) frees no one: the driver stays on the job until an admin
+// resolves it to completed (settlement frees them) or cancelled (freed here).
+const ORDER_ENDED_STATUSES = {
+  trips: ["completed", "cancelled", "cancelledByDriver", "cancelledByPassenger", "expired"],
+  deliveries: ["cancelled", "cancelledByDriver", "cancelledByPassenger"],
+  gas_orders: ["cancelled", "failed"],
+};
+
+async function releaseDriverFromEndedOrder(collection, orderId, before, after) {
+  const ended = ORDER_ENDED_STATUSES[collection];
+  if (!after?.driverId || !ended.includes(after.status) || ended.includes(before?.status)) {
+    return false;
+  }
+  return getDb().runTransaction((tx) => releaseDriverIfCurrent(tx, after.driverId, orderId));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,105 +239,29 @@ exports.onTripCreatedNotify = onDocumentCreated(
     if (data.driverId) return;
     if (data.status && data.status !== "searching") return;
 
-    try {
-      const lat = data.pickupLocation?.latitude ?? 0;
-      const lng = data.pickupLocation?.longitude ?? 0;
+    // A wallet ride is offered to drivers only once its hold is linked and
+    // matches the booked price; otherwise it is cancelled (escrow.js
+    // secureTripPayment). Cash rides are unchanged.
+    if (!(await secureTripPayment(tripId, data))) return;
 
-      const driversSnap = await getDb()
-        .collection("drivers")
-        .where("isAvailable", "==", true)
-        .where("isOnline", "==", true)
-        .where("isApproved", "==", true)
-        .where("role", "==", "driver_hailing") // ← ride vs delivery bucket
-        .where("serviceType", "==", data.serviceType) // ← taxi vs pragyia, matches the trip
-        .get();
-
-      if (driversSnap.empty) {
-        console.log(`Trip ${tripId}: no available ride drivers`);
-        return;
-      }
-
-      const nearby = driversSnap.docs.filter((doc) => {
-        const d = doc.data();
-        const loc = d.location;
-        if (!loc) return false;
-        return haversineKm(lat, lng, loc.latitude, loc.longitude) <= 10.0;
-      });
-
-      if (nearby.length === 0) {
-        console.log(`Trip ${tripId}: no drivers within 10km`);
-        return;
-      }
-
-      const tokens = nearby.map((d) => d.data().fcmToken).filter(Boolean);
-      if (tokens.length === 0) return;
-
-      // Write in-app notification doc for each nearby driver (bell inbox)
-      const batch = getDb().batch();
-      for (const doc of nearby) {
-        const ref = getDb()
-          .collection("drivers")
-          .doc(doc.id)
-          .collection("notifications")
-          .doc();
-        batch.set(ref, {
-          type: "rideRequest",
-          title: "New Ride Request 🛵",
-          body: `${data.pickupAddress ?? "Nearby pickup"} → ${data.dropoffAddress ?? "destination"} · GH₵${Number(data.estimatedFare ?? 0).toFixed(2)}`,
-          route: "/driver-shell",
-          metadata: { tripId },
-          isRead: false,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-      await batch
-        .commit()
-        .catch((e) =>
-          console.error(`Trip ${tripId}: notif batch write failed:`, e.message),
-        );
-
-      const response = await admin.messaging().sendEachForMulticast({
-        tokens,
-        android: {
-          priority: "high", // ← immediate delivery even in Doze
-          notification: {
-            channelId: "driver_trips", // ← the high-importance channel the app creates
-            sound: "default",
-          },
-        },
-        apns: {
-          payload: { aps: { sound: "default" } },
-        },
-        data: {
-          type: "NEW_RIDE_REQUEST",
-          tripId,
-          pickupAddress: data.pickupAddress ?? "",
-          dropoffAddress: data.dropoffAddress ?? "",
-          estimatedFare: String(data.estimatedFare ?? 0),
-          title: "🛵 New Ride Request",
-          body: `${data.pickupAddress ?? "Nearby pickup"} → ${data.dropoffAddress ?? "destination"} · GH₵${Number(data.estimatedFare ?? 0).toFixed(2)}`,
-        },
-      });
-
-      console.log(
-        `Trip ${tripId}: FCM successCount=${response.successCount}, failureCount=${response.failureCount}`,
-      );
-      response.responses.forEach((r, i) => {
-        if (!r.success) {
-          console.error(
-            `Trip ${tripId}: token ${tokens[i].slice(0, 20)}... failed:`,
-            r.error?.code,
-            r.error?.message,
-          );
-        } else {
-          console.log(
-            `Trip ${tripId}: token ${tokens[i].slice(0, 20)}... delivered OK`,
-          );
-        }
-      });
-    } catch (err) {
-      console.error(`Trip ${tripId}: notify failed (non-fatal):`, err);
-    }
+    await offerToDrivers("ride", tripId, data, {
+      inbox: {
+        type: "rideRequest",
+        title: "New Ride Request 🛵",
+        body: `${data.pickupAddress ?? "Nearby pickup"} → ${data.dropoffAddress ?? "destination"} · GH₵${Number(data.estimatedFare ?? 0).toFixed(2)}`,
+        route: "/driver-shell",
+        metadata: { tripId },
+      },
+      push: {
+        type: "NEW_RIDE_REQUEST",
+        tripId,
+        pickupAddress: data.pickupAddress ?? "",
+        dropoffAddress: data.dropoffAddress ?? "",
+        estimatedFare: String(data.estimatedFare ?? 0),
+        title: "🛵 New Ride Request",
+        body: `${data.pickupAddress ?? "Nearby pickup"} → ${data.dropoffAddress ?? "destination"} · GH₵${Number(data.estimatedFare ?? 0).toFixed(2)}`,
+      },
+    });
   },
 );
 
@@ -211,6 +294,125 @@ async function notifyDriver(uid, { type, title, body, route, metadata = {} }) {
 
   await _sendFcm(token, { type, title, body, route, metadata });
 }
+
+// ── Linked-rider supplier offers ─────────────────────────────────────────────
+// A gas supplier offers an order to one of its linked riders
+// (gas_supplier_fulfilment.js). The rider gets an inbox entry and a push.
+// The inbox doc id is deterministic and written with create(), so a redelivered
+// event finds it and sends nothing. The push only routes the rider to the
+// offers screen; accepting is checked again, server-side, at acceptance.
+
+const RIDER_OFFER_ENDED = new Set(["withdrawn", "timed_out", "cancelled", "revoked"]);
+
+/**
+ * Writes the rider's inbox entry once. Returns false when it already exists
+ * (the event was delivered before), so the caller sends no push.
+ */
+async function notifyRiderOnce(uid, { inboxId, type, title, body, orderId, channel = "driver_trips" }, { fcm } = {}) {
+  if (!uid) return false;
+  const ref = getDb().collection("drivers").doc(uid).collection("notifications").doc(inboxId);
+  try {
+    await ref.create({
+      type,
+      title,
+      body,
+      route: "/gas-supplier-jobs",
+      metadata: { orderId },
+      isRead: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    if (e.code === 6 || /already exists/i.test(e.message ?? "")) return false;
+    console.error(`rider offer ${orderId}: inbox write failed:`, e.message);
+    return false;
+  }
+
+  // Read once: the token the send used is the one cleanup may drop, so a
+  // token the rider saved after it is never removed.
+  let token;
+  try {
+    token = (await getDb().collection("drivers").doc(uid).get()).data()?.fcmToken;
+    if (!token) return true;
+    await (fcm ?? getFcm()).send({
+      token,
+      notification: { title, body },
+      data: { type, orderId },
+      android: {
+        priority: "high",
+        notification: { channelId: channel, sound: "default", tag: `gsro_${orderId}` },
+      },
+      apns: {
+        headers: { "apns-collapse-id": `gsro_${orderId}` },
+        payload: { aps: { sound: "default" } },
+      },
+    });
+  } catch (e) {
+    console.error(`rider offer ${orderId}: FCM send error:`, e.code ?? e.message);
+    if (DEAD_TOKEN_CODES.has(e.code) && token) {
+      await dropDeadToken(uid, token).catch((x) => console.error("token cleanup failed:", x.message));
+    }
+  }
+  return true;
+}
+
+const toMillis = (t) => (t?.toMillis ? t.toMillis() : t instanceof Date ? t.getTime() : Number(t ?? 0));
+
+/**
+ * Decides and sends the offer notifications for one order change. `before`
+ * and `after` are the order data. Never throws. Returns the inbox ids pushed
+ * and the ids skipped (stale, expired, or already sent).
+ */
+async function handleRiderOfferChange(before, after, orderId, { now = Date.now(), fcm } = {}) {
+  const sent = [];
+  const skipped = [];
+  try {
+    const offer = after?.riderOffer;
+    if (offer && offer.seq !== before?.riderOffer?.seq) {
+      const id = `gas_rider_offer_${orderId}_${offer.seq}_offer`;
+      // A delayed event: push only while this offer is still the current one.
+      const live = (await getDb().collection("gas_supplier_orders").doc(orderId).get()).data();
+      const cur = live?.riderOffer;
+      if (!cur || cur.seq !== offer.seq || cur.driverId !== offer.driverId || toMillis(cur.expiresAt) <= now) {
+        skipped.push(id);
+      } else if (await notifyRiderOnce(offer.driverId, {
+        inboxId: id,
+        type: "GAS_SUPPLIER_RIDER_OFFER",
+        title: "New gas delivery offer",
+        body: "A gas supplier has offered you a delivery. Open Supplier jobs to accept or decline.",
+        orderId,
+      }, { fcm })) sent.push(id);
+      else skipped.push(id);
+    }
+
+    const last = after?.lastRiderOffer;
+    const prev = before?.lastRiderOffer;
+    if (last && RIDER_OFFER_ENDED.has(last.outcome) && (last.seq !== prev?.seq || last.outcome !== prev?.outcome)) {
+      const id = `gas_rider_offer_${orderId}_${last.seq}_ended`;
+      if (await notifyRiderOnce(last.driverId, {
+        inboxId: id,
+        type: "GAS_SUPPLIER_RIDER_OFFER_ENDED",
+        title: "Gas delivery offer ended",
+        body: "A gas delivery offer made to you is no longer available.",
+        orderId,
+      }, { fcm })) sent.push(id);
+      else skipped.push(id);
+    }
+  } catch (e) {
+    console.error(`rider offer ${orderId}: notification failed:`, e.message);
+  }
+  return { sent, skipped };
+}
+
+exports.handleRiderOfferChange = handleRiderOfferChange;
+exports.notifyRiderOnce = notifyRiderOnce;
+
+exports.onGasSupplierRiderOfferChanged = onDocumentUpdated(
+  { region: "europe-west2", document: "gas_supplier_orders/{orderId}" },
+  async (event) => {
+    await handleRiderOfferChange(
+      event.data.before.data(), event.data.after.data(), event.params.orderId);
+  },
+);
 
 // ── FCM sender ────────────────────────────────────────────────────────────────
 
@@ -285,6 +487,10 @@ exports.onTripStatusChanged = onDocumentUpdated(
     const driverRoute = `/driver/trip-active?tripId=${tripId}`;
     const meta = { tripId };
 
+    // Free the driver when the trip ends, only if still on this trip.
+    await releaseDriverFromEndedOrder("trips", tripId, before, after)
+      .catch((e) => console.error(`Trip ${tripId}: driver release failed:`, e.message));
+
     switch (after.status) {
       // ── Driver accepted — notify passenger ──
       case "tripAccepted":
@@ -340,17 +546,6 @@ exports.onTripStatusChanged = onDocumentUpdated(
                 metadata: meta,
               })
             : Promise.resolve(),
-          // Reset driver availability
-          driverId
-            ? getDb()
-                .collection("drivers")
-                .doc(driverId)
-                .update({
-                  isAvailable: true,
-                  currentTripId: admin.firestore.FieldValue.delete(),
-                })
-                .catch((e) => console.error("Driver reset error:", e.message))
-            : Promise.resolve(),
         ]);
         break;
 
@@ -366,17 +561,6 @@ exports.onTripStatusChanged = onDocumentUpdated(
                 metadata: meta,
               })
             : Promise.resolve(),
-          // Reset driver
-          driverId
-            ? getDb()
-                .collection("drivers")
-                .doc(driverId)
-                .update({
-                  isAvailable: true,
-                  currentTripId: admin.firestore.FieldValue.delete(),
-                })
-                .catch((e) => console.error("Driver reset error:", e.message))
-            : Promise.resolve(),
         ]);
         break;
 
@@ -390,17 +574,6 @@ exports.onTripStatusChanged = onDocumentUpdated(
             route: "/shell",
             metadata: meta,
           }),
-          // Reset driver
-          driverId
-            ? getDb()
-                .collection("drivers")
-                .doc(driverId)
-                .update({
-                  isAvailable: true,
-                  currentTripId: admin.firestore.FieldValue.delete(),
-                })
-                .catch((e) => console.error("Driver reset error:", e.message))
-            : Promise.resolve(),
         ]);
         break;
 
@@ -429,6 +602,51 @@ exports.onGasOrderCreated = onDocumentCreated(
     const orderId = event.params.orderId;
     const uid = data.passengerId;
 
+    // The completion code lives where the assigned driver cannot read it.
+    await ensureCompletionCode("gas_orders", orderId, data)
+      .catch((e) => console.error(`Gas order ${orderId}: completion code not stored:`, e.message));
+
+    // The app-written total and delivery fee must be the server's Gas price
+    // (gas_pricing.js) before the order is offered to anyone; the price is
+    // then stamped on the order (verifiedPrice) for acceptance and
+    // settlement. Otherwise the order is cancelled now, nothing is charged
+    // (a wallet hold is refunded by the cancellation), and the customer is
+    // asked to review the current price and order again.
+    const priced = await verifyAndStampGasPrice(orderId);
+    if (!priced.ok) {
+      if (priced.reason === "order_not_open") return;
+      console.warn(`Gas order ${orderId}: ${priced.reason}; cancelled before dispatch`);
+      await cancelOrderForPayment("gas_orders", orderId, priced.reason, {
+        cancellationReason: priced.reason === "price_changed" ? "price_changed" : "price_not_verified",
+        alertType: "gas_price_rejected",
+        what: priced.reason === "price_changed"
+          ? "its total or delivery fee is not the current server Gas price"
+          : `it cannot be priced by the server (${priced.detail ?? "no detail"})`,
+      });
+      return;
+    }
+
+    // A requested refill station (refillStationRef) must be the supplier's
+    // own verified, in-stock station serving this order (gas_refill_station.js);
+    // its trusted snapshot is stamped as verifiedRefillStation. Otherwise the
+    // order is cancelled now, before any driver sees it: never another
+    // station or a guessed point. Orders without a reference are unchanged.
+    const station = await verifyAndStampRefillStation(orderId);
+    if (!station.ok) {
+      if (station.reason === "order_not_open") return;
+      console.warn(`Gas order ${orderId}: refill station ${station.reason}; cancelled before dispatch`);
+      await cancelOrderForPayment("gas_orders", orderId, station.reason, {
+        cancellationReason: "refill_station_unavailable",
+        alertType: "gas_refill_station_rejected",
+        what: `its requested refill station cannot serve it (${station.reason})`,
+      });
+      return;
+    }
+
+    // Instructions and condition notes stay server-side until a driver is assigned.
+    await sealPrivateDetails("gas_orders", orderId)
+      .catch((e) => console.error(`Gas order ${orderId}: details not sealed:`, e.message));
+
     // ── 1. Notify passenger ───────────────────────────────────────────────
     await notifyPassenger(uid, {
       type: "gas",
@@ -438,127 +656,123 @@ exports.onGasOrderCreated = onDocumentCreated(
       metadata: { orderId },
     });
 
-    // ── 2. Notify nearby available delivery drivers via FCM ───────────────
-    try {
-      const deliveryLat =
-        data.deliveryLocation?.latitude ?? data.pickupLocation?.latitude ?? 0;
-      const deliveryLng =
-        data.deliveryLocation?.longitude ?? data.pickupLocation?.longitude ?? 0;
-
-      const driversSnap = await getDb()
-        .collection("drivers")
-        .where("isAvailable", "==", true)
-        .where("isOnline", "==", true)
-        .where("isApproved", "==", true)
-        .where("role", "==", "driver_delivery")
-        .get();
-
-      if (driversSnap.empty) {
-        console.log(`Gas order ${orderId}: no available delivery drivers`);
-        return;
-      }
-
-      const nearby = driversSnap.docs.filter((doc) => {
-        const driver = doc.data();
-        const loc = driver.location;
-
-        if (!loc) return false;
-
-        // Gas capability is evaluated independently of the delivery radius.
-        // Unknown/missing vehicle types fail closed.
-        if (!canHandleGasOrder(driver.vehicleType, data.refillType)) {
-          return false;
-        }
-
-        return (
-          haversineKm(deliveryLat, deliveryLng, loc.latitude, loc.longitude) <=
-          10.0
-        );
-      });
-
-      if (nearby.length === 0) {
-        const radiusEligible = driversSnap.docs.filter((doc) => {
-          const loc = doc.data().location;
-          if (!loc) return false;
-
-          return (
-            haversineKm(
-              deliveryLat,
-              deliveryLng,
-              loc.latitude,
-              loc.longitude,
-            ) <= 10.0
-          );
-        });
-
-        if (radiusEligible.length === 0) {
-          console.log(`Gas order ${orderId}: no drivers within 10km`);
-        } else {
-          console.log(
-            `Gas order ${orderId}: ${radiusEligible.length} nearby driver(s) failed gas vehicle eligibility for ${data.refillType ?? "unknown refill type"}`,
-          );
-        }
-
-        return;
-      }
-
-      const tokens = nearby.map((d) => d.data().fcmToken).filter(Boolean);
-      if (tokens.length === 0) return;
-
-      const batch = getDb().batch();
-      for (const doc of nearby) {
-        const ref = getDb()
-          .collection("drivers")
-          .doc(doc.id)
-          .collection("notifications")
-          .doc();
-        batch.set(ref, {
-          type: "gasOrder",
-          title: "New Gas Order 🔥",
-          body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
-          route: "/driver-shell",
-          metadata: { orderId },
-          isRead: false,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-      await batch
-        .commit()
-        .catch((e) =>
-          console.error(
-            `Gas order ${orderId}: notif batch write failed:`,
-            e.message,
-          ),
-        );
-
-      await admin.messaging().sendEachForMulticast({
-        tokens,
-        android: {
-          priority: "high",
-          notification: { channelId: "driver_trips", sound: "default" },
-        },
-        apns: { payload: { aps: { sound: "default" } } },
-        data: {
-  type: "NEW_GAS_REQUEST",
-  orderId,
-  pickupAddress: data.pickupAddress ?? "",
-  deliveryAddress: data.deliveryAddress ?? "",
-  cylinderSize: data.cylinderSize ?? "",
-  totalPrice: String(data.totalPrice ?? 0),
-  title: "🔥 New Gas Order",
-  body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${data.deliveryAddress ?? "Nearby"}`,
-  route: `/driver/active-gas?orderId=${orderId}`,
-},
-      });
-      console.log(`Gas order ${orderId}: FCM sent to ${tokens.length} drivers`);
-    } catch (e) {
-      console.error(
-        `Gas order ${orderId}: driver notification failed:`,
-        e.message,
-      );
+    // ── 2. Offer it to eligible nearby Delivery drivers ──────────────────
+    // A wallet order is offered once its hold is linked to it (as for
+    // deliveries: attachEscrowToOrder checks the price, the app records
+    // escrowId, onGasOrderPaymentAttached then dispatches). Cash orders are
+    // dispatched now, as before. Read again: the payment may have been
+    // linked while the price was checked, before which
+    // onGasOrderPaymentAttached could not offer it (no verified price).
+    const current = (await getDb().collection("gas_orders").doc(orderId).get()).data() ?? data;
+    if (current.paymentMethod === "wallet" && !(await orderPaymentLinked("gas_orders", orderId, current))) {
+      console.log(`Gas order ${orderId}: waiting for its wallet payment before dispatch`);
+      return;
     }
+    await dispatchGasOrderToDrivers(orderId, current);
   },
 );
+
+// ── onGasOrderPaymentAttached: dispatch a wallet Gas order once paid ────────
+// As onDeliveryPaymentAttached: fires when an open, unassigned wallet order
+// first records its escrowId, and dispatches it only if that hold really is
+// this order's payment (owner, link and HELD).
+exports.onGasOrderPaymentAttached = onDocumentUpdated(
+  { region: "europe-west2", document: "gas_orders/{orderId}" },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    const orderId = event.params.orderId;
+    if (!after || before?.escrowId != null || after.escrowId == null) return;
+    if (after.paymentMethod !== "wallet" || after.status !== "pendingApproval" || after.driverId) return;
+    if (!(await orderPaymentLinked("gas_orders", orderId, after))) {
+      console.warn(`Gas order ${orderId}: escrowId does not name its linked hold; not dispatched`);
+      return;
+    }
+    await dispatchGasOrderToDrivers(orderId, after);
+  },
+);
+
+/**
+ * Offers a legacy Gas order to eligible nearby Delivery drivers: publishes
+ * its offer (order_offers.js; only a priced, open, unassigned order has one)
+ * and notifies drivers once, by the call that published it.
+ */
+async function dispatchGasOrderToDrivers(orderId, data) {
+  // A job nobody may take is not listed (offerToDrivers handles it below).
+  if (!jobRejection("gas", data) && await publishOffer("gas_orders", orderId) !== "published") {
+    console.log(`Gas order ${orderId}: no new offer; drivers not notified`);
+    return;
+  }
+  // Drivers see the area only (order_offers.js): never the street address.
+  const area = areaLabel(data.deliveryAddress ?? data.pickupAddress) || "Nearby";
+  const total = stampedPrice(data)?.total ?? data.totalPrice ?? 0;
+  // No route in the push: like ride and delivery requests, a tap opens the
+  // app on its request list, where acceptance goes through acceptGasOrder.
+  await offerToDrivers("gas", orderId, data, {
+    inbox: {
+      type: "gasOrder",
+      title: "New Gas Order 🔥",
+      body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${area}`,
+      route: "/driver-shell",
+      metadata: { orderId },
+    },
+    push: {
+      type: "NEW_GAS_REQUEST",
+      orderId,
+      pickupAddress: area,
+      deliveryAddress: area,
+      cylinderSize: data.cylinderSize ?? "",
+      totalPrice: String(total),
+      title: "🔥 New Gas Order",
+      body: `${data.cylinderSize ?? "Gas cylinder"} delivery — ${area}`,
+    },
+  });
+}
+
+/**
+ * Checks a new Gas order's own amounts against the server price and stamps
+ * verifiedPrice on it, in one transaction on the order as it is now (a
+ * retry finds its own stamp and agrees). Returns {ok: true} or
+ * {ok: false, reason, detail?}; reason "order_not_open" when the order was
+ * cancelled or taken meanwhile (nothing to do).
+ */
+async function verifyAndStampGasPrice(orderId) {
+  const ref = getDb().collection("gas_orders").doc(orderId);
+  const settingsRef = getDb().collection("settings").doc("platform");
+  return getDb().runTransaction(async (tx) => {
+    const [snap, settingsSnap] = await Promise.all([tx.get(ref), tx.get(settingsRef)]);
+    const order = snap.exists ? snap.data() : null;
+    if (!isOpenUnassigned("gas_orders", order)) return { ok: false, reason: "order_not_open" };
+    if (stampedPrice(order)) return { ok: true };
+    const check = verifyGasOrderPrice(order, settingsSnap.exists ? settingsSnap.data() : null);
+    if (!check.ok) return { ok: false, reason: check.reason, detail: check.detail };
+    tx.update(ref, {
+      verifiedPrice: { ...verifiedPriceStamp(check.quote), verifiedAt: admin.firestore.FieldValue.serverTimestamp() },
+    });
+    return { ok: true };
+  });
+}
+
+/**
+ * Copies the passenger's name and phone onto a delivery once a driver is
+ * assigned to it. Drivers may read the assigned delivery but not passenger
+ * user documents; before assignment the order is readable by every active
+ * delivery driver, so the contact is not written then.
+ */
+async function attachPassengerContact(deliveryId, uid) {
+  if (!uid) return;
+  const passengerSnap = await getDb().collection("users").doc(uid).get();
+  if (!passengerSnap.exists) return;
+  const passenger = passengerSnap.data() || {};
+  const text = (v) => (typeof v === "string" ? v.trim() : "");
+  const passengerName = text(passenger.displayName) ||
+    `${text(passenger.firstName)} ${text(passenger.lastName)}`.trim();
+  const passengerPhone = text(passenger.phoneNumber);
+  await getDb().collection("deliveries").doc(deliveryId).update({
+    passengerName: passengerName || null,
+    passengerPhone: passengerPhone || null,
+  });
+}
 
 // ── onDeliveryCreated: notify passenger + nearby drivers ─────────────────────
 exports.onDeliveryCreated = onDocumentCreated(
@@ -572,59 +786,37 @@ exports.onDeliveryCreated = onDocumentCreated(
     const deliveryId = event.params.deliveryId;
     const uid = data.passengerId;
 
-    // ── Enrich delivery with passenger contact details ─────────────────────
-    // Drivers are allowed to read the assigned delivery, but not arbitrary
-    // passenger user documents. Copy only the contact fields needed for
-    // delivery communication.
-    if (uid) {
-      try {
-        const passengerSnap = await getDb().collection("users").doc(uid).get();
+    // The completion code lives where the assigned driver cannot read it.
+    await ensureCompletionCode("deliveries", deliveryId, data)
+      .catch((e) => console.error(`Delivery ${deliveryId}: completion code not stored:`, e.message));
 
-        if (passengerSnap.exists) {
-          const passenger = passengerSnap.data() || {};
-
-          const displayName =
-            typeof passenger.displayName === "string"
-              ? passenger.displayName.trim()
-              : "";
-
-          const firstName =
-            typeof passenger.firstName === "string"
-              ? passenger.firstName.trim()
-              : "";
-
-          const lastName =
-            typeof passenger.lastName === "string"
-              ? passenger.lastName.trim()
-              : "";
-
-          const passengerName =
-            displayName || `${firstName} ${lastName}`.trim();
-
-          const passengerPhone =
-            typeof passenger.phoneNumber === "string"
-              ? passenger.phoneNumber.trim()
-              : "";
-
-          await getDb()
-            .collection("deliveries")
-            .doc(deliveryId)
-            .update({
-              passengerName: passengerName || null,
-              passengerPhone: passengerPhone || null,
-            });
-
-          console.log(
-            `Delivery ${deliveryId}: passenger contact details attached`,
-          );
-        }
-      } catch (e) {
-        console.error(
-          `Delivery ${deliveryId}: failed to attach passenger contact:`,
-          e.message,
-        );
-      }
+    // The price must be the server's (delivery_quotes.js): the order's own
+    // quote, unexpired, unused, for these endpoints and this parcel, at this
+    // fare and the current rates; it is stamped as verifiedPrice. Otherwise
+    // the delivery is cancelled before anyone sees it or anything is held for
+    // it (a wallet hold is refunded by the cancellation) and the customer is
+    // asked to get a new price.
+    // A booking no vehicle may carry (older Passenger builds) skips this: the
+    // dispatch below ends it with that reason and nothing is offered.
+    const priced = jobRejection("delivery", data) ? { ok: true } : await verifyAndStampDeliveryPrice(deliveryId);
+    if (!priced.ok) {
+      if (priced.reason === "order_not_open") return;
+      console.warn(`Delivery ${deliveryId}: ${priced.reason}; cancelled before dispatch`);
+      await cancelOrderForPayment("deliveries", deliveryId, priced.reason, {
+        cancellationReason: priced.reason === "price_changed" ? "price_changed" : "quote_not_verified",
+        alertType: "delivery_price_rejected",
+        what: `its price could not be verified (${priced.reason})`,
+      });
+      return;
     }
+
+    // Receiver contact, notes and photo stay server-side until a driver is assigned.
+    await sealPrivateDetails("deliveries", deliveryId)
+      .catch((e) => console.error(`Delivery ${deliveryId}: details not sealed:`, e.message));
+
+    // Passenger contact details are copied when a driver is assigned
+    // (onDeliveryStatusChanged → attachPassengerContact), not now: an open
+    // delivery is readable by every active delivery driver.
 
     // ── 1. Notify passenger ───────────────────────────────────────────────
     await notifyPassenger(uid, {
@@ -636,95 +828,150 @@ exports.onDeliveryCreated = onDocumentCreated(
     });
 
     // ── 2. Notify nearby delivery drivers ─────────────────────────────────
-    try {
-      const pickupLat = data.pickupLocation?.latitude ?? 0;
-      const pickupLng = data.pickupLocation?.longitude ?? 0;
-
-      const driversSnap = await getDb()
-        .collection("drivers")
-        .where("isAvailable", "==", true)
-        .where("isOnline", "==", true)
-        .where("isApproved", "==", true)
-        .where("role", "==", "driver_delivery")
-        .get();
-
-      if (driversSnap.empty) {
-        console.log(`Delivery ${deliveryId}: no available drivers`);
-        return;
-      }
-
-      const nearby = driversSnap.docs.filter((doc) => {
-        const loc = doc.data().location;
-        if (!loc) return false;
-        return (
-          haversineKm(pickupLat, pickupLng, loc.latitude, loc.longitude) <= 10.0
-        );
-      });
-
-      if (nearby.length === 0) {
-        console.log(`Delivery ${deliveryId}: no drivers within 10km`);
-        return;
-      }
-
-      const tokens = nearby.map((d) => d.data().fcmToken).filter(Boolean);
-      if (tokens.length === 0) return;
-
-      const batch = getDb().batch();
-      for (const doc of nearby) {
-        const ref = getDb()
-          .collection("drivers")
-          .doc(doc.id)
-          .collection("notifications")
-          .doc();
-        batch.set(ref, {
-          type: "delivery",
-          title: "New Delivery Request 📦",
-          body: `${data.parcelType ?? "Parcel"} — ${data.pickupAddress ?? "Nearby"}`,
-          route: "/driver-shell",
-          metadata: { deliveryId },
-          isRead: false,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-      await batch
-        .commit()
-        .catch((e) =>
-          console.error(
-            `Delivery ${deliveryId}: notif batch write failed:`,
-            e.message,
-          ),
-        );
-
-      await admin.messaging().sendEachForMulticast({
-        tokens,
-        android: {
-          priority: "high",
-          notification: { channelId: "driver_trips", sound: "default" },
-        },
-        apns: { payload: { aps: { sound: "default" } } },
-        data: {
-          type: "NEW_DELIVERY_REQUEST",
-          deliveryId,
-          pickupAddress: data.pickupAddress ?? "",
-          dropoffAddress: data.dropoffAddress ?? "",
-          parcelType: data.parcelType ?? "",
-          estimatedFare: String(data.estimatedFare ?? 0),
-          weightTier: data.weightTier ?? "",
-          title: "📦 New Delivery Request",
-          body: `${data.parcelType ?? "Parcel"} — ${data.pickupAddress ?? "Nearby"}`,
-        },
-      });
-      console.log(
-        `Delivery ${deliveryId}: FCM sent to ${tokens.length} drivers`,
-      );
-    } catch (e) {
-      console.error(
-        `Delivery ${deliveryId}: driver notification failed:`,
-        e.message,
-      );
+    // A wallet delivery is offered once its hold is linked to it
+    // (attachEscrowToOrder records escrowId; onDeliveryPaymentAttached then
+    // dispatches). Cash deliveries are dispatched now, as before.
+    // Read again: the payment may have been linked while the price was
+    // checked, before which onDeliveryPaymentAttached could not offer it.
+    const current = (await getDb().collection("deliveries").doc(deliveryId).get()).data() ?? data;
+    if (current.paymentMethod === "wallet" && !(await orderPaymentLinked("deliveries", deliveryId, current))) {
+      console.log(`Delivery ${deliveryId}: waiting for its wallet payment before dispatch`);
+      return;
     }
+    await dispatchDeliveryToDrivers(deliveryId, current);
   },
 );
+
+// ── onDeliveryPaymentAttached: dispatch a wallet delivery once paid ─────────
+// Fires when a pending, unassigned wallet delivery first records its
+// escrowId, and dispatches it only if that hold really is this delivery's
+// payment (owner, link and HELD), however escrowId was written.
+exports.onDeliveryPaymentAttached = onDocumentUpdated(
+  { region: "europe-west2", document: "deliveries/{deliveryId}" },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    const deliveryId = event.params.deliveryId;
+    if (!after || before?.escrowId != null || after.escrowId == null) return;
+    if (after.paymentMethod !== "wallet" || after.status !== "pending" || after.driverId) return;
+    if (!(await orderPaymentLinked("deliveries", deliveryId, after))) {
+      console.warn(`Delivery ${deliveryId}: escrowId does not name its linked hold; not dispatched`);
+      return;
+    }
+    await dispatchDeliveryToDrivers(deliveryId, after);
+  },
+);
+
+const PAID_ORDER_REFERENCE_TYPE = { deliveries: "delivery", gas_orders: "gas_order" };
+
+/**
+ * A wallet Delivery or Gas order that a driver took before its payment was
+ * linked (open orders are listed to drivers, and older Driver builds claimed
+ * them directly) is cancelled at once, before anyone sets out: settlement
+ * would never pay for it. Decided in a transaction on the order and hold as
+ * they are now (escrow.js cancelIfAssignedUnpaid), so a stale event never
+ * cancels an order paid meanwhile. The cancellation's own status event frees
+ * the driver. Returns true when it cancelled the order.
+ */
+async function cancelUnpaidAssignment(collection, orderId, after) {
+  if (after?.status !== "driverAssigned" || after.paymentMethod !== "wallet") return false;
+  return cancelIfAssignedUnpaid(collection, orderId);
+}
+
+// ── Order details hidden from unassigned drivers ────────────────────────────
+// An open order is readable by every active Delivery driver (they list open
+// requests from it). The fields below are not needed to decide on a job, and
+// every app reads them as optional; the create triggers move them to
+// {order}/private/details, which no client may read (firestore.rules has no
+// match for it), and the status triggers copy them back once a driver holds
+// the job. Addresses and locations stay: the apps require them on the order.
+const PRIVATE_FIELDS = Object.freeze({
+  deliveries: ["receiverName", "receiverPhone", "notes", "photoUrl"],
+  gas_orders: ["pickupInstructions", "deliveryInstructions", "cylinderConditionNotes", "receiptEmail"],
+});
+const privateRef = (collection, orderId) =>
+  getDb().collection(collection).doc(orderId).collection("private").doc("details");
+
+/** Moves the order's private fields out while it is still open and unassigned. Returns true when it did. */
+async function sealPrivateDetails(collection, orderId) {
+  const fields = PRIVATE_FIELDS[collection];
+  const ref = getDb().collection(collection).doc(orderId);
+  return getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const o = snap.exists ? snap.data() : null;
+    if (!o || o.driverId != null) return false; // already taken: its driver may see them
+    const present = fields.filter((k) => o[k] !== undefined);
+    if (present.length === 0) return false;
+    const held = Object.fromEntries(present.map((k) => [k, o[k]]));
+    tx.set(privateRef(collection, orderId), held, { merge: true });
+    tx.update(ref, Object.fromEntries(present.map((k) => [k, admin.firestore.FieldValue.delete()])));
+    return true;
+  });
+}
+
+/** Copies the private fields back onto an order its driver now holds. Returns true when it did. */
+async function revealPrivateDetails(collection, orderId, driverId) {
+  const ref = getDb().collection(collection).doc(orderId);
+  return getDb().runTransaction(async (tx) => {
+    const [snap, held] = await Promise.all([tx.get(ref), tx.get(privateRef(collection, orderId))]);
+    const o = snap.exists ? snap.data() : null;
+    if (!o || !held.exists || o.status !== "driverAssigned" || !driverId || o.driverId !== driverId) {
+      return false;
+    }
+    const fields = Object.fromEntries(PRIVATE_FIELDS[collection]
+      .filter((k) => held.data()[k] !== undefined && o[k] === undefined)
+      .map((k) => [k, held.data()[k]]));
+    if (Object.keys(fields).length === 0) return false;
+    tx.update(ref, fields);
+    return true;
+  });
+}
+
+/** True when the order's escrowId is its passenger's HELD hold, linked to it. */
+async function orderPaymentLinked(collection, orderId, data) {
+  if (typeof data.escrowId !== "string" || !data.escrowId) return false;
+  const snap = await getDb().collection("escrows").doc(data.escrowId).get();
+  const e = snap.exists ? snap.data() : null;
+  return !!e && e.status === "HELD" && e.userId === data.passengerId &&
+    e.referenceId === orderId && e.referenceType === PAID_ORDER_REFERENCE_TYPE[collection];
+}
+
+/**
+ * Offers a delivery request to eligible nearby Delivery drivers: publishes
+ * its offer (order_offers.js) and notifies drivers once, by the call that
+ * published it.
+ */
+async function dispatchDeliveryToDrivers(deliveryId, data) {
+  // A job nobody may take (e.g. a vehicle that cannot carry its weight tier)
+  // is not listed; offerToDrivers ends it and alerts operations.
+  if (!jobRejection("delivery", data) && await publishOffer("deliveries", deliveryId) !== "published") {
+    console.log(`Delivery ${deliveryId}: no new offer; drivers not notified`);
+    return;
+  }
+  // Drivers see areas only (order_offers.js): never the street addresses.
+  const pickupArea = areaLabel(data.pickupAddress) || "Nearby";
+  const dropoffArea = areaLabel(data.dropoffAddress) || "Nearby";
+  await offerToDrivers("delivery", deliveryId, data, {
+    inbox: {
+      type: "delivery",
+      title: "New Delivery Request 📦",
+      body: `${data.parcelType ?? "Parcel"} — ${pickupArea}`,
+      route: "/driver-shell",
+      metadata: { deliveryId },
+    },
+    push: {
+      type: "NEW_DELIVERY_REQUEST",
+      deliveryId,
+      pickupAddress: pickupArea,
+      dropoffAddress: dropoffArea,
+      parcelType: data.parcelType ?? "",
+      estimatedFare: String(data.estimatedFare ?? 0),
+      weightTier: data.weightTier ?? "",
+      title: "📦 New Delivery Request",
+      body: `${data.parcelType ?? "Parcel"} — ${pickupArea}`,
+    },
+  });
+}
 
 exports.onGasOrderStatusChanged = onDocumentUpdated(
   { region: "europe-west2", document: "gas_orders/{orderId}" },
@@ -734,12 +981,25 @@ exports.onGasOrderStatusChanged = onDocumentUpdated(
     const orderId = event.params.orderId;
 
     if (!statusChanged(before, after)) return;
+    // No longer open: drivers stop seeing it (acceptance already removed it).
+    if (!isOpenUnassigned("gas_orders", after)) {
+      await withdrawOfferIfTaken("gas_orders", orderId)
+        .catch((e) => console.error(`Gas order ${orderId}: offer not withdrawn:`, e.message));
+    }
+    if (await cancelUnpaidAssignment("gas_orders", orderId, after)) return;
+    if (after.status === "driverAssigned" && after.driverId) {
+      await revealPrivateDetails("gas_orders", orderId, after.driverId)
+        .catch((e) => console.error(`Gas order ${orderId}: details not copied:`, e.message));
+    }
+
+    await releaseDriverFromEndedOrder("gas_orders", orderId, before, after)
+      .catch((e) => console.error(`gas_orders ${orderId}: driver release failed:`, e.message));
 
     const passengerId = after.passengerId;
     const driverId = after.driverId;
     const driverName = after.driverName ?? "Your driver";
     const cylinderSize = after.cylinderSize ?? "gas cylinder";
-    const totalPrice = (after.totalPrice ?? 0).toFixed(2);
+    const totalPrice = Number(after.totalPrice ?? 0).toFixed(2);
 
     const passengerRoute = `/gas-tracking?orderId=${orderId}`;
     const driverRoute = `/driver/active-gas?orderId=${orderId}`;
@@ -848,13 +1108,22 @@ exports.onGasOrderStatusChanged = onDocumentUpdated(
       case "cancelledByPassenger":
       case "cancelled":
         await Promise.all([
-          notifyPassenger(passengerId, {
-            type: "gas",
-            title: "Gas order cancelled",
-            body: "Your gas order was cancelled. Any charges will be refunded.",
-            route: "/shell",
-            metadata: meta,
-          }),
+          notifyPassenger(passengerId, after.cancellationReason === "price_changed"
+            ? {
+                type: "gas",
+                title: "Gas price changed",
+                body: "Your order was not placed because the gas price has changed. " +
+                  "Nothing was charged. Please review the new price and order again.",
+                route: "/shell",
+                metadata: { ...meta, reason: "price_changed" },
+              }
+            : {
+                type: "gas",
+                title: "Gas order cancelled",
+                body: "Your gas order was cancelled. Any charges will be refunded.",
+                route: "/shell",
+                metadata: meta,
+              }),
           driverId
             ? notifyDriver(driverId, {
                 type: "gas",
@@ -882,6 +1151,21 @@ exports.onDeliveryStatusChanged = onDocumentUpdated(
     const deliveryId = event.params.deliveryId;
 
     if (!statusChanged(before, after)) return;
+    // No longer open: drivers stop seeing it (acceptance already removed it).
+    if (!isOpenUnassigned("deliveries", after)) {
+      await withdrawOfferIfTaken("deliveries", deliveryId)
+        .catch((e) => console.error(`Delivery ${deliveryId}: offer not withdrawn:`, e.message));
+    }
+    if (await cancelUnpaidAssignment("deliveries", deliveryId, after)) return;
+
+    if (after.status === "driverAssigned" && after.driverId) {
+      await attachPassengerContact(deliveryId, after.passengerId ?? after.userId)
+        .catch((e) => console.error(`Delivery ${deliveryId}: passenger contact not attached:`, e.message));
+      await revealPrivateDetails("deliveries", deliveryId, after.driverId)
+        .catch((e) => console.error(`Delivery ${deliveryId}: details not copied:`, e.message));
+    }
+    await releaseDriverFromEndedOrder("deliveries", deliveryId, before, after)
+      .catch((e) => console.error(`deliveries ${deliveryId}: driver release failed:`, e.message));
 
     const passengerId = after.passengerId ?? after.userId;
     const driverId = after.driverId;
@@ -1014,7 +1298,7 @@ exports.onDeliveryStatusChanged = onDocumentUpdated(
           notifyPassenger(passengerId, {
             type: "delivery",
             title: "Delivery cancelled",
-            body: "Your delivery was cancelled. Contact support if you need help.",
+            body: deliveryCancelledMessage(after),
             route: "/shell",
             metadata: meta,
           }),

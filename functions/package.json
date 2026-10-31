@@ -13,7 +13,16 @@
     "test:payments:delivery": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/delivery_integrity.test.js\"",
     "test:payments:attach": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/escrow_attach.test.js\"",
     "test:payments:monitor": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/settlement_monitor.test.js\"",
-    "test:deploy-packaging": "node --test test/deploy_packaging.test.js"
+    "test:deploy-packaging": "node --test test/deploy_packaging.test.js",
+    "test:hold-settings": "node --test test/hold_limit_settings_check.test.js",
+    "test:payments:e2e": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/escrow_e2e.test.js\"",
+    "test:payments:sdk": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/sdk_v7_runtime.test.js\"",
+    "test:payments:hold": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/hold_amount_validation.test.js\"",
+    "test:payments:release": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/ride_gas_release.test.js test/payments/terminal_status_refunds.test.js\"",
+    "test:ride-dispatch": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/ride_dispatch.test.js test/payments/passenger_wallet_trigger.test.js\"",
+    "test:payments:withdrawal": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/withdrawal_approval.test.js\"",
+    "test:payments:cancellation": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../firebase.json \"node --test --test-concurrency=1 test/payments/delivery_cancellation.test.js test/payments/ride_gas_cancellation.test.js\"",
+    "test:release": "firebase emulators:exec --only firestore --project demo-ctsgo-payments --config ../deploy/phase1c/firebase.json \"node scripts/release_tests.js\""
   },
   "engines": {
     "node": "22"

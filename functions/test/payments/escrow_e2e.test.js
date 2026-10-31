@@ -54,7 +54,7 @@ async function assertWallet(balance, held) {
 }
 
 async function seedAccounts({ balance = 200 } = {}) {
-  await h.seed("settings/platform", { platformFeePercent: 15, delivery: {} });
+  await h.seed("settings/platform", PLATFORM);
   await h.seed(`wallets/${P}`, { balance, heldBalance: 0 });
   await h.seed(`drivers/${D}`, { walletBalance: 0, totalEarnings: 0 });
 }
@@ -63,14 +63,42 @@ function deliveryDoc(fare) {
   // DeliveryRequest.toFirestore: no escrowId at creation.
   return {
     passengerId: P, driverId: null, status: "pending", paymentMethod: "wallet",
-    estimatedFare: fare, deliveryOtp: "4321",
+    estimatedFare: fare,
     pickupLocation: new GeoPoint(5.556, -0.1969), dropoffLocation: new GeoPoint(5.6037, -0.155),
     vehicleType: "Okada", weightTier: "Small", isFragile: false, requiresHelpers: false,
   };
 }
 
+// Orders as Passenger 1.0.1 creates them: no code on the order; the code is
+// server-held in order_completion_codes (completion_codes.js), as the create
+// triggers store it. Wallet Delivery/Gas refuse orders that carry one.
+const CODES = { deliveries: "4321", gas_orders: "777" };
+// Deliveries are booked with their server quote (release v5 round 3) whenever
+// one is possible at their fare; an underpriced or impossible booking (only an
+// older build makes one) stays unquoted.
+const PLATFORM = { platformFeePercent: 15, delivery: h.DELIVERY_RATES };
+async function withQuote(collection, orderId, doc) {
+  if (collection !== "deliveries" || doc.deliveryQuoteId !== undefined) return doc;
+  try {
+    h.metersForFare(doc, PLATFORM);
+  } catch (_) {
+    return doc;
+  }
+  return h.quotedDelivery(doc, { quoteId: `q-${orderId}`, settings: PLATFORM });
+}
+async function seedOrder(path, doc) {
+  const [collection, orderId] = path.split("/");
+  doc = await withQuote(collection, orderId, doc);
+  await h.seed(path, doc);
+  await h.seed(`order_completion_codes/${collection}_${orderId}`, { collection, orderId,
+    passengerId: doc.passengerId ?? null, code: CODES[collection], attempts: 0 });
+}
+
 after(() => h.fft.cleanup());
-beforeEach(() => h.clearFirestore());
+// Wallet Delivery and Gas are offered once app_config/mobile requires the
+// app versions that keep the completion code secret (escrow.js); these tests
+// cover that state.
+beforeEach(async () => { await h.clearFirestore(); await h.enableDeliveryGasWallet(); });
 
 // ── holdBalance itself ────────────────────────────────────────────────────────
 
@@ -112,24 +140,11 @@ describe("holdBalance", () => {
     await assertWallet(200, 0);
   });
 
-  test("E2E-04 a string amount does not corrupt the wallet (observed behaviour)", async () => {
+  test("E2E-04 a string amount is refused with invalid-argument and changes nothing", async () => {
     await seedAccounts();
-    let outcome;
-    try {
-      const r = await hold("100", "delivery");
-      outcome = { ok: true, escrow: await h.read(`escrows/${r.escrowId}`) };
-    } catch (e) {
-      outcome = { ok: false, code: e.code };
-    }
-    const w = await wallet();
-    // Whatever happened, the wallet must stay numeric and conserved.
-    assert.equal(typeof w.balance, "number");
-    assert.equal(typeof w.heldBalance, "number");
-    assert.equal(w.balance + w.heldBalance, 200);
-    // Record the observed behaviour for the report.
-    console.log(`E2E-04 observed: ${JSON.stringify(outcome.ok
-      ? { ok: true, amountType: typeof outcome.escrow.amount, amount: outcome.escrow.amount }
-      : outcome)} wallet=${JSON.stringify({ balance: w.balance, held: w.heldBalance })}`);
+    await assert.rejects(hold("100", "delivery"), (e) => e.code === "invalid-argument");
+    await assertWallet(200, 0);
+    assert.equal((await h.db().collection("escrows").get()).size, 0);
   });
 });
 
@@ -139,7 +154,7 @@ describe("Flow A: settle on completion", () => {
   test("E2E-10 delivery", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/A1", deliveryDoc(100));
+    await seedOrder("deliveries/A1", deliveryDoc(100));
     assert.equal((await attach(escrowId, "A1", "delivery")).success, true);
     await update(null, "deliveries", "A1", { escrowId }); // app's follow-up update
     await update(null, "deliveries", "A1", { driverId: D, status: "driverAssigned" });
@@ -174,10 +189,10 @@ describe("Flow A: settle on completion", () => {
     assert.equal(await ledger(`capture_${escrowId}`), 1);
   });
 
-  test("E2E-11 a cancel after completion does not refund (observed flag behaviour)", async () => {
+  test("E2E-11 a cancel after completion does not refund or claim a refund", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/A2", deliveryDoc(100));
+    await seedOrder("deliveries/A2", deliveryDoc(100));
     await attach(escrowId, "A2", "delivery");
     await update(null, "deliveries", "A2", { escrowId, driverId: D, status: "arrivedAtDropoff" });
     await update(trips.onDeliveryCompleted, "deliveries", "A2",
@@ -188,15 +203,19 @@ describe("Flow A: settle on completion", () => {
     await assertWallet(100, 0);
     assert.equal((await driver()).walletBalance, 85);
     assert.equal(await ledger(`refund_${escrowId}`), 0);
-    console.log(`E2E-11 observed: escrowRefunded flag after no-op refund = ${
-      (await h.read("deliveries/A2")).escrowRefunded}`);
+    // (Firestore rules now stop parties writing this; the trigger is still
+    // checked for server-side or legacy writes.)
+    assert.notEqual((await h.read("deliveries/A2")).escrowRefunded, true);
+    // Recognised as a cancellation after completion before any refund
+    // attempt (the escrow is already released here).
+    assert.equal(await h.count("admin_alerts", "type", "delivery_cancel_after_completion"), 1);
   });
 
   test("E2E-12 gas order", async () => {
     await seedAccounts();
     const { escrowId } = await hold(60, "gas_order");
-    await h.seed("gas_orders/A3", { passengerId: P, driverId: null, status: "pendingApproval",
-      paymentMethod: "wallet", totalPrice: 60, deliveryOtp: "777" });
+    await seedOrder("gas_orders/A3", { passengerId: P, driverId: null, status: "pendingApproval",
+      paymentMethod: "wallet", totalPrice: 60, refillType: "exchangeEmpty", cylinderSize: "kg3", quantity: 1 });
     await attach(escrowId, "A3", "gas_order");
     await update(null, "gas_orders", "A3", { escrowId });
     await update(null, "gas_orders", "A3", { driverId: D, status: "driverArrived" });
@@ -214,7 +233,8 @@ describe("Flow A: settle on completion", () => {
     await seedAccounts();
     const { escrowId } = await hold(40, "trip");
     await h.seed("trips/A4", { passengerId: P, driverId: null, status: "searching",
-      paymentMethod: "wallet", estimatedFare: 40, escrowId });
+      paymentMethod: "wallet", estimatedFare: 40, escrowId, serviceType: "taxi",
+      pickupLocation: new GeoPoint(5.556, -0.1969), dropoffLocation: new GeoPoint(5.6037, -0.155) });
     await attach(escrowId, "A4", "trip");
     await update(null, "trips", "A4", { driverId: D, status: "tripStarted" });
     await update(trips.onTripCompleted, "trips", "A4",
@@ -233,7 +253,7 @@ describe("Flow B: refund on cancellation", () => {
   test("E2E-20 delivery", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/B1", deliveryDoc(100));
+    await seedOrder("deliveries/B1", deliveryDoc(100));
     await attach(escrowId, "B1", "delivery");
     await update(null, "deliveries", "B1", { escrowId });
     await update(trips.onDeliveryCancelled, "deliveries", "B1", { status: "cancelled" });
@@ -265,7 +285,7 @@ describe("Flow B: refund on cancellation", () => {
     await seedAccounts();
     const { escrowId } = await hold(60, "gas_order");
     await h.seed("gas_orders/B2", { passengerId: P, driverId: null, status: "pendingApproval",
-      paymentMethod: "wallet", totalPrice: 60 });
+      paymentMethod: "wallet", totalPrice: 60, refillType: "exchangeEmpty", cylinderSize: "kg3", quantity: 1 });
     await attach(escrowId, "B2", "gas_order");
     await update(null, "gas_orders", "B2", { escrowId });
     await update(trips.onGasOrderCancelled, "gas_orders", "B2", { status: "cancelled" });
@@ -278,7 +298,8 @@ describe("Flow B: refund on cancellation", () => {
     await seedAccounts();
     const { escrowId } = await hold(40, "trip");
     await h.seed("trips/B3", { passengerId: P, driverId: null, status: "searching",
-      paymentMethod: "wallet", estimatedFare: 40, escrowId });
+      paymentMethod: "wallet", estimatedFare: 40, escrowId, serviceType: "taxi",
+      pickupLocation: new GeoPoint(5.556, -0.1969), dropoffLocation: new GeoPoint(5.6037, -0.155) });
     await attach(escrowId, "B3", "trip");
     await update(trips.onTripCancelled, "trips", "B3", { status: "cancelledByPassenger" });
     assert.equal((await h.read(`escrows/${escrowId}`)).status, "REFUNDED");
@@ -293,7 +314,7 @@ describe("ownership and failure recovery", () => {
   test("E2E-30 another user cannot attach or roll back someone's escrow", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/C1", { ...deliveryDoc(100), passengerId: OTHER });
+    await seedOrder("deliveries/C1", { ...deliveryDoc(100), passengerId: OTHER });
     await assert.rejects(attach(escrowId, "C1", "delivery", OTHER),
       (e) => e.code === "permission-denied");
     await assert.rejects(attach(escrowId, "C1", "delivery", P),
@@ -317,7 +338,7 @@ describe("ownership and failure recovery", () => {
   test("E2E-32 rollback is refused once the escrow is attached to an order", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/C2", deliveryDoc(100));
+    await seedOrder("deliveries/C2", deliveryDoc(100));
     await attach(escrowId, "C2", "delivery");
     await assert.rejects(refundOnError(escrowId), (e) => e.code === "failed-precondition");
     assert.equal((await h.read(`escrows/${escrowId}`)).status, "HELD");
@@ -327,7 +348,7 @@ describe("ownership and failure recovery", () => {
   test("E2E-33 attach failed after the order was created: settlement blocks, money stays held", async () => {
     await seedAccounts();
     const { escrowId } = await hold(100, "delivery");
-    await h.seed("deliveries/C3", deliveryDoc(100));
+    await seedOrder("deliveries/C3", deliveryDoc(100));
     // The attach call never reached the server; the app still wrote escrowId.
     await update(null, "deliveries", "C3", { escrowId, driverId: D, status: "arrivedAtDropoff" });
     await update(trips.onDeliveryCompleted, "deliveries", "C3",
@@ -345,8 +366,8 @@ describe("ownership and failure recovery", () => {
     await seedAccounts({ balance: 300 });
     const a = await hold(100, "delivery");
     const b = await hold(50, "delivery");
-    await h.seed("deliveries/C4", deliveryDoc(100));
-    await h.seed("deliveries/C5", deliveryDoc(50));
+    await seedOrder("deliveries/C4", deliveryDoc(100));
+    await seedOrder("deliveries/C5", deliveryDoc(50));
     await attach(a.escrowId, "C4", "delivery");
     await attach(b.escrowId, "C5", "delivery");
     // Cross-attaching is refused.

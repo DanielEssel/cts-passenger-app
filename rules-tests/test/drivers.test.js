@@ -141,11 +141,14 @@ describe("drivers", () => {
         }),
       ));
 
+    // Every build marks itself busy in a separate write right after its
+    // claim transaction; only a job now assigned to the driver may be named
+    // (driver_job_state.test.js covers the refusals).
     it("DRV-P06 marks itself busy after accepting (requests_section)", () =>
       assertSucceeds(
         updateDoc(driver(h.DRIVER), {
           isAvailable: false,
-          currentTripId: "searching",
+          currentTripId: "assigned",
         }),
       ));
 

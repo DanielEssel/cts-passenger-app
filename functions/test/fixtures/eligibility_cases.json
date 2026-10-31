@@ -1,0 +1,81 @@
+{
+  "_comment": "Shared eligibility cases. Run by functions/test/payments/eligibility_parity.test.js against dispatch_policy.js (dispatch and acceptance) and, as a byte-identical copy, by the Driver App's test/features/driver/eligibility_parity_test.dart against dispatch_eligibility.dart (the request list). Keep the two copies identical. Points are [lat, lng]; the job point is the pickup (gas: the customer). Expected is the policy reason, or null when the driver may take the job.",
+  "jobPoint": [5.6037, -0.187],
+  "near": [5.62, -0.19],
+  "outside": [5.6937, -0.187],
+  "far": [6.69, -1.62],
+  "drivers": {
+    "okadaRide": { "role": "driver_hailing", "serviceType": "okada", "vehicleType": "motorcycle" },
+    "okadaRideLegacy": { "role": "driver_hailing", "serviceType": "okada", "vehicleType": "motorbike" },
+    "taxiRide": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": "taxi" },
+    "pragyiaRide": { "role": "driver_hailing", "serviceType": "pragyia", "vehicleType": "pragyia" },
+    "pragyiaAsTaxi": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": "pragyia" },
+    "taxiNoVehicle": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": null },
+    "taxiUnknownVehicle": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": "bus" },
+    "bike": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "motorcycle" },
+    "trike": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "tricycle" },
+    "trikeLegacy": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "aboboyaa" },
+    "truck": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "miniTruck" },
+    "truckLegacy": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "mini_truck" },
+    "deliveryUnknownVehicle": { "role": "driver_delivery", "serviceType": "delivery", "vehicleType": "van" },
+    "bikeUnapproved": { "role": "driver_delivery", "vehicleType": "motorcycle", "isApproved": false },
+    "bikeSuspended": { "role": "driver_delivery", "vehicleType": "motorcycle", "signupStep": "suspended" },
+    "bikeOffline": { "role": "driver_delivery", "vehicleType": "motorcycle", "isOnline": false },
+    "bikeUnavailable": { "role": "driver_delivery", "vehicleType": "motorcycle", "isAvailable": false },
+    "bikeOnJobOnline": { "role": "driver_delivery", "vehicleType": "motorcycle", "currentTripId": "job-1" },
+    "taxiOnJobOnline": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": "taxi", "currentTripId": "job-1" },
+    "bikeFar": { "role": "driver_delivery", "vehicleType": "motorcycle", "location": "far" },
+    "bikeOutside": { "role": "driver_delivery", "vehicleType": "motorcycle", "location": "outside" },
+    "taxiOutside": { "role": "driver_hailing", "serviceType": "taxi", "vehicleType": "taxi", "location": "outside" },
+    "bikeNoLocation": { "role": "driver_delivery", "vehicleType": "motorcycle", "location": null },
+    "bikeZeroLocation": { "role": "driver_delivery", "vehicleType": "motorcycle", "location": [0, 0] },
+    "noRole": { "vehicleType": "motorcycle" }
+  },
+  "cases": [
+    { "job": { "service": "ride", "serviceType": "okada" }, "expect": {
+      "okadaRide": null, "okadaRideLegacy": null, "taxiRide": "wrong_ride_service", "pragyiaRide": "wrong_ride_service",
+      "bike": "wrong_service", "taxiOnJobOnline": "driver_on_job" } },
+    { "job": { "service": "ride", "serviceType": "taxi" }, "expect": {
+      "taxiRide": null, "okadaRide": "wrong_ride_service", "pragyiaAsTaxi": "vehicle_not_eligible",
+      "taxiNoVehicle": "vehicle_not_eligible", "taxiUnknownVehicle": "vehicle_not_eligible",
+      "bike": "wrong_service", "trike": "wrong_service", "truck": "wrong_service",
+      "taxiOnJobOnline": "driver_on_job", "taxiOutside": "outside_radius", "noRole": "wrong_service" } },
+    { "job": { "service": "ride", "serviceType": "pragyia" }, "expect": {
+      "pragyiaRide": null, "taxiRide": "wrong_ride_service", "pragyiaAsTaxi": "wrong_ride_service" } },
+
+    { "job": { "service": "delivery", "vehicleType": "Okada", "weightTier": "Small" }, "expect": {
+      "bike": null, "trike": "vehicle_not_eligible", "truck": "vehicle_not_eligible",
+      "okadaRide": "wrong_service", "deliveryUnknownVehicle": "vehicle_not_eligible",
+      "bikeUnapproved": "driver_not_approved", "bikeSuspended": "driver_not_approved",
+      "bikeOffline": "driver_unavailable", "bikeUnavailable": "driver_unavailable",
+      "bikeOnJobOnline": "driver_on_job", "bikeFar": "outside_radius", "bikeOutside": "outside_radius",
+      "bikeNoLocation": "driver_location_invalid", "bikeZeroLocation": "driver_location_invalid",
+      "noRole": "wrong_service" } },
+    { "job": { "service": "delivery", "vehicleType": "Aboboya", "weightTier": "Medium" }, "expect": {
+      "trike": null, "trikeLegacy": null, "bike": "vehicle_not_eligible", "truck": "vehicle_not_eligible" } },
+    { "job": { "service": "delivery", "vehicleType": "Aboboya", "weightTier": "Large" }, "expect": {
+      "trike": null, "bike": "vehicle_not_eligible", "truck": "vehicle_not_eligible" } },
+    { "job": { "service": "delivery", "vehicleType": "Mini Truck", "weightTier": "Bulk" }, "expect": {
+      "truck": null, "truckLegacy": null, "trike": "vehicle_not_eligible", "bike": "vehicle_not_eligible" } },
+    { "job": { "service": "delivery", "vehicleType": "Okada", "weightTier": "Medium" }, "jobRejection": "vehicle_cannot_carry_weight_tier" },
+    { "job": { "service": "delivery", "vehicleType": "Okada", "weightTier": "Large" }, "jobRejection": "vehicle_cannot_carry_weight_tier" },
+    { "job": { "service": "delivery", "vehicleType": "Aboboya", "weightTier": "Bulk" }, "jobRejection": "vehicle_cannot_carry_weight_tier" },
+    { "job": { "service": "delivery", "vehicleType": "Mini Truck", "weightTier": "Small" }, "jobRejection": "vehicle_cannot_carry_weight_tier" },
+    { "job": { "service": "delivery", "vehicleType": "Van", "weightTier": "Small" }, "jobRejection": "unknown_delivery_vehicle" },
+    { "job": { "service": "ride", "serviceType": "bus" }, "jobRejection": "unknown_ride_service" },
+    { "job": { "service": "ride", "serviceType": "taxi", "point": [0, 0] }, "jobRejection": "invalid_job_location" },
+
+    { "job": { "service": "gas", "refillType": "exchangeEmpty" }, "expect": {
+      "bike": null, "trike": null, "truck": null, "trikeLegacy": null,
+      "okadaRide": "wrong_service", "taxiRide": "wrong_service", "deliveryUnknownVehicle": "vehicle_not_eligible",
+      "bikeSuspended": "driver_not_approved", "bikeOnJobOnline": "driver_on_job", "bikeFar": "outside_radius" } },
+    { "job": { "service": "gas", "refillType": "newCylinder" }, "expect": {
+      "bike": null, "trike": null, "truck": null } },
+    { "job": { "service": "gas", "refillType": "pickupAndReturn" }, "expect": {
+      "bike": null, "trike": null, "truck": null } },
+    { "job": { "service": "gas", "refillType": "commercialBulk" }, "expect": {
+      "bike": "vehicle_not_eligible", "trike": null, "truck": null } },
+    { "job": { "service": "gas", "refillType": "mystery" }, "expect": {
+      "bike": "vehicle_not_eligible", "trike": "vehicle_not_eligible", "truck": "vehicle_not_eligible" } }
+  ]
+}

@@ -145,4 +145,12 @@ void main() {
     expect((retried, back), (1, 1));
     expect(find.textContaining('Exception'), findsNothing);
   });
+
+  test('ctsMoney groups thousands and keeps two decimals', () {
+    expect(ctsMoney(0), '0.00');
+    expect(ctsMoney(42.5), '42.50');
+    expect(ctsMoney(1242.5), '1,242.50');
+    expect(ctsMoney(1234567.891), '1,234,567.89');
+    expect(ctsMoney(-1500), '-1,500.00');
+  });
 }

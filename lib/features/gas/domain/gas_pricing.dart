@@ -11,10 +11,14 @@
 //   • Pickup & Return  → refill price
 //   • Commercial Bulk  → refill price × commercial rate
 //
-// Delivery charge (distance-based, like rides/delivery):
+// Delivery charge:
 //   deliveryCharge = max(minDeliveryFee, baseFare + perKm × distanceKm × legs)
 //   • Exchange / New / Commercial → 1 leg (driver → customer)
 //   • Pickup & Return             → 2 legs + fixed round-trip surcharge
+// The order screen prices every order at [GasPricing.standardDistanceKm]:
+// the server (functions/gas_pricing.js, the authority) charges that distance
+// and accepts an order only when its total and delivery fee equal its own
+// price, so the two must use the same inputs.
 //
 // The total is what gets held in escrow and paid out, so it must always match
 // what the customer sees at checkout.
@@ -67,6 +71,13 @@ class GasPricingInputs {
 }
 
 class GasPricing {
+  /// The delivery distance charged for every order, in km
+  /// (functions/gas_pricing.js STANDARD_DISTANCE_KM).
+  static const double standardDistanceKm = 1.0;
+
+  /// Most cylinders in one order (functions/gas_pricing.js MAX_GAS_QUANTITY).
+  static const int maxQuantity = 20;
+
   /// Computes the price breakdown. Pure — no I/O.
   ///
   /// [distanceKm] is the one-way estimate (customer ↔ nearest driver/station).

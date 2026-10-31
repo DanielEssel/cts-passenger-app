@@ -48,7 +48,7 @@ class ActiveRequestBanner extends StatelessWidget {
                     _typeLabel(request),
                     style: const TextStyle(
                       color: Colors.white70,
-                      fontSize: 10,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.5,
                     ),

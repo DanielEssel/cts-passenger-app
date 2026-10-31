@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -52,16 +51,18 @@ class MapSection extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const CtsBackButton(elevated: true),
-              const Spacer(),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _DriversNearbyChip(),
-                  if (state.isDestinationSet) ...[
-                    const SizedBox(height: 8),
-                    _RouteStatsChip(state: state),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _DriversNearbyChip(),
+                    if (state.isDestinationSet) ...[
+                      const SizedBox(height: 8),
+                      _RouteStatsChip(state: state),
+                    ],
                   ],
-                ],
+                ),
               ),
             ],
           ),
@@ -140,16 +141,18 @@ class _MapChip extends StatelessWidget {
           Container(
             width: 7,
             height: 7,
-            decoration:
-                BoxDecoration(color: dotColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: CtsTheme.textPrimary,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: CtsTheme.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
+import '../../../core/theme/cts_theme.dart';
 import '../../../core/routes/app_routes.dart';
 import '../providers/auth_providers.dart';
 import '../../auth/widgets/auth_widgets.dart';
@@ -142,7 +142,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             bottom: size.height * 0.35,
             left: -60,
             child: AuthGlow(
-              color: AppColors.secondary,
+              color: CtsTheme.apple,
               size: 160,
               opacity: 0.08,
             ),
@@ -171,46 +171,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         const SizedBox(height: 28),
 
                         // Typography with better hierarchy
-                        Center(
-                          child: Text(
-                            'Welcome back',
-                            style: AppTextStyles.heading1.copyWith(
-                              fontSize: 34,
-                              height: 1.1,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                        Semantics(
+                          header: true,
+                          child:
+                              const Text('Welcome back', style: CtsText.title1),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
 
                         Text(
                           'Enter your phone number to continue',
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: AppColors.textSecondary,
-                            height: 1.5,
-                            fontSize: 16,
-                          ),
+                          style: CtsText.body
+                              .copyWith(color: CtsTheme.textSecondary),
                         ),
                         const SizedBox(height: 32),
 
                         // Phone input with premium styling
-                        const AuthFieldLabel('PHONE NUMBER'),
+                        const AuthFieldLabel('Phone number'),
                         const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: AppColors.border.withValues(alpha: 0.3),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.03),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
+                        SizedBox(
                           child: PhoneInputField(
                             key: _phoneKey,
                             controller: _phoneController,
@@ -218,7 +196,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             enabled: !isLoading,
                           ),
                         ),
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 28),
 
                         // Premium CTA Button with enhanced interactions
                         _PremiumCtaButton(
@@ -237,16 +215,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 thickness: 0.5,
                               ),
                             ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              child: Text(
-                                'New to CTS?',
-                                style: AppTextStyles.caption.copyWith(
-                                  color: AppColors.textTertiary,
-                                  fontSize: 13,
-                                  letterSpacing: 0.3,
+                            Flexible(
+                              flex: 4,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: const Text(
+                                  'New to CTSGo?',
+                                  textAlign: TextAlign.center,
+                                  style: CtsText.bodySmall,
                                 ),
                               ),
                             ),
@@ -327,6 +305,7 @@ class _PremiumCtaButtonState extends State<_PremiumCtaButton>
       duration: const Duration(milliseconds: 150),
       lowerBound: 0.97,
       upperBound: 1.0,
+      value: 1.0,
     );
   }
 
@@ -338,93 +317,78 @@ class _PremiumCtaButtonState extends State<_PremiumCtaButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) {
-        if (!widget.isLoading) {
+    return Semantics(
+      button: true,
+      enabled: !widget.isLoading,
+      child: GestureDetector(
+        onTapDown: (_) {
+          if (!widget.isLoading) {
+            _scaleController.reverse();
+            HapticFeedback.lightImpact();
+          }
+        },
+        onTapUp: (_) {
           _scaleController.forward();
-          HapticFeedback.lightImpact();
-        }
-      },
-      onTapUp: (_) {
-        _scaleController.reverse();
-        if (!widget.isLoading) {
-          widget.onTap();
-        }
-      },
-      onTapCancel: () {
-        _scaleController.reverse();
-      },
-      child: AnimatedBuilder(
-        animation: _scaleController,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleController.value,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              decoration: BoxDecoration(
-                gradient: widget.isLoading
-                    ? LinearGradient(
-                        colors: [
-                          AppColors.primary.withValues(alpha: 0.6),
-                          AppColors.primary.withValues(alpha: 0.4),
-                        ],
-                      )
-                    : LinearGradient(
-                        colors: [
-                          AppColors.primary,
-                          AppColors.primary.withValues(alpha: 0.8),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: widget.isLoading
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-              ),
-              child: Center(
-                child: widget.isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.label,
-                            style: AppTextStyles.button.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 17,
-                              letterSpacing: 0.3,
+          if (!widget.isLoading) {
+            widget.onTap();
+          }
+        },
+        onTapCancel: () {
+          _scaleController.forward();
+        },
+        child: AnimatedBuilder(
+          animation: _scaleController,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _scaleController.value,
+              child: Container(
+                width: double.infinity,
+                constraints:
+                    const BoxConstraints(minHeight: CtsTheme.buttonHeight),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: widget.isLoading
+                      ? CtsTheme.vivid.withValues(alpha: 0.7)
+                      : CtsTheme.vivid,
+                  borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+                ),
+                child: Center(
+                  child: widget.isLoading
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              CtsTheme.onVivid,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          const Icon(
-                            Icons.arrow_forward_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ],
-                      ),
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.label,
+                                textAlign: TextAlign.center,
+                                style: CtsText.button
+                                    .copyWith(color: CtsTheme.onVivid),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: CtsTheme.onVivid,
+                              size: 20,
+                            ),
+                          ],
+                        ),
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -456,6 +420,7 @@ class _PremiumSecondaryButtonState extends State<_PremiumSecondaryButton>
       duration: const Duration(milliseconds: 150),
       lowerBound: 0.98,
       upperBound: 1.0,
+      value: 1.0,
     );
   }
 
@@ -467,54 +432,47 @@ class _PremiumSecondaryButtonState extends State<_PremiumSecondaryButton>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) {
-        _scaleController.forward();
-        HapticFeedback.lightImpact();
-      },
-      onTapUp: (_) {
-        _scaleController.reverse();
-        widget.onTap();
-      },
-      onTapCancel: () {
-        _scaleController.reverse();
-      },
-      child: AnimatedBuilder(
-        animation: _scaleController,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleController.value,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: AppColors.border.withValues(alpha: 0.3),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  'Create an account',
-                  style: AppTextStyles.button.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-            ),
-          );
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        onTapDown: (_) {
+          _scaleController.reverse();
+          HapticFeedback.lightImpact();
         },
+        onTapUp: (_) {
+          _scaleController.forward();
+          widget.onTap();
+        },
+        onTapCancel: () {
+          _scaleController.forward();
+        },
+        child: AnimatedBuilder(
+          animation: _scaleController,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _scaleController.value,
+              child: Container(
+                width: double.infinity,
+                constraints:
+                    const BoxConstraints(minHeight: CtsTheme.buttonHeight),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: CtsTheme.surface,
+                  borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+                  border: Border.all(color: CtsTheme.border, width: 1.2),
+                ),
+                child: Center(
+                  child: Text(
+                    'Create an account',
+                    textAlign: TextAlign.center,
+                    style: CtsText.button.copyWith(color: CtsTheme.textPrimary),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

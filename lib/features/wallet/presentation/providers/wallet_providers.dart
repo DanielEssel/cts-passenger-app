@@ -5,7 +5,6 @@ import '../../../../features/wallet/data/repositories/wallet_repository_impl.dar
 import '../../../../features/wallet/data/repositories/wallet_repository.dart';
 import '../../../../features/wallet/domain/usecases/get_wallet_usecase.dart';
 import '../../../../features/wallet/domain/usecases/get_transaction_usecase.dart';
-import '../../../../features/wallet/domain/usecases/initialize_paystack_payment_usecase.dart';
 import '../../../../features/wallet/domain/entities/wallet.dart';
 import '../../../../features/wallet/domain/entities/transaction.dart';
 
@@ -29,11 +28,6 @@ final getWalletUseCaseProvider = Provider<GetWalletUseCase>(
 
 final getTransactionsUseCaseProvider = Provider<GetTransactionsUseCase>(
   (ref) => GetTransactionsUseCase(ref.watch(walletRepositoryProvider)),
-);
-
-final initializePaystackPaymentUseCaseProvider =
-    Provider<InitializePaystackPaymentUseCase>(
-  (ref) => InitializePaystackPaymentUseCase(ref.watch(walletRepositoryProvider)),
 );
 
 // ── Wallet state ──────────────────────────────────────────────────────────────
@@ -86,28 +80,5 @@ final recentTransactionsStreamProvider = StreamProvider<List<Transaction>>((ref)
   return ref.watch(walletRepositoryProvider).watchRecentTransactions();
 });
 
-// ── Payment controller ────────────────────────────────────────────────────────
-
-class PaymentController {
-  const PaymentController(this._ref);
-  final Ref _ref;
-
-  Future<bool> initializeTopUp({
-    required double amount,
-    required String paymentMethod,
-    required String email,
-  }) async {
-    final result = await _ref
-        .read(initializePaystackPaymentUseCaseProvider)
-        .execute(amount: amount, paymentMethod: paymentMethod, email: email);
-
-    return result.fold(
-    (_)        => false,                              // ← Left (failure)
-    (response) => response.authorizationUrl.isNotEmpty, // ← Right
-  );
-  }
-}
-
-final paymentControllerProvider = Provider(
-  (ref) => PaymentController(ref),
-);
+// Wallet top-ups use the Bridge Mobile Money flow (walletControllerProvider
+// and widgets/bridge_momo_sheet.dart); the Paystack controller was removed.

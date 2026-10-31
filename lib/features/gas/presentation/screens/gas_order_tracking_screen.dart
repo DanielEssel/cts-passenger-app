@@ -1,10 +1,18 @@
 // lib/features/gas/presentation/screens/gas_order_tracking_screen.dart
-// Refactored to use shared tracking widgets (no TrackingStatusHeader yet)
+//
+// The passenger's live gas order screen. What it says and offers comes only
+// from the order's stored status and its own fulfilment flow
+// (gasTrackingView): a simple drop-off, or Pickup & Return (collect → refill
+// station → return). The order stores only the customer's location, so the
+// map shows the customer and the driver; no station position is invented.
+// Ended, unknown and missing orders get their own screen.
 
 import 'package:cts_transport_app/core/widgets/cts_ui.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/theme/cts_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../tracking/data/completion_code_provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../../core/utils/phone_launcher.dart';
@@ -14,277 +22,14 @@ import '../../repositories/gas_order_repository.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/services/marker_service.dart';
-import '../../../../widgets/common/shared_widgets.dart';
 import '../../../ride/presentation/trip_complete_screen.dart';
 import '../../../ride/services/route_service.dart';
+import '../../../tracking/domain/tracking_view.dart';
+import '../../../tracking/widgets/passenger_tracking_panel.dart';
 import '../../../tracking/widgets/tracking_constants.dart';
-import '../../../tracking/widgets/tracking_action_button.dart';
-import '../../../tracking/widgets/tracking_drag_handle.dart';
 import '../../../tracking/widgets/tracking_map.dart';
-import '../../../tracking/widgets/tracking_status_banner.dart';
-import '../../../tracking/widgets/tracking_timeline.dart';
 import '../../models/gas_refill_request.dart';
 import '../../providers/gas_order_providers.dart';
-
-// Temporary inline status header until shared widget is created
-class _TempStatusHeader extends StatelessWidget {
-  final String statusText;
-  final IconData icon;
-  final bool isLive;
-
-  const _TempStatusHeader({
-    required this.statusText,
-    required this.icon,
-    this.isLive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.97),
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: AppColors.primary, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              statusText,
-              style: AppTextStyles.labelLarge.copyWith(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          if (isLive)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: const Text(
-                'LIVE',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class DriverInfoCard extends StatelessWidget {
-  final String name;
-  final double rating;
-  final String vehicleType;
-  final String? vehiclePlate;
-  final String price;
-  final IconData vehicleIcon;
-  final VoidCallback? onCall;
-  final VoidCallback? onChat;
-  final VoidCallback? onEmergency;
-
-  const DriverInfoCard({
-    super.key,
-    required this.name,
-    required this.rating,
-    required this.vehicleType,
-    this.vehiclePlate,
-    required this.price,
-    required this.vehicleIcon,
-    this.onCall,
-    this.onChat,
-    this.onEmergency,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.primaryDim,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(vehicleIcon, color: AppColors.primary, size: 24),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name,
-                        style: AppTextStyles.heading4
-                            .copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.star_rounded,
-                            color: AppColors.success, size: 16),
-                        const SizedBox(width: 4),
-                        Text(rating.toStringAsFixed(1),
-                            style: AppTextStyles.bodyMedium),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(vehicleType,
-                        style: AppTextStyles.bodyMedium
-                            .copyWith(color: AppColors.textSecondary)),
-                    if (vehiclePlate != null && vehiclePlate!.isNotEmpty)
-                      Text(vehiclePlate!,
-                          style: AppTextStyles.caption.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              Text(price,
-                  style: AppTextStyles.heading4
-                      .copyWith(color: AppColors.primary)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: onCall,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.phone_rounded,
-                            size: 18, color: AppColors.primary),
-                        SizedBox(width: 8),
-                        Text('Call',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GestureDetector(
-                  onTap: onChat,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.chat_bubble_rounded,
-                            size: 18, color: AppColors.primary),
-                        SizedBox(width: 8),
-                        Text('Chat',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GestureDetector(
-                  onTap: onEmergency,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.errorLight,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.report_problem_rounded,
-                            size: 18, color: AppColors.error),
-                        SizedBox(width: 8),
-                        Text('Report',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.error)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class GasOrderTrackingScreen extends ConsumerWidget {
   final String orderId;
@@ -333,13 +78,16 @@ class GasOrderTrackingScreen extends ConsumerWidget {
         ),
         data: (order) {
           if (order == null) {
-            return CtsErrorState(
-              icon: Icons.search_off_rounded,
-              title: 'Order not found',
-              message: 'This order may have been removed. You can check '
-                  'your past orders in History.',
-              onBack: () =>
-                  Navigator.of(context).popUntil((route) => route.isFirst),
+            return TrackingEndedScreen(
+              view: const TrackingView(
+                phase: TrackingPhase.ended,
+                icon: Icons.search_off_rounded,
+                headline: 'Order not found',
+                detail: 'This order may have been removed. You can check '
+                    'your past orders in History.',
+              ),
+              onHome: () => Navigator.of(context, rootNavigator: true)
+                  .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false),
             );
           }
           return _GasTrackingBody(order: order, orderId: orderId);
@@ -363,271 +111,275 @@ class _GasTrackingBody extends ConsumerStatefulWidget {
 }
 
 class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
-  late final RouteService _routeService;
+  /// The receiver's completion code: the order's own (older orders) or the
+  /// server-held one (completion_code_provider.dart). Set in build.
+  String? _code;
+
+  final _routeService = RouteService();
   Set<Polyline> _polylines = {};
-  bool _routeFetched = false;
+  String? _routeFor; // the status the drawn route belongs to
+  bool _routeBusy = false;
 
-  // Timeline steps for gas delivery
-  static const _steps = [
-    GasOrderStatus.pendingApproval,
-    GasOrderStatus.driverAssigned,
-    GasOrderStatus.driverEnRoute,
-    GasOrderStatus.driverArrived,
-    GasOrderStatus.pickedUp,
-    GasOrderStatus.atStation,
-    GasOrderStatus.refilling,
-    GasOrderStatus.returning,
-    GasOrderStatus.delivered,
-  ];
+  TrackingView get _view => gasTrackingView(
+        widget.order.rawStatus ?? widget.order.status.firestoreValue,
+        refillType: widget.order.refillType.firestoreValue,
+        hasOtp: (_code ?? '').isNotEmpty,
+      );
 
-  static const _stepIcons = <GasOrderStatus, IconData>{
-    GasOrderStatus.pendingApproval: Icons.hourglass_top_rounded,
-    GasOrderStatus.driverAssigned: Icons.person_rounded,
-    GasOrderStatus.driverEnRoute: Icons.directions_bike_rounded,
-    GasOrderStatus.driverArrived: Icons.location_on_rounded,
-    GasOrderStatus.pickedUp: Icons.propane_tank_rounded,
-    GasOrderStatus.atStation: Icons.local_gas_station_rounded,
-    GasOrderStatus.refilling: Icons.local_fire_department_rounded,
-    GasOrderStatus.returning: Icons.u_turn_left_rounded,
-    GasOrderStatus.delivered: Icons.check_circle_rounded,
-  };
+  LatLng get _customer => LatLng(
+        widget.order.deliveryLocation.latitude,
+        widget.order.deliveryLocation.longitude,
+      );
 
-  static const _stepLabels = <GasOrderStatus, String>{
-    GasOrderStatus.pendingApproval: 'Finding driver',
-    GasOrderStatus.driverAssigned: 'Driver assigned',
-    GasOrderStatus.driverEnRoute: 'Driver en route',
-    GasOrderStatus.driverArrived: 'Driver arrived',
-    GasOrderStatus.pickedUp: 'Cylinder collected',
-    GasOrderStatus.atStation: 'At refill station',
-    GasOrderStatus.refilling: 'Refilling',
-    GasOrderStatus.returning: 'Returning to you',
-    GasOrderStatus.delivered: 'Delivered',
-  };
+  LatLng? get _driver => widget.order.driverLocation == null
+      ? null
+      : LatLng(widget.order.driverLocation!.latitude,
+          widget.order.driverLocation!.longitude);
 
   @override
   void initState() {
     super.initState();
-    _routeService = RouteService();
-    _fetchRoute();
+    _syncRoute();
   }
 
-  Future<void> _fetchRoute() async {
-    if (_routeFetched) return;
-    _routeFetched = true;
+  @override
+  void didUpdateWidget(_GasTrackingBody old) {
+    super.didUpdateWidget(old);
+    _syncRoute();
+  }
 
-    final pickup = LatLng(
-      widget.order.pickupLocation.latitude,
-      widget.order.pickupLocation.longitude,
-    );
-    final dropoff = LatLng(
-      widget.order.deliveryLocation.latitude,
-      widget.order.deliveryLocation.longitude,
-    );
-
-    final result = await _routeService.getRoute(pickup, dropoff);
-    if (result != null && result.points.isNotEmpty && mounted) {
-      setState(() {
-        _polylines = {
-          // Main route
-          Polyline(
-            polylineId: const PolylineId('main_route'),
-            points: result.points,
-            color: AppColors.primary.withValues(alpha: 0.9),
-            width: TrackingConstants.polylineWidth.toInt(),
-            geodesic: TrackingConstants.polylineGeodesic,
-            patterns: const [],
-            jointType: JointType.round,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
-          ),
-          // Shadow for depth
-          Polyline(
-            polylineId: const PolylineId('shadow_route'),
-            points: result.points,
-            color: Colors.black.withValues(alpha: 0.08),
-            width: TrackingConstants.polylineShadowWidth.toInt(),
-            geodesic: TrackingConstants.polylineGeodesic,
-            patterns: const [],
-            jointType: JointType.round,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
-          ),
-        };
-      });
+  /// Draws the driver → customer route only on legs heading to the
+  /// customer, once per status. The refill leg has no route: no station
+  /// coordinates are stored.
+  Future<void> _syncRoute() async {
+    final view = _view;
+    final status = widget.order.rawStatus;
+    final driver = _driver;
+    if (view.heading != TrackingHeading.customer || !view.tracksDriver) {
+      // Runs from initState/didUpdateWidget, which always rebuild after.
+      _polylines = {};
+      _routeFor = null;
+      return;
+    }
+    if (driver == null || _routeBusy || _routeFor == status) return;
+    _routeBusy = true;
+    try {
+      final result = await _routeService.getRoute(driver, _customer);
+      if (result != null && result.points.isNotEmpty && mounted) {
+        setState(() {
+          _routeFor = status;
+          _polylines = {
+            Polyline(
+              polylineId: const PolylineId('main_route'),
+              points: result.points,
+              color: AppColors.primary.withValues(alpha: 0.9),
+              width: TrackingConstants.polylineWidth.toInt(),
+              geodesic: TrackingConstants.polylineGeodesic,
+              jointType: JointType.round,
+              startCap: Cap.roundCap,
+              endCap: Cap.roundCap,
+            ),
+          };
+        });
+      }
+    } catch (e) {
+      debugPrint('Gas route fetch failed: $e');
+    } finally {
+      _routeBusy = false;
     }
   }
+
+  void _goHome() => Navigator.of(context, rootNavigator: true)
+      .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false);
+
+  void _getHelp() => Navigator.of(context, rootNavigator: true)
+      .pushNamed(AppRoutes.helpSupport);
+
+  void _callDriver() => openPhoneAction(
+        action: PhoneAction.call,
+        number: widget.order.driverPhone,
+        label: 'your driver',
+        messenger: ScaffoldMessenger.maybeOf(context),
+      );
+
+  String _otpShareMessage() =>
+      'Your gas delivery OTP is: *$_code*\n\n'
+      'Please give this code to the CTSGo rider when they arrive.';
 
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
-    final isCompleted = order.status == GasOrderStatus.delivered;
-    final isCancelled = order.status == GasOrderStatus.cancelled ||
-        order.status == GasOrderStatus.failed;
+    _code = completionCodeFor(ref, 'gas_orders', order.id, order.deliveryOtp);
+    final view = _view;
 
-    final pickup = LatLng(
-      order.pickupLocation.latitude,
-      order.pickupLocation.longitude,
-    );
-    final dropoff = LatLng(
-      order.deliveryLocation.latitude,
-      order.deliveryLocation.longitude,
-    );
-    final driverLocation = order.driverLocation != null
-        ? LatLng(
-            order.driverLocation!.latitude,
-            order.driverLocation!.longitude,
-          )
-        : null;
+    if (view.phase == TrackingPhase.ended ||
+        view.phase == TrackingPhase.unknown) {
+      return TrackingEndedScreen(view: view, onHome: _goHome);
+    }
+
+    final driver = _driver;
+    final showDriver = view.hasDriver && order.driverId != null;
+    final phone = (order.driverPhone ?? '').trim();
+    final showCode = (_code ?? '').isNotEmpty && !view.isOver;
+    final station = order.preferredStationAddress?.trim() ?? '';
+    final onRefillLeg =
+        const {'pickedUp', 'atStation', 'refilling'}.contains(order.rawStatus);
 
     SystemChrome.setSystemUIOverlayStyle(TrackingConstants.lightStatusBar);
 
-    return Stack(
-      children: [
-        // Full-bleed map
-        Positioned.fill(
-          child: _buildTrackingMap(pickup, dropoff, driverLocation),
-        ),
-
-        // Status header
-        Positioned(
-          top: MediaQuery.of(context).padding.top + 12,
-          left: 16,
-          right: 16,
-          child: _buildStatusHeader(order),
-        ),
-
-        // Draggable bottom sheet
-        DraggableScrollableSheet(
-          initialChildSize: TrackingConstants.initialSheetSize,
-          minChildSize: TrackingConstants.minSheetSize,
-          maxChildSize: TrackingConstants.maxSheetSize,
-          snap: true,
-          snapSizes: TrackingConstants.snapSizes,
-          builder: (context, scrollController) => Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(28)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, -8),
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, -4),
-                ),
-              ],
+    return TrackingLayout(
+      map: Stack(
+        children: [
+          Positioned.fill(
+            child: TrackingMap(
+              pickup: _customer,
+              dropoff: _customer,
+              driverLocation: view.tracksDriver ? driver : null,
+              driverHeading: order.driverHeading ?? 0,
+              polylines: _polylines,
+              additionalMarkers: _buildMarkers(view),
+              padding: const EdgeInsets.only(bottom: 48),
+              controlsBottomOffset: 12,
+              myLocationEnabled: true,
+              showControls: true,
             ),
-            child: Column(
-              children: [
-                const TrackingDragHandle(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Column(
-                      children: [
-                        if (isCancelled)
-                          _buildCancelledBanner()
-                        else ...[
-                          _buildTimeline(order),
-                          const SizedBox(height: 14),
-                          if (isCompleted) ...[
-                            _buildCompletedBanner(),
-                            const SizedBox(height: 14),
-                          ],
-                        ],
-                        _buildOtpCard(context),
-                        const SizedBox(height: 12),
-                        _buildDriverInfoCard(context),
-                        const SizedBox(height: 12),
-                        _buildOrderSummary(),
-                        const SizedBox(height: 12),
-                        if (!isCompleted && !isCancelled)
-                          _buildActionRow(context),
-                        if (order.status == GasOrderStatus.pendingApproval) ...[
-                          const SizedBox(height: 8),
-                          _buildCancelPending(),
-                        ],
-                        if (isCompleted || isCancelled) ...[
-                          const SizedBox(height: 12),
-                          PrimaryButton(
-                            label: 'Back to home',
-                            onTap: () =>
-                                Navigator.of(context, rootNavigator: true)
-                                    .pushNamedAndRemoveUntil(
-                                        AppRoutes.shell, (_) => false),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                      ],
-                    ),
-                  ),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 16,
+            child: TrackingMapButton(
+              icon: Icons.arrow_back_rounded,
+              label: 'Back',
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+          if (view.tracksDriver)
+            Positioned(
+              left: 16,
+              right: 80,
+              bottom: 12,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TrackingLocationNote(
+                  hasLocation: driver != null,
+                  updatedAt: order.driverLocationAt,
                 ),
-              ],
+              ),
+            ),
+        ],
+      ),
+      actions: showDriver && view.phase == TrackingPhase.active
+          ? TrackingActionBar(
+              primary: TrackingAction(
+                label: 'Call driver',
+                icon: Icons.phone_rounded,
+                onTap: phone.isEmpty ? null : _callDriver,
+              ),
+              secondary: showCode
+                  ? TrackingAction(
+                      label: 'Share code',
+                      icon: Icons.share_rounded,
+                      onTap: () => Share.share(_otpShareMessage(),
+                          subject: 'CTSGo Gas Delivery OTP'),
+                    )
+                  : null,
+            )
+          : null,
+      children: [
+        TrackingStatusHeader(view: view),
+        const SizedBox(height: 18),
+        TrackingProgressBar(steps: view.steps, current: view.stepIndex),
+        const SizedBox(height: 18),
+        if (onRefillLeg && station.isNotEmpty) ...[
+          _infoLine(Icons.local_gas_station_rounded, 'Refill station', station),
+          const SizedBox(height: 12),
+        ],
+        if (showDriver) ...[
+          TrackingDriverCard(
+            name: order.driverName,
+            rating: order.driverRating,
+            vehicle: order.driverVehicle,
+          ),
+          if (phone.isEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              "Your driver's phone number isn't available.",
+              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+            ),
+          ],
+          const SizedBox(height: 12),
+        ],
+        if (showCode) ...[
+          _buildOtpCard(context),
+          const SizedBox(height: 12),
+        ],
+        TrackingRouteSummary(
+          fromLabel: 'Delivery address',
+          fromAddress: order.deliveryAddress,
+        ),
+        const SizedBox(height: 12),
+        _buildOrderSummary(),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: _getHelp,
+            icon: const Icon(Icons.support_agent_rounded, size: 20),
+            label: const Text('Get help with this order'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textPrimary,
+              minimumSize: const Size(48, 48),
+              textStyle:
+                  const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
           ),
         ),
+        if (view.canCancel)
+          TrackingCancelLink(
+            label: 'Cancel order',
+            busy: _cancelling,
+            onTap: _confirmCancel,
+          ),
       ],
     );
   }
 
-  // In gas_order_tracking_screen.dart - update the map usage
+  Widget _infoLine(IconData icon, String label, String value) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                    text: '$label: ',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                TextSpan(text: value),
+              ]),
+              style: const TextStyle(
+                  fontSize: 15, color: AppColors.textPrimary, height: 1.4),
+            ),
+          ),
+        ],
+      );
 
-  Widget _buildTrackingMap(
-    LatLng pickup,
-    LatLng dropoff,
-    LatLng? driverLocation,
-  ) {
-    return TrackingMap(
-      pickup: pickup,
-      dropoff: dropoff,
-      driverLocation: driverLocation,
-      driverHeading: widget.order.driverHeading ?? 0,
-      polylines: _polylines,
-      additionalMarkers: _buildMarkers(),
-      padding: const EdgeInsets.only(bottom: 160),
-      controlsBottomOffset: 180, // Controls above bottom sheet
-      myLocationEnabled: true,
-      showControls: true,
-    );
-  }
-
-  Set<Marker> _buildMarkers() {
+  /// The order stores one location: the customer's. The driver is shown
+  /// only while they are on the job.
+  Set<Marker> _buildMarkers(TrackingView view) {
     final markerService = MarkerService.instance;
-    final pickup = LatLng(
-      widget.order.pickupLocation.latitude,
-      widget.order.pickupLocation.longitude,
-    );
-    final dropoff = LatLng(
-      widget.order.deliveryLocation.latitude,
-      widget.order.deliveryLocation.longitude,
-    );
-
+    final driver = _driver;
     return {
       Marker(
-        markerId: const MarkerId('pickup'),
-        position: pickup,
-        icon: markerService.pickup(),
-        anchor: const Offset(0.5, 1.0),
-      ),
-      Marker(
-        markerId: const MarkerId('dropoff'),
-        position: dropoff,
+        markerId: const MarkerId('customer'),
+        position: _customer,
         icon: markerService.dropoff(),
         anchor: const Offset(0.5, 1.0),
+        infoWindow: const InfoWindow(title: 'Delivery address'),
       ),
-      if (widget.order.driverLocation != null)
+      if (driver != null && view.tracksDriver)
         Marker(
           markerId: const MarkerId('driver'),
-          position: LatLng(
-            widget.order.driverLocation!.latitude,
-            widget.order.driverLocation!.longitude,
-          ),
+          position: driver,
           icon: markerService.vehicle('gas'),
           anchor: const Offset(0.5, 0.5),
           rotation: widget.order.driverHeading ?? 0,
@@ -637,103 +389,25 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
     };
   }
 
-  Widget _buildStatusHeader(GasRefillRequest order) {
-    final isActive = !_isCompleteOrCancelled(order.status);
-    final statusText =
-        _stepLabels[order.status] ?? order.status.passengerDisplayName;
-
-    return _TempStatusHeader(
-      statusText: statusText,
-      icon: Icons.local_fire_department_rounded,
-      isLive: isActive,
-    );
-  }
-
-  bool _isCompleteOrCancelled(GasOrderStatus status) {
-    return status == GasOrderStatus.delivered ||
-        status == GasOrderStatus.cancelled ||
-        status == GasOrderStatus.failed;
-  }
-
-  Widget _buildTimeline(GasRefillRequest order) {
-    final currentIndex = _steps.indexOf(order.status);
-
-    final timelineItems = _steps.asMap().entries.map((entry) {
-      final index = entry.key;
-      final status = entry.value;
-      return TrackingTimelineItem(
-        icon: _stepIcons[status] ?? Icons.circle_outlined,
-        label: _stepLabels[status] ?? status.passengerDisplayName,
-        isCompleted: index < currentIndex,
-        isCurrent: index == currentIndex,
-      );
-    }).toList();
-
-    return TrackingTimeline(
-      items: timelineItems,
-      currentIndex: currentIndex,
-    );
-  }
-
-  Widget _buildCompletedBanner() {
-    return TrackingStatusBanner(
-      icon: Icons.check_circle_rounded,
-      color: AppColors.success,
-      title: 'Gas delivered!',
-      subtitle: 'Delivered to ${widget.order.deliveryAddress}',
-    );
-  }
-
   // Cancel is offered only while no driver has accepted (pendingApproval).
-  // The backend refunds any wallet hold when the order becomes cancelled.
+  // The repository re-checks that in a transaction; the backend refunds any
+  // wallet hold when the order becomes cancelled.
   bool _cancelling = false;
 
-  Widget _buildCancelPending() => SizedBox(
-        width: double.infinity,
-        height: 48,
-        child: TextButton.icon(
-          onPressed: _cancelling ? null : _confirmCancel,
-          icon: _cancelling
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.error),
-                )
-              : const Icon(Icons.close_rounded, color: AppColors.error),
-          label: Text(_cancelling ? 'Cancelling…' : 'Cancel order',
-              style: const TextStyle(
-                color: AppColors.error,
-                fontWeight: FontWeight.w700,
-              )),
-        ),
-      );
-
   Future<void> _confirmCancel() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel this gas order?',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        content: const Text('No driver has accepted it yet. Any amount held '
-            'from your wallet for this order is returned.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('Keep order'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Cancel order'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    if (_cancelling) return;
     setState(() => _cancelling = true);
     try {
+      final confirmed = await showTrackingConfirm(
+        context,
+        title: 'Cancel this gas order?',
+        message: 'No driver has accepted it yet. Any amount held from your '
+            'wallet for this order is returned.',
+        confirmLabel: 'Cancel order',
+        keepLabel: 'Keep order',
+        destructive: true,
+      );
+      if (!confirmed || !mounted) return;
       await ref.read(gasOrderRepositoryProvider).cancelPendingOrder(
             widget.orderId,
             reason: 'Cancelled by customer before a driver accepted',
@@ -758,18 +432,8 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
     }
   }
 
-  Widget _buildCancelledBanner() {
-    return TrackingStatusBanner(
-      icon: Icons.cancel_rounded,
-      color: AppColors.error,
-      title: 'Order cancelled',
-      subtitle: 'Your wallet will be refunded if charged.',
-      backgroundColor: AppColors.errorLight,
-    );
-  }
-
   Widget _buildOtpCard(BuildContext context) {
-    final otp = widget.order.deliveryOtp;
+    final otp = _code;
     if (otp == null || otp.isEmpty) return const SizedBox.shrink();
 
     final isCompleteOrCancelled =
@@ -779,8 +443,7 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
 
     if (isCompleteOrCancelled) return const SizedBox.shrink();
 
-    final shareMsg = 'Your gas delivery OTP is: *$otp*\n\n'
-        'Please give this code to the CTSTransport rider when they arrive.';
+    final shareMsg = _otpShareMessage();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -815,16 +478,16 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Delivery OTP',
+                  Text('Delivery code',
                       style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
                       )),
                   Text(
-                    'Give this code to the rider on arrival',
+                    'Give this code to the driver when you receive your gas',
                     style:
-                        TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                        TextStyle(fontSize: 14, color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -876,17 +539,17 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF7ED),
+              color: CtsTheme.warningTint,
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Row(children: [
               Icon(Icons.info_outline_rounded,
-                  color: Color(0xFFD97706), size: 14),
+                  color: CtsTheme.warning, size: 14),
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Only share this OTP with the CTSTransport rider. Do not share with anyone else.',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                  'Only share this OTP with the CTSGo rider. Do not share with anyone else.',
+                  style: TextStyle(fontSize: 14, color: CtsTheme.warning),
                 ),
               ),
             ]),
@@ -895,8 +558,8 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
           SizedBox(
             width: double.infinity,
             child: GestureDetector(
-              onTap: () => Share.share(shareMsg,
-                  subject: 'CTSTransport Gas Delivery OTP'),
+              onTap: () =>
+                  Share.share(shareMsg, subject: 'CTSGo Gas Delivery OTP'),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
@@ -921,43 +584,6 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildDriverInfoCard(BuildContext context) {
-    final order = widget.order;
-    final hasDriver = order.driverName?.isNotEmpty == true ||
-        order.driverPhone?.isNotEmpty == true;
-
-    if (!hasDriver) return const SizedBox.shrink();
-
-    final name = order.driverName ?? 'Your driver';
-    final rating = order.driverRating ?? 0.0;
-
-    IconData vehicleIcon = Icons.two_wheeler_rounded;
-
-    return DriverInfoCard(
-      name: name,
-      rating: rating,
-      vehicleType: order.driverVehicle ?? 'Gas delivery',
-      vehiclePlate: null,
-      price: 'GHS ${order.totalPrice.toStringAsFixed(2)}',
-      vehicleIcon: vehicleIcon,
-      onCall: () => openPhoneAction(
-        action: PhoneAction.call,
-        number: order.driverPhone,
-        label: 'your driver',
-        messenger: ScaffoldMessenger.maybeOf(context),
-      ),
-      onChat: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Chat feature coming soon'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      },
-      onEmergency: () => _showReportSheet(context),
     );
   }
 
@@ -1008,7 +634,7 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
                     ),
                     Text(order.refillType.displayName,
                         style: AppTextStyles.caption.copyWith(
-                          color: const Color(0xFF5F6368),
+                          color: CtsTheme.textSecondary,
                         )),
                   ],
                 ),
@@ -1027,12 +653,18 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Total',
-                  style: AppTextStyles.labelLarge
-                      .copyWith(fontWeight: FontWeight.w700)),
-              Text('GHS ${order.totalPrice.toStringAsFixed(2)}',
-                  style: AppTextStyles.heading4
-                      .copyWith(color: AppColors.primary)),
+              Flexible(
+                child: Text('Total',
+                    style: AppTextStyles.labelLarge
+                        .copyWith(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text('GHS ${order.totalPrice.toStringAsFixed(2)}',
+                    textAlign: TextAlign.end,
+                    style: AppTextStyles.heading4
+                        .copyWith(color: AppColors.primary)),
+              ),
             ],
           ),
         ],
@@ -1043,97 +675,16 @@ class _GasTrackingBodyState extends ConsumerState<_GasTrackingBody> {
   Widget _summaryLine(String label, double amount) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: AppTextStyles.bodyMedium
-                  .copyWith(color: const Color(0xFF5F6368))),
-          Text('GHS ${amount.toStringAsFixed(2)}',
-              style: AppTextStyles.bodyMedium),
+          Flexible(
+            child: Text(label,
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: CtsTheme.textSecondary)),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text('GHS ${amount.toStringAsFixed(2)}',
+                textAlign: TextAlign.end, style: AppTextStyles.bodyMedium),
+          ),
         ],
       );
-
-  Widget _buildActionRow(BuildContext context) {
-    return Row(
-      children: [
-        TrackingActionButton(
-          icon: Icons.phone_rounded,
-          label: 'Call driver',
-          onTap: () => openPhoneAction(
-            action: PhoneAction.call,
-            number: widget.order.driverPhone,
-            label: 'your driver',
-            messenger: ScaffoldMessenger.maybeOf(context),
-          ),
-        ),
-        const SizedBox(width: 10),
-        TrackingActionButton(
-          icon: Icons.share_rounded,
-          label: 'Share',
-          onTap: () {
-            final shortId = widget.orderId.length >= 8
-                ? widget.orderId.substring(0, 8).toUpperCase()
-                : widget.orderId.toUpperCase();
-            Share.share('Track my CTSTransport gas order #$shortId');
-          },
-        ),
-        const SizedBox(width: 10),
-        TrackingActionButton(
-          icon: Icons.report_problem_rounded,
-          label: 'Report',
-          backgroundColor: AppColors.errorLight,
-          iconColor: AppColors.error,
-          onTap: () => _showReportSheet(context),
-        ),
-      ],
-    );
-  }
-
-  void _showReportSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const TrackingDragHandle(),
-            const SizedBox(height: 20),
-            const Text('Report an issue', style: AppTextStyles.heading3),
-            const SizedBox(height: 16),
-            ...[
-              'Driver not moving',
-              'Wrong delivery location',
-              'Cylinder issue',
-              'Driver unreachable',
-              'Other',
-            ].map((issue) => GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                            child:
-                                Text(issue, style: AppTextStyles.bodyMedium)),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: AppColors.textTertiary, size: 16),
-                      ],
-                    ),
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
 }

@@ -101,7 +101,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
 
   Future<void> _launchWhatsApp() async {
     final uri = Uri.parse(
-        'https://wa.me/233302000000?text=Hello%2C%20I%20need%20help%20with%20CTSTransport');
+        'https://wa.me/233302000000?text=Hello%2C%20I%20need%20help%20with%20CTSGo');
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       _showError('WhatsApp is not installed');
     }
@@ -111,7 +111,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     final uri = Uri(
       scheme: 'mailto',
       path: 'support@ctstransport.com',
-      queryParameters: {'subject': 'CTSTransport Support Request'},
+      queryParameters: {'subject': 'CTSGo Support Request'},
     );
     if (!await launchUrl(uri)) {
       _showError('Could not open email app');

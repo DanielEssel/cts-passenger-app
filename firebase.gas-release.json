@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "rules": "firestore.gas-candidate.staged",
+    "indexes": "firestore.indexes.json"
+  }
+}

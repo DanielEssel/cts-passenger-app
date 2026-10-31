@@ -2,7 +2,7 @@ name: cts_transport_app
 description: "CTS Go"
 publish_to: 'none'
 
-version: 1.0.0+9
+version: 1.0.2+11
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -45,7 +45,6 @@ dependencies:
   firebase_messaging: ^16.2.0
   cloud_functions: ^6.2.0
   firebase_analytics: ^12.0.0
-  webview_flutter: ^4.4.0
   flutter_local_notifications: ^21.0.0  # Show FCM alerts in foreground
 
   # ── Maps & Location ─────────────────────────────
@@ -103,26 +102,21 @@ flutter:
     - assets/icons/
     - assets/logos/
     - assets/markers/
+    - assets/fonts/inter/OFL.txt
 
   # ============================================
-  # FONTS (Optional - For Custom Fonts)
-  # ==========================================
-  # fonts:
-  #   - family: Poppins
-  #     fonts:
-  #       - asset: assets/fonts/Poppins-Regular.ttf
-  #         weight: 400
-  #       - asset: assets/fonts/Poppins-Medium.ttf
-  #         weight: 500
-  #       - asset: assets/fonts/Poppins-SemiBold.ttf
-  #         weight: 600
-  #       - asset: assets/fonts/Poppins-Bold.ttf
-  #         weight: 700
-  #   - family: Inter
-  #     fonts:
-  #       - asset: assets/fonts/Inter-Regular.ttf
-  #         weight: 400
-  #       - asset: assets/fonts/Inter-Medium.ttf
-  #         weight: 500
-  #       - asset: assets/fonts/Inter-Bold.ttf
-  #         weight: 700
+  # FONTS — Inter 4.1 (SIL OFL 1.1, see assets/fonts/inter/OFL.txt)
+  # ============================================
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/inter/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/inter/Inter-ExtraBold.ttf
+          weight: 800

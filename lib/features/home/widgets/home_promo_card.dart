@@ -93,7 +93,7 @@ class HomePromoCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.75),
-                fontSize: 10.5,
+                fontSize: 12,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.2,
               ),

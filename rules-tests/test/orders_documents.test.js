@@ -55,6 +55,17 @@ const newGas = (o = {}) => ({
   deliveryOtp: "4321", ...o,
 });
 
+// Passenger 1.0.1 creates orders without deliveryOtp (the server stores the
+// code in order_completion_codes); Gas orders carry their delivery fee and
+// quantity (gas_order_screen.dart). The HEAD (1.0.0) payloads above are
+// what older builds write; they are refused at creation (release v5).
+const without = (o, k) => { const c = { ...o }; delete c[k]; return c; };
+// ... and names its server quote (delivery_quotes.js; release v5 round 3).
+const newDelivery101 = (o = {}) => without(newDelivery({ deliveryQuoteId: "q-1", ...o }), "deliveryOtp");
+const newGas101 = (o = {}) => without(newGas({
+  refillType: "exchangeEmpty", cylinderSize: "kg3", quantity: 1, preferredBrand: null,
+  gasPrice: 50, deliveryFee: 12, totalPrice: 62, ...o,
+}), "deliveryOtp");
 // requests_section.dart delivery accept.
 const acceptDelivery = (uid) => ({
   driverId: uid, driverName: `Driver ${uid}`, driverPhone: "",
@@ -94,6 +105,7 @@ async function seedOrders() {
     await put("deliveries/pendingDel", { ...newDelivery(), createdAt: null });
     await put("deliveries/assignedDel", { ...newDelivery({ status: "driverAssigned", driverId: DEL }), createdAt: null });
     await put("deliveries/cancelledDel", { ...newDelivery({ status: "cancelled" }), createdAt: null });
+    await put("deliveries/completedDel", { ...newDelivery({ status: "completed", driverId: DEL }), createdAt: null });
     await put("gas_orders/pendingGas", { ...newGas(), createdAt: null });
     await put("gas_orders/assignedGas", { ...newGas({ status: "driverAssigned", driverId: DEL }), createdAt: null });
   });
@@ -105,8 +117,11 @@ describe("deliveries", () => {
   beforeEach(async () => { await h.seed(); await seedOrders(); });
 
   // ── Must keep working ─────────────────────────────────────────────────
-  it("DLV-P01 passenger creates a delivery with the app's payload", () =>
-    assertSucceeds(setDoc(doc(h.db(h.PAX), "deliveries/new"), newDelivery())));
+  it("DLV-P01 passenger creates a delivery with the app's payload (Passenger 1.0.1)", () =>
+    assertSucceeds(setDoc(doc(h.db(h.PAX), "deliveries/new"), newDelivery101())));
+
+  it("DLV-S09 an order carrying its own completion code (Passenger 1.0.0 payload) is refused", () =>
+    assertFails(setDoc(doc(h.db(h.PAX), "deliveries/new"), newDelivery())));
 
   it("DLV-P02 passenger reads own delivery and history", async () => {
     await assertSucceeds(getDoc(doc(h.db(h.PAX), "deliveries/pendingDel")));
@@ -114,11 +129,23 @@ describe("deliveries", () => {
       where("passengerId", "==", h.PAX), orderBy("createdAt", "desc"))));
   });
 
-  it("DLV-P03 approved delivery driver runs the released request query", () =>
-    assertSucceeds(getDocs(openDeliveries(DEL))));
+  it("DLV-S10 an approved delivery driver no longer reads open deliveries (list or get)", async () => {
+    await assertFails(getDocs(openDeliveries(DEL)));
+    await assertFails(getDoc(doc(h.db(DEL), "deliveries/pendingDel")));
+  });
 
-  it("DLV-P04 approved delivery driver accepts via the app's transaction", () =>
-    assertSucceeds(acceptDeliveryTx(DEL2)));
+  it("DLV-P03 approved delivery driver reads the open-request offers instead", async () => {
+    await h.env().withSecurityRulesDisabled((ctx) =>
+      setDoc(doc(ctx.firestore(), "delivery_offers/pendingDel"), { service: "delivery", fare: 20 }));
+    await assertSucceeds(getDoc(doc(h.db(DEL), "delivery_offers/pendingDel")));
+    await assertSucceeds(getDocs(query(collection(h.db(DEL), "delivery_offers"), limit(20))));
+  });
+
+  it("DLV-P04 the claim rule still governs a claim write sent without a read", () =>
+    assertSucceeds(updateDoc(doc(h.db(DEL2), "deliveries/pendingDel"), acceptDelivery(DEL2))));
+
+  it("DLV-S11 the released read-first accept transaction is refused at its read", () =>
+    assertFails(acceptDeliveryTx(DEL2)));
 
   it("DLV-P05 assigned driver progresses, streams location and completes with OTP", async () => {
     const r = doc(h.db(DEL), "deliveries/assignedDel");
@@ -148,7 +175,12 @@ describe("deliveries", () => {
 
   it("DLV-P07 passenger cancels, rates and attaches escrow", async () => {
     const r = doc(h.db(h.PAX), "deliveries/pendingDel");
-    await assertSucceeds(updateDoc(r, { escrowId: "esc1" }));
+    // As in delivery_vehicle_screen.dart: attachEscrowToOrder (server) links
+    // the escrow to this delivery first, then the app saves its id. An
+    // escrow not linked to this delivery cannot be saved (ORD-ESC tests).
+    await h.env().withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "escrows/escDel"),
+      { userId: h.PAX, amount: 20, status: "HELD", referenceId: "pendingDel", referenceType: "delivery" }));
+    await assertSucceeds(updateDoc(r, { escrowId: "escDel" }));
     await assertSucceeds(updateDoc(r, { status: "cancelled", cancelledAt: serverTimestamp(), cancelReason: "x" }));
     await assertSucceeds(updateDoc(doc(h.db(h.PAX), "deliveries/assignedDel"), { passengerRating: 5 }));
   });
@@ -195,6 +227,30 @@ describe("deliveries", () => {
   it("DLV-S07 passenger cannot create a delivery pre-assigned to a driver", () =>
     assertFails(setDoc(doc(h.db(h.PAX), "deliveries/new"),
       newDelivery({ driverId: DEL, status: "driverAssigned" }))));
+
+  // A completed delivery's status is final for the parties: cancelling it
+  // would fire onDeliveryCancelled on a delivery that was already paid.
+  it("DLV-S08 neither party can cancel or reopen a completed delivery", async () => {
+    for (const uid of [h.PAX, DEL]) {
+      const r = doc(h.db(uid), "deliveries/completedDel");
+      await assertFails(updateDoc(r, { status: "cancelled", cancelledAt: serverTimestamp(), cancelReason: "x" }));
+      await assertFails(updateDoc(r, { status: "pending" }));
+      await assertFails(updateDoc(r, { status: deleteField() }));
+    }
+  });
+
+  it("DLV-P08 a completed delivery can still be rated and written without status changes", async () => {
+    await assertSucceeds(updateDoc(doc(h.db(h.PAX), "deliveries/completedDel"), { passengerRating: 4 }));
+    await assertSucceeds(updateDoc(doc(h.db(DEL), "deliveries/completedDel"), { driverRating: 5 }));
+    await assertSucceeds(updateDoc(doc(h.db(h.PAX), "deliveries/completedDel"), { status: "completed" }));
+  });
+
+  it("DLV-P09 normal cancellation before completion still works for both parties", async () => {
+    await assertSucceeds(updateDoc(doc(h.db(h.PAX), "deliveries/assignedDel"),
+      { status: "cancelled", cancelledAt: serverTimestamp(), cancelReason: "changed my mind" }));
+    await assertSucceeds(updateDoc(doc(h.db(h.PAX), "deliveries/pendingDel"),
+      { status: "cancelled", cancelledAt: serverTimestamp(), cancelReason: "x" }));
+  });
 });
 
 describe("gas orders", () => {
@@ -202,15 +258,33 @@ describe("gas orders", () => {
   after(() => h.env().cleanup());
   beforeEach(async () => { await h.seed(); await seedOrders(); });
 
-  it("GAS-P01 passenger creates and reads own order", async () => {
-    await assertSucceeds(setDoc(doc(h.db(h.PAX), "gas_orders/new"), newGas()));
+  it("GAS-P01 passenger creates and reads own order (Passenger 1.0.1 payload)", async () => {
+    await assertSucceeds(setDoc(doc(h.db(h.PAX), "gas_orders/new"), newGas101()));
     await assertSucceeds(getDoc(doc(h.db(h.PAX), "gas_orders/pendingGas")));
     await assertSucceeds(getDocs(query(collection(h.db(h.PAX), "gas_orders"),
       where("passengerId", "==", h.PAX))));
   });
 
-  it("GAS-P02 approved delivery driver runs the released open-orders query", () =>
-    assertSucceeds(getDocs(openGas(DEL))));
+  it("GAS-S05 an approved delivery driver no longer reads open gas orders (list or get)", async () => {
+    await assertFails(getDocs(openGas(DEL)));
+    await assertFails(getDoc(doc(h.db(DEL), "gas_orders/pendingGas")));
+  });
+
+  it("GAS-P02 approved delivery driver reads the open-order offers instead", async () => {
+    await h.env().withSecurityRulesDisabled((ctx) =>
+      setDoc(doc(ctx.firestore(), "gas_order_offers/pendingGas"), { service: "gas", fare: 62 }));
+    await assertSucceeds(getDoc(doc(h.db(DEL), "gas_order_offers/pendingGas")));
+  });
+
+  it("GAS-S06 Gas creation refuses the 1.0.0 payload and untyped amounts", async () => {
+    const r = doc(h.db(h.PAX), "gas_orders/new");
+    await assertFails(setDoc(r, newGas()));
+    await assertFails(setDoc(r, { ...newGas101(), deliveryOtp: "4321" }));
+    await assertFails(setDoc(r, newGas101({ totalPrice: "62" })));
+    await assertFails(setDoc(r, without(newGas101(), "deliveryFee")));
+    await assertFails(setDoc(r, newGas101({ quantity: 1.5 })));
+    await assertFails(setDoc(r, newGas101({ verifiedPrice: { total: 62 } })));
+  });
 
   it("GAS-P03 assigned driver reads and updates the order", async () => {
     await assertSucceeds(getDoc(doc(h.db(DEL), "gas_orders/assignedGas")));

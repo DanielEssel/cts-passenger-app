@@ -1,6 +1,8 @@
 // lib/features/profile/presentation/screens/privacy_security_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -179,7 +181,11 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
       error: (e, _) => Scaffold(
         backgroundColor: AppColors.background,
         appBar: const CTSTransportAppBar(title: 'Privacy & Security'),
-        body: Center(child: Text('Error: $e')),
+        body: const CtsErrorState(
+          title: "Couldn't load your details",
+          message:
+              'Check your connection, then go back and open this page again.',
+        ),
       ),
       data: (prefs) {
         _seedPrefs(prefs);
@@ -270,19 +276,22 @@ class _PrivacySecurityScreenState extends ConsumerState<PrivacySecurityScreen> {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   Widget _sectionLabel(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text.toUpperCase(),
-          style: AppTextStyles.caption.copyWith(
-            color: AppColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.8,
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+        child: Semantics(
+          header: true,
+          child: Text(
+            text,
+            style: CtsText.label.copyWith(
+              color: text.toLowerCase().contains('danger')
+                  ? CtsTheme.errorDeep
+                  : CtsTheme.textSecondary,
+            ),
           ),
         ),
       );
 
-  Widget _divider() => const Divider(
-      height: 0.5, thickness: 0.5, indent: 66, color: AppColors.borderLight);
+  Widget _divider() =>
+      const Divider(height: 1, indent: 68, color: CtsTheme.borderLight);
 
   // ── Dialogs ───────────────────────────────────────────────────────────────
 
@@ -421,14 +430,13 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          color: CtsTheme.surface,
+          borderRadius: BorderRadius.circular(CtsTheme.radiusLg),
           border: Border.all(
-            color: isDanger
-                ? AppColors.error.withValues(alpha: 0.3)
-                : AppColors.border,
+            color: isDanger ? CtsTheme.errorBorder : CtsTheme.border,
           ),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       );
 }
@@ -448,46 +456,14 @@ class _ActionTile extends StatelessWidget {
     this.labelColor,
   });
 
+  // A coloured label marks a destructive action (deactivate, delete).
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => CtsListRow(
+        icon: icon,
+        title: label,
+        subtitle: subtitle,
+        destructive: labelColor != null,
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: (labelColor ?? AppColors.textSecondary)
-                      .withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Icon(icon,
-                    size: 18, color: labelColor ?? AppColors.textSecondary),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label,
-                        style: AppTextStyles.bodyMedium.copyWith(
-                            color: labelColor ?? AppColors.textPrimary)),
-                    if (subtitle != null)
-                      Text(subtitle!,
-                          style: AppTextStyles.caption
-                              .copyWith(color: AppColors.textTertiary)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded,
-                  color: labelColor?.withValues(alpha: 0.5) ??
-                      AppColors.textTertiary,
-                  size: 18),
-            ],
-          ),
-        ),
       );
 }
 
@@ -507,37 +483,15 @@ class _ToggleTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(icon, size: 18, color: AppColors.textSecondary),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: AppTextStyles.bodyMedium),
-                  Text(subtitle,
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.textTertiary)),
-                ],
-              ),
-            ),
-            Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-              activeTrackColor: AppColors.primary,
-            ),
-          ],
+  Widget build(BuildContext context) => CtsListRow(
+        icon: icon,
+        title: label,
+        subtitle: subtitle,
+        tone: CtsTone.brand,
+        trailing: Switch.adaptive(
+          value: value,
+          onChanged: onChanged,
+          activeTrackColor: CtsTheme.vivid,
         ),
       );
 }

@@ -1,4 +1,10 @@
 // lib/features/ride_tracking/ride_tracking_screen.dart
+//
+// The passenger's live ride screen. What it says and offers comes only from
+// the trip's stored status (rideTrackingView): one plain headline, whether
+// the passenger needs to act, named progress, the driver's real details and
+// an honest note on how current the driver's position is. Ended, unknown
+// and missing trips get their own screen with no tracking controls.
 import 'dart:async';
 import 'dart:math';
 
@@ -10,49 +16,19 @@ import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/utils/phone_launcher.dart';
+import '../../core/theme/cts_theme.dart';
+import '../../core/widgets/cts_ui.dart';
 
 import '../ride/presentation/trip_complete_screen.dart';
 import '../ride/services/route_service.dart';
+import '../tracking/domain/tracking_view.dart';
+import '../tracking/domain/trip_completion.dart';
+import '../tracking/widgets/arrival_prompt.dart';
+import '../tracking/widgets/passenger_tracking_panel.dart';
 import 'package:cts_transport_app/core/services/marker_service.dart';
 
-const _kPrimary = Color(0xFF16A34A);
+const _kPrimary = CtsTheme.primary;
 const _kAccra = LatLng(5.6037, -0.1870);
-
-enum _TripStatus {
-  searching,
-  tripAccepted,
-  driverArrived,
-  tripStarted,
-  completed,
-  cancelledByDriver,
-  cancelledByPassenger,
-  unknown;
-
-  static _TripStatus fromString(String? v) => switch (v) {
-        'searching' => searching,
-        'tripAccepted' => tripAccepted,
-        'driverArrived' => driverArrived,
-        'tripStarted' => tripStarted,
-        'inProgress' => tripStarted,
-        'completed' => completed,
-        'cancelledByDriver' => cancelledByDriver,
-        'cancelledByPassenger' => cancelledByPassenger,
-        _ => unknown,
-      };
-
-  int get stepIndex => switch (this) {
-        tripAccepted => 0,
-        driverArrived => 1,
-        tripStarted => 2,
-        completed => 3,
-        _ => 0,
-      };
-
-  bool get isTerminal =>
-      this == completed ||
-      this == cancelledByDriver ||
-      this == cancelledByPassenger;
-}
 
 class RideTrackingScreen extends StatefulWidget {
   final String tripId;
@@ -65,8 +41,13 @@ class RideTrackingScreen extends StatefulWidget {
 class _RideTrackingScreenState extends State<RideTrackingScreen>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   Map<String, dynamic> _tripData = {};
-  _TripStatus _status = _TripStatus.tripAccepted;
+  String? _rawStatus;
   bool _isLoading = true;
+  bool _missing = false; // the trip document does not exist
+  bool _loadFailed = false; // the trip could not be read
+
+  TrackingView get _view => rideTrackingView(_rawStatus);
+  bool get _headsToPickup => _view.heading == TrackingHeading.pickup;
 
   GoogleMapController? _mapController;
   LatLng? _driverLatLng; // current (animated) driver position
@@ -86,6 +67,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _driverDocSub;
   String? _driverDocId;
   bool _tripHasLiveLoc = false;
+  DateTime? _driverLocAt; // when the shown driver position was written
 
   // ── Route ──────────────────────────────────────
   final _routeService = RouteService();
@@ -98,7 +80,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   bool _mapReady = false;
 
   bool _isCancelling = false;
-  bool _isNavigatingToComplete = false;
+  bool _completionHandled = false;
 
   StreamSubscription<DocumentSnapshot>? _tripSub;
 
@@ -112,25 +94,6 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d8f0e4"}]}
 ]
 ''';
-
-  static const _steps = [
-    (
-      label: 'Driver on the way',
-      icon: Icons.directions_car_rounded,
-      color: _kPrimary
-    ),
-    (
-      label: 'Driver arrived',
-      icon: Icons.location_on_rounded,
-      color: Colors.orange
-    ),
-    (
-      label: 'Trip in progress',
-      icon: Icons.electric_bolt_rounded,
-      color: Colors.blue
-    ),
-    (label: 'Completed', icon: Icons.flag_rounded, color: Colors.purple),
-  ];
 
   @override
   void initState() {
@@ -170,29 +133,42 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   }
 
   void _subscribeToTrip() {
+    _tripSub?.cancel();
     _tripSub = FirebaseFirestore.instance
         .collection('trips')
         .doc(widget.tripId)
-        .snapshots()
+        // Metadata changes too, so a cached first snapshot is always followed
+        // by the server's copy, which decides what a completed trip shows.
+        .snapshots(includeMetadataChanges: true)
         .listen((snap) {
-      if (!snap.exists || !mounted) return;
+      if (!mounted) return;
+      if (!snap.exists) {
+        setState(() {
+          _missing = true;
+          _isLoading = false;
+        });
+        return;
+      }
       final data = snap.data()!;
-      final prevStatus = _status;
-      final newStatus = _TripStatus.fromString(data['status'] as String?);
+      final prevStatus = _rawStatus;
+      final newStatus = data['status'] as String?;
       final geo = data['driverCurrentLocation'] as GeoPoint?;
       final pickup = data['pickupLocation'] as GeoPoint?;
       final dropoff = data['dropoffLocation'] as GeoPoint?;
 
       setState(() {
         _tripData = data;
-        _status = newStatus;
+        _rawStatus = newStatus;
         _isLoading = false;
+        _missing = false;
+        _loadFailed = false;
         if (pickup != null) {
           _pickupLatLng = LatLng(pickup.latitude, pickup.longitude);
         }
         if (dropoff != null) {
           _dropoffLatLng = LatLng(dropoff.latitude, dropoff.longitude);
         }
+        if (geo != null) _driverLocAt = readDriverLocationTime(data);
       });
 
       if (newStatus != prevStatus) {
@@ -211,9 +187,16 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
       _listenDriverDoc(data['driverId'] as String?);
       _syncRoute();
 
-      if (newStatus == _TripStatus.completed) _navigateToComplete(data);
-      if (newStatus == _TripStatus.cancelledByDriver) {
-        _showDriverCancelledDialog();
+      if (newStatus == 'completed') {
+        _onCompleted(data, fromCache: snap.metadata.isFromCache);
+      }
+    }, onError: (Object e) {
+      debugPrint('Trip stream failed: $e');
+      if (mounted) {
+        setState(() {
+          _loadFailed = true;
+          _isLoading = false;
+        });
       }
     });
   }
@@ -240,6 +223,11 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
       final d = s.data();
       final g = (d?['location'] ?? d?['currentLocation']) as GeoPoint?;
       if (g == null) return;
+      final at = readDriverLocationTime(d!) ??
+          (d['lastSeen'] is Timestamp
+              ? (d['lastSeen'] as Timestamp).toDate()
+              : null);
+      setState(() => _driverLocAt = at);
       _applyDriverLocation(LatLng(g.latitude, g.longitude));
       _syncRoute();
     });
@@ -252,8 +240,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
   void _fitTrip() {
     if (!_mapReady) return;
     final driver = _driverLatLng;
-    final toPickup = _status == _TripStatus.tripAccepted ||
-        _status == _TripStatus.driverArrived;
+    final toPickup = _headsToPickup;
     final target = toPickup ? _pickupLatLng : _dropoffLatLng;
 
     if (driver == null || target == null) {
@@ -262,10 +249,10 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         final a = _pickupLatLng!, b = _dropoffLatLng!;
         _mapController?.animateCamera(CameraUpdate.newLatLngBounds(
           LatLngBounds(
-            southwest: LatLng(min(a.latitude, b.latitude),
-                min(a.longitude, b.longitude)),
-            northeast: LatLng(max(a.latitude, b.latitude),
-                max(a.longitude, b.longitude)),
+            southwest: LatLng(
+                min(a.latitude, b.latitude), min(a.longitude, b.longitude)),
+            northeast: LatLng(
+                max(a.latitude, b.latitude), max(a.longitude, b.longitude)),
           ),
           80,
         ));
@@ -302,8 +289,9 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
 
   Future<void> _syncRoute() async {
     if (_routeBusy) return;
-    final toPickup = _status == _TripStatus.tripAccepted ||
-        _status == _TripStatus.driverArrived;
+    // No route while searching or once the ride is over.
+    if (!_view.tracksDriver) return;
+    final toPickup = _headsToPickup;
     final from = toPickup ? _driverTarget : (_driverTarget ?? _pickupLatLng);
     final to = toPickup ? _pickupLatLng : _dropoffLatLng;
     if (from == null || to == null) return;
@@ -385,164 +373,108 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     return markers;
   }
 
-  void _navigateToComplete(Map<String, dynamic> data) {
-    if (!mounted || _isNavigatingToComplete) return;
-    _isNavigatingToComplete = true;
+  /// A completed ride: decided from the server's copy of the trip, never a
+  /// cached one, so a trip already confirmed or settled is never offered for
+  /// confirmation again (see tripCompletionStep).
+  void _onCompleted(Map<String, dynamic> data, {required bool fromCache}) {
+    if (!mounted || _completionHandled || fromCache) return;
+    final step = tripCompletionStep(data);
+    if (step == TripCompletionStep.none) return;
+    _completionHandled = true;
+    switch (step) {
+      case TripCompletionStep.showSummary:
+        _openSummary(data);
+      case TripCompletionStep.askArrival:
+        _askArrival(data);
+      case TripCompletionStep.underReview:
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text(
+              'You reported a problem with this trip. Our team will review it and contact you.'),
+          duration: Duration(seconds: 5),
+        ));
+      case TripCompletionStep.none:
+        break;
+    }
+  }
 
-    final fare = data['actualFare'] != null
-        ? 'GHS ${(data["actualFare"] as num).toStringAsFixed(2)}'
-        : 'GHS ${(data["estimatedFare"] as num? ?? 0).toStringAsFixed(2)}';
+  String _fareLabel(Map<String, dynamic> data) => data['actualFare'] != null
+      ? 'GHS ${(data["actualFare"] as num).toStringAsFixed(2)}'
+      : 'GHS ${(data["estimatedFare"] as num? ?? 0).toStringAsFixed(2)}';
 
-    // ── Passenger confirmation dialog ─────────────────────────────────────
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDCFCE7),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.flag_rounded,
-                    color: Color(0xFF16A34A), size: 32),
-              ),
-              const SizedBox(height: 16),
-              const Text('Have you arrived?',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  )),
-              const SizedBox(height: 8),
-              Text(
-                'Confirm you reached your destination. $fare will be deducted from your wallet.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-              ),
-              const SizedBox(height: 20),
-              // Confirm button
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF16A34A),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Yes, I arrived!',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                      )),
-                ),
-              ),
-              const SizedBox(height: 8),
-              // Dispute button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xFFDC2626)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text("I didn't arrive — Report issue",
-                      style: TextStyle(
-                        color: Color(0xFFDC2626),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      )),
-                ),
-              ),
-            ],
-          ),
+  void _openSummary(Map<String, dynamic> data) {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TripCompleteScreen(
+          tripId: widget.tripId,
+          driverId: data['driverId'] as String? ?? '',
+          driverName: data['driverName'] as String? ?? 'Your driver',
+          destination: data['dropoffAddress'] as String? ?? '',
+          fare: _fareLabel(data),
+          rideType: data['serviceType'] as String? ?? 'Ride',
+          driverRating: (data['driverRating'] as num?)?.toDouble() ?? 5.0,
         ),
-      ).then((confirmed) async {
-        if (!mounted) return;
+      ),
+    );
+  }
 
-        if (confirmed == true) {
-          // ✅ Passenger confirmed — write to Firestore
-          // This triggers onTripCompleted CF to process payment
-          await FirebaseFirestore.instance
-              .collection('trips')
-              .doc(widget.tripId)
-              .update({
-            'passengerConfirmed': true,
-            'passengerConfirmedAt': FieldValue.serverTimestamp(),
-          });
+  // ── Passenger confirmation dialog ─────────────────────────────────────
+  Future<void> _askArrival(Map<String, dynamic> data) async {
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    final answer = await askArrival(
+      context,
+      message: arrivalMessage(
+        fare: _fareLabel(data),
+        paymentMethod: data['paymentMethod'] as String?,
+      ),
+    );
+    if (!mounted) return;
 
-          if (!mounted) return;
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TripCompleteScreen(
-                tripId: widget.tripId,
-                driverId: data['driverId'] as String? ?? '',
-                driverName: data['driverName'] as String? ?? 'Your driver',
-                destination: data['dropoffAddress'] as String? ?? '',
-                fare: fare,
-                rideType: data['serviceType'] as String? ?? 'Ride',
-                driverRating: (data['driverRating'] as num?)?.toDouble() ?? 5.0,
-              ),
-            ),
-          );
-        } else {
-          // ❌ Passenger disputed — raise dispute
-          await FirebaseFirestore.instance
-              .collection('trips')
-              .doc(widget.tripId)
-              .update({
-            'disputed': true,
-            'disputedAt': FieldValue.serverTimestamp(),
-            'disputeReason': 'Passenger did not confirm arrival',
-          });
+    if (answer == ArrivalAnswer.dismissed) {
+      // Closed without answering (Android Back): nothing is written. The
+      // passenger can answer later from here.
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: const Text('Let us know when you have arrived.'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Answer',
+          onPressed: () => _askArrival(data),
+        ),
+      ));
+      return;
+    }
 
-          // Write support ticket automatically
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          await FirebaseFirestore.instance.collection('supportTickets').add({
-            'userId': uid,
-            'userRole': 'passenger',
-            'subject': 'Trip dispute — did not arrive at destination',
-            'message':
-                'Driver marked trip as complete but passenger did not arrive. Trip ID: ${widget.tripId}',
-            'category': 'trip_dispute',
-            'priority': 'high',
-            'status': 'open',
-            'tripId': widget.tripId,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+    // "Yes" writes passengerConfirmed, which onTripCompleted settles once;
+    // "Report issue" keeps the existing dispute flow.
+    await applyArrivalAnswer(
+      answer,
+      FirestoreArrivalWriter(),
+      tripId: widget.tripId,
+      userId: FirebaseAuth.instance.currentUser?.uid,
+    );
+    if (!mounted) return;
 
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content:
-                  Text('Dispute raised. Our team will review and contact you.'),
-              backgroundColor: Color(0xFFDC2626),
-              duration: Duration(seconds: 4),
-            ),
-          );
+    if (answer == ArrivalAnswer.arrived) {
+      _openSummary(data);
+      return;
+    }
 
-          // Navigate home after dispute
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              Navigator.of(context, rootNavigator: true)
-                  .pushNamedAndRemoveUntil('/shell', (_) => false);
-            }
-          });
-        }
-      });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Dispute raised. Our team will review and contact you.'),
+        backgroundColor: CtsTheme.error,
+        duration: Duration(seconds: 4),
+      ),
+    );
+
+    // Navigate home after dispute
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true)
+            .pushNamedAndRemoveUntil('/shell', (_) => false);
+      }
     });
   }
 
@@ -560,56 +492,47 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
         messenger: ScaffoldMessenger.maybeOf(context),
       );
 
+  /// Shares the trip's real details. There is no public tracking page, so
+  /// no tracking link is sent.
   void _shareTrip() => Share.share(
-        'I\'m on a CTSTransport trip to ${_tripData['dropoffAddress'] ?? 'my destination'}. '
-        'Track me: https://ctstrip.app/track/${widget.tripId}',
-        subject: 'My CTSTransport trip',
+        rideShareText(_tripData),
+        subject: 'My CTSGo ride',
       );
 
   Future<void> _cancelRide() async {
     if (_isCancelling) return;
-    // Pop with the dialog's own context: the dialog is on the root navigator,
-    // while this screen's context resolves to the shell's nested navigator,
-    // so popping with it closed the screen and left the dialog stuck.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel ride?',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        content: const Text(
-            'Cancelling after a driver has been assigned may incur a fee.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogCtx, false),
-              child: const Text('Keep Ride')),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Cancel Ride'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
     setState(() => _isCancelling = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('trips')
-          .doc(widget.tripId)
-          .update({
-        'status': 'cancelledByPassenger',
-        'cancelledAt': FieldValue.serverTimestamp(),
-      });
+      final confirmed = await showTrackingConfirm(
+        context,
+        title: 'Cancel this ride?',
+        message: _view.phase == TrackingPhase.searching
+            ? 'We will stop looking for a driver. Any amount held from your '
+                'wallet for this ride is returned automatically.'
+            : 'Your driver will be told you cancelled. Any amount held from '
+                'your wallet for this ride is returned automatically.',
+        confirmLabel: 'Cancel ride',
+        keepLabel: 'Keep ride',
+        destructive: true,
+      );
+      if (!confirmed || !mounted) return;
+      await cancelRideAsPassenger(
+        FirebaseFirestore.instance,
+        tripId: widget.tripId,
+        passengerUid: FirebaseAuth.instance.currentUser?.uid ?? '',
+      );
       if (mounted) {
         Navigator.of(context, rootNavigator: true)
             .pushNamedAndRemoveUntil('/shell', (_) => false);
       }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _isCancelling = false);
-        _snack('Could not cancel. Try again.', isError: true);
-      }
+    } on TrackingActionException catch (e) {
+      _snack(e.message, isError: true);
+    } catch (e) {
+      debugPrint('Ride cancel failed: $e');
+      _snack("Couldn't cancel. Check your connection and try again.",
+          isError: true);
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
     }
   }
 
@@ -626,62 +549,12 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
       ));
   }
 
-  void _showDriverCancelledDialog() {
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16)),
-              child:
-                  const Icon(Icons.cancel_rounded, color: Colors.red, size: 32),
-            ),
-            const SizedBox(height: 16),
-            const Text('Driver Cancelled',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            const Text('Your driver cancelled. Please book again.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  if (context.mounted) {
-                    Navigator.of(context, rootNavigator: true)
-                        .pushNamedAndRemoveUntil('/shell', (_) => false);
-                  }
-                },
-                style: FilledButton.styleFrom(
-                    backgroundColor: _kPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12))),
-                child: const Text('Book Again'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showSOSSheet() => showModalBottomSheet<void>(
         context: context,
         backgroundColor: Colors.white,
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (_) => _SOSSheet(tripId: widget.tripId),
+        builder: (_) => _SOSSheet(shareText: rideShareText(_tripData)),
       );
 
   @override
@@ -695,461 +568,262 @@ class _RideTrackingScreenState extends State<RideTrackingScreen>
     super.dispose();
   }
 
+  void _goHome() => Navigator.of(context, rootNavigator: true)
+      .pushNamedAndRemoveUntil('/shell', (_) => false);
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
           body: Center(child: CircularProgressIndicator(color: _kPrimary)));
     }
+    if (_loadFailed) {
+      return Scaffold(
+        body: CtsErrorState(
+          title: "Can't load your ride",
+          message: 'Check your connection. Your ride is not affected.',
+          onRetry: () {
+            setState(() {
+              _loadFailed = false;
+              _isLoading = true;
+            });
+            _subscribeToTrip();
+          },
+          onBack: _goHome,
+        ),
+      );
+    }
+    if (_missing) {
+      return TrackingEndedScreen(
+        view: const TrackingView(
+          phase: TrackingPhase.ended,
+          icon: Icons.search_off_rounded,
+          headline: 'Ride not found',
+          detail: 'This ride may have been removed. You can check your past '
+              'rides in History.',
+        ),
+        onHome: _goHome,
+      );
+    }
+
+    final view = _view;
+    if (view.phase == TrackingPhase.ended ||
+        view.phase == TrackingPhase.unknown) {
+      return TrackingEndedScreen(
+        view: view,
+        homeLabel: _rawStatus == 'cancelledByDriver' ||
+                _rawStatus == 'noDriversAvailable' ||
+                _rawStatus == 'expired'
+            ? 'Book another ride'
+            : 'Back to home',
+        onHome: _goHome,
+      );
+    }
+
+    final phone = (_tripData['driverPhone'] as String?)?.trim() ?? '';
+    final showDriver = view.hasDriver && _tripData['driverId'] != null;
+    final fare =
+        (_tripData['actualFare'] ?? _tripData['estimatedFare']) as num?;
 
     return PopScope(
-      canPop: _status.isTerminal,
+      // Leaving mid-ride is blocked as before; the ride keeps running.
+      canPop: view.isOver || view.phase == TrackingPhase.review,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _snack('Please wait for your trip to complete.');
+        if (!didPop) {
+          _snack("Your ride is still active. You'll be able to leave this "
+              'screen when it ends.');
+        }
       },
-      child: Stack(
-        children: [
-          Scaffold(
-            backgroundColor: const Color(0xFFF8FAF9),
-            body: Column(
-              children: [
-                Expanded(
-                  flex: 55,
-                  child: Stack(
-                    children: [
-                      // Only the map rebuilds on animation frames; a touch on
-                      // the map turns off camera-follow.
-                      Listener(
-                        onPointerDown: (_) => _follow = false,
-                        child: ValueListenableBuilder(
-                          valueListenable: _driverPose,
-                          builder: (_, __, ___) => GoogleMap(
-                            style: _mapStyle,
-                            onMapCreated: (c) {
-                              _mapController = c;
-                              setState(() => _mapReady = true);
-                              WidgetsBinding.instance
-                                  .addPostFrameCallback((_) => _fitTrip());
-                            },
-                            initialCameraPosition: CameraPosition(
-                                target: _pickupLatLng ?? _kAccra, zoom: 14),
-                            markers: _buildMarkers(),
-                            polylines: _routePolyline,
-                            myLocationEnabled: true,
-                            myLocationButtonEnabled: false,
-                            zoomControlsEnabled: false,
-                            mapToolbarEnabled: false,
-                            compassEnabled: false,
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: MediaQuery.of(context).padding.top + 12,
-                        right: 16,
-                        child: _MapBtn(
-                          icon: Icons.my_location_rounded,
-                          color: _kPrimary,
-                          onTap: () {
-                            _follow = true;
-                            _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
-                            _fitTrip();
-                          },
-                        ),
-                      ),
-                      Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: _buildStatusBar()),
-                    ],
+      child: Scaffold(
+        backgroundColor: CtsTheme.background,
+        body: TrackingLayout(
+          map: _buildMap(view),
+          actions: showDriver && view.phase == TrackingPhase.active
+              ? TrackingActionBar(
+                  primary: TrackingAction(
+                    label: 'Call driver',
+                    icon: Icons.phone_rounded,
+                    onTap: phone.isEmpty ? null : _callDriver,
                   ),
-                ),
-                Expanded(
-                  flex: 45,
-                  child: Container(
-                    color: Colors.white,
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(20, 0, 20,
-                          MediaQuery.of(context).padding.bottom + 16),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 8),
-                          _buildStepper(),
-                          const SizedBox(height: 16),
-                          _buildDriverCard(),
-                          const SizedBox(height: 12),
-                          _buildActionRow(),
-                          const SizedBox(height: 12),
-                          _buildSOSButton(),
-                        ],
-                      ),
-                    ),
+                  secondary: TrackingAction(
+                    label: 'Message',
+                    icon: Icons.sms_rounded,
+                    onTap: phone.isEmpty ? null : _messageDriver,
                   ),
+                )
+              : null,
+          children: [
+            TrackingStatusHeader(view: view),
+            const SizedBox(height: 18),
+            TrackingProgressBar(steps: view.steps, current: view.stepIndex),
+            const SizedBox(height: 18),
+            if (showDriver) ...[
+              TrackingDriverCard(
+                name: _tripData['driverName'] as String?,
+                rating: (_tripData['driverRating'] as num?)?.toDouble(),
+                vehicle: _vehicleLabel(_tripData['serviceType'] as String?),
+                plate: _tripData['driverPlate'] as String?,
+              ),
+              if (phone.isEmpty) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  "Your driver's phone number isn't available.",
+                  style: TextStyle(fontSize: 14, color: CtsTheme.textSecondary),
                 ),
               ],
+              const SizedBox(height: 12),
+            ],
+            TrackingRouteSummary(
+              fromLabel: 'Pickup',
+              fromAddress: _tripData['pickupAddress'] as String? ?? '',
+              toLabel: 'Destination',
+              toAddress: _tripData['dropoffAddress'] as String? ?? '',
+              emphasiseTo: view.heading == TrackingHeading.dropoff,
+              priceLabel:
+                  fare == null ? null : 'GHS ${fare.toStringAsFixed(2)}',
             ),
-          ),
-          if (_isCancelling)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.45),
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 12),
-                      Text(
-                        'Cancelling ride...',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            const SizedBox(height: 16),
+            if (showDriver) ...[
+              _buildSafetyRow(),
+              const SizedBox(height: 8),
+            ],
+            if (view.canCancel)
+              TrackingCancelLink(
+                label: 'Cancel ride',
+                busy: _isCancelling,
+                onTap: _cancelRide,
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStatusBar() {
-    final (color, icon, label) = switch (_status) {
-      _TripStatus.tripAccepted => (
-          _kPrimary,
-          Icons.directions_car_rounded,
-          'Driver is on the way'
+  /// The service type is the only vehicle information a trip carries.
+  static String? _vehicleLabel(String? serviceType) => switch (serviceType) {
+        'okada' => 'Okada (motorbike)',
+        'pragya' => 'Pragya (tricycle)',
+        'taxi' => 'Taxi',
+        null || '' => null,
+        _ => serviceType,
+      };
+
+  Widget _buildMap(TrackingView view) {
+    return Stack(
+      children: [
+        // Only the map rebuilds on animation frames; a touch on the map
+        // turns off camera-follow.
+        Listener(
+          onPointerDown: (_) => _follow = false,
+          child: ValueListenableBuilder(
+            valueListenable: _driverPose,
+            builder: (_, __, ___) => GoogleMap(
+              style: _mapStyle,
+              onMapCreated: (c) {
+                _mapController = c;
+                setState(() => _mapReady = true);
+                WidgetsBinding.instance.addPostFrameCallback((_) => _fitTrip());
+              },
+              initialCameraPosition:
+                  CameraPosition(target: _pickupLatLng ?? _kAccra, zoom: 14),
+              markers: _buildMarkers(),
+              polylines: view.tracksDriver ? _routePolyline : const {},
+              myLocationEnabled: true,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              compassEnabled: false,
+              padding: const EdgeInsets.only(bottom: 48),
+            ),
+          ),
         ),
-      _TripStatus.driverArrived => (
-          Colors.orange,
-          Icons.location_on_rounded,
-          'Driver has arrived'
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 12,
+          right: 16,
+          child: TrackingMapButton(
+            icon: Icons.my_location_rounded,
+            label: 'Show the whole route',
+            onTap: () {
+              _follow = true;
+              _lastCam = DateTime.fromMillisecondsSinceEpoch(0);
+              _fitTrip();
+            },
+          ),
         ),
-      _TripStatus.tripStarted => (
-          Colors.blue,
-          Icons.electric_bolt_rounded,
-          'Trip in progress'
-        ),
-      _TripStatus.completed => (
-          Colors.purple,
-          Icons.flag_rounded,
-          'Trip completed'
-        ),
-      _TripStatus.cancelledByDriver => (
-          Colors.red,
-          Icons.cancel_rounded,
-          'Cancelled by driver'
-        ),
-      _TripStatus.cancelledByPassenger => (
-          Colors.red,
-          Icons.cancel_rounded,
-          'Cancelled'
-        ),
-      _ => (_kPrimary, Icons.search_rounded, 'Finding driver...'),
-    };
-    final eta = _tripData['eta'] as String?;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-          color: color,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
-      child: Row(
+        if (view.tracksDriver)
+          Positioned(
+            left: 16,
+            right: 80,
+            bottom: 12,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TrackingLocationNote(
+                hasLocation: _driverTarget != null,
+                updatedAt: _driverLocAt,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Share and SOS: real actions, kept below the main details.
+  Widget _buildSafetyRow() => Row(
         children: [
-          Icon(icon, color: Colors.white, size: 18),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _shareTrip,
+              icon: const Icon(Icons.share_rounded, size: 20),
+              label: const Text('Share trip details'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: CtsTheme.textPrimary,
+                minimumSize: const Size.fromHeight(48),
+                side: const BorderSide(color: CtsTheme.border),
+                textStyle:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(
-              child: Text(label,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14))),
-          if (eta != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(20)),
-              child: Text(eta,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12)),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepper() {
-    final step = _status.stepIndex;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE5E7EB))),
-      child: Row(
-        children: List.generate(_steps.length, (i) {
-          final done = i < step;
-          final current = i == step;
-          return Expanded(
-            child: Row(
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: done
-                        ? _kPrimary
-                        : current
-                            ? _steps[i].color
-                            : const Color(0xFFF3F4F6),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: done || current
-                            ? Colors.transparent
-                            : const Color(0xFFD1D5DB)),
-                  ),
-                  child: Icon(done ? Icons.check_rounded : _steps[i].icon,
-                      size: 12,
-                      color: done || current
-                          ? Colors.white
-                          : const Color(0xFF9CA3AF)),
-                ),
-                if (i < _steps.length - 1)
-                  Expanded(
-                      child: Container(
-                          height: 2,
-                          color: done ? _kPrimary : const Color(0xFFE5E7EB))),
-              ],
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildDriverCard() {
-    final name = _tripData['driverName'] as String? ?? 'Your Driver';
-    final rating = (_tripData['driverRating'] as num?)?.toDouble() ?? 5.0;
-    final plate = _tripData['driverPlate'] as String? ?? '';
-    final svcType = _tripData['serviceType'] as String? ?? 'Ride';
-    final dest = _tripData['dropoffAddress'] as String? ?? '';
-    final fare = (_tripData['estimatedFare'] as num?)?.toDouble() ?? 0.0;
-    final parts = name.trim().split(' ');
-    final initials = parts.length >= 2
-        ? '${parts.first[0]}${parts.last[0]}'.toUpperCase()
-        : name.isNotEmpty
-            ? name[0].toUpperCase()
-            : 'D';
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE5E7EB))),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                  radius: 26,
-                  backgroundColor: _kPrimary,
-                  child: Text(initials,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16))),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 15)),
-                    Row(children: [
-                      const Icon(Icons.star_rounded,
-                          color: Color(0xFFFFB74D), size: 14),
-                      const SizedBox(width: 3),
-                      Text(rating.toStringAsFixed(1),
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF6B7280))),
-                      const SizedBox(width: 8),
-                      Text('· $svcType',
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF6B7280))),
-                    ]),
-                  ],
-                ),
+            child: OutlinedButton.icon(
+              onPressed: _showSOSSheet,
+              icon: const Icon(Icons.emergency_rounded, size: 20),
+              label: const Text('SOS'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: CtsTheme.errorDeep,
+                backgroundColor: CtsTheme.errorTint,
+                minimumSize: const Size.fromHeight(48),
+                side: const BorderSide(color: CtsTheme.errorBorder),
+                textStyle:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-              if (plate.isNotEmpty)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                      color: const Color(0xFF1F2937),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text(plate,
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          letterSpacing: 1)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Divider(height: 1, color: Color(0xFFF3F4F6)),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Icon(Icons.flag_rounded, color: _kPrimary, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: Text(dest,
-                      style: const TextStyle(
-                          fontSize: 13, color: Color(0xFF374151)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis)),
-              Text('GHS ${fare.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _kPrimary)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionRow() => Row(
-        children: [
-          Expanded(
-              child: _ActionBtn(
-                  icon: Icons.phone_rounded,
-                  label: 'Call',
-                  onTap: _callDriver)),
-          const SizedBox(width: 8),
-          Expanded(
-              child: _ActionBtn(
-                  icon: Icons.chat_bubble_rounded,
-                  label: 'Message',
-                  onTap: _messageDriver)),
-          const SizedBox(width: 8),
-          Expanded(
-              child: _ActionBtn(
-                  icon: Icons.share_rounded,
-                  label: 'Share',
-                  onTap: _shareTrip)),
-          const SizedBox(width: 8),
-          Expanded(
-              child: _ActionBtn(
-                  icon: Icons.close_rounded,
-                  label: 'Cancel',
-                  color: Colors.red.withValues(alpha: 0.08),
-                  iconColor: Colors.red,
-                  onTap: _status.isTerminal ? null : _cancelRide)),
-        ],
-      );
-
-  Widget _buildSOSButton() => GestureDetector(
-        onTap: _showSOSSheet,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.red.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
-          ),
-          child:
-              const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.emergency_rounded, color: Colors.red, size: 18),
-            SizedBox(width: 8),
-            Text('SOS Emergency',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.red)),
-          ]),
-        ),
-      );
-}
-
-class _MapBtn extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  const _MapBtn({required this.icon, required this.color, required this.onTap});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2))
-              ]),
-          child: Icon(icon, color: color, size: 20),
-        ),
-      );
-}
-
-class _ActionBtn extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color? color;
-  final Color? iconColor;
-  const _ActionBtn(
-      {required this.icon,
-      required this.label,
-      required this.onTap,
-      this.color,
-      this.iconColor});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: AnimatedOpacity(
-          opacity: onTap == null ? 0.4 : 1.0,
-          duration: const Duration(milliseconds: 200),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: color ?? const Color(0xFFF9FAFB),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
             ),
-            child: Column(children: [
-              Icon(icon, color: iconColor ?? const Color(0xFF6B7280), size: 20),
-              const SizedBox(height: 4),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF6B7280)),
-                  textAlign: TextAlign.center),
-            ]),
           ),
-        ),
+        ],
       );
+}
+
+/// Trip details for sharing: destination, driver and plate when known.
+/// There is no public tracking page, so no link is included.
+String rideShareText(Map<String, dynamic> trip) {
+  final dest = (trip['dropoffAddress'] as String?)?.trim();
+  final driver = (trip['driverName'] as String?)?.trim();
+  final plate = (trip['driverPlate'] as String?)?.trim();
+  return [
+    "I'm on a CTSGo ride${dest == null || dest.isEmpty ? '' : ' to $dest'}.",
+    if (driver != null && driver.isNotEmpty) 'Driver: $driver.',
+    if (plate != null && plate.isNotEmpty) 'Plate: $plate.',
+  ].join(' ');
 }
 
 class _SOSSheet extends StatelessWidget {
-  final String tripId;
-  const _SOSSheet({required this.tripId});
+  final String shareText;
+  const _SOSSheet({required this.shareText});
 
   // Captures the messenger before closing the sheet so a failure message can
   // still be shown on the tracking screen.
@@ -1175,7 +849,7 @@ class _SOSSheet extends StatelessWidget {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: CtsTheme.border,
                     borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 20),
             Container(
@@ -1191,7 +865,7 @@ class _SOSSheet extends StatelessWidget {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             const Text('Select an option below',
-                style: TextStyle(color: Colors.grey)),
+                style: TextStyle(color: CtsTheme.textSecondary)),
             const SizedBox(height: 20),
             // 112 is Ghana's national emergency number (police, fire,
             // ambulance). These open the dialer; they do not place the call
@@ -1210,12 +884,11 @@ class _SOSSheet extends StatelessWidget {
                 onTap: () => _dial(context, '193', 'Ambulance (193)')),
             _SOSOption(
                 icon: Icons.people_rounded,
-                label: 'Share location with emergency contact',
+                label: 'Share trip details with a contact',
                 onTap: () {
                   Navigator.pop(context);
-                  Share.share(
-                      'I need help. Trip: $tripId. Track: https://ctstrip.app/track/$tripId',
-                      subject: 'Emergency — CTSTransport');
+                  Share.share('I need help. $shareText',
+                      subject: 'Emergency — CTSGo');
                 }),
           ],
         ),

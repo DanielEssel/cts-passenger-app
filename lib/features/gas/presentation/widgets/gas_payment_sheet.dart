@@ -1,16 +1,74 @@
 // lib/features/gas/presentation/widgets/gas_payment_sheet.dart
 
 import 'package:flutter/material.dart';
+import '../../../../core/theme/cts_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+import 'dart:io' show SocketException;
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/constants/app_colors.dart';
 import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
+import 'package:cts_transport_app/features/gas/domain/gas_pricing.dart';
 import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_providers.dart';
+import 'package:cts_transport_app/features/wallet/presentation/widgets/bridge_momo_sheet.dart';
 
 /// Slides up before placing a gas order.
 /// Returns `true`  when payment succeeds (caller should proceed to create order).
 /// Returns `false` / null when user cancels.
+// ── Error presentation ──────────────────────────────────────────────────────
+// Payment problems are explained in plain words; the raw exception (which
+// can carry internal service text) goes to the debug log only. Specific
+// outcomes such as "insufficient balance" are shown by the sheet directly,
+// and Mobile Money results are explained inside the MoMo sheet.
+
+const _kConnectionCodes = {
+  'unavailable',
+  'network-request-failed',
+  'deadline-exceeded',
+  'internal',
+};
+const _kAuthCodes = {
+  'unauthenticated',
+  'permission-denied',
+  'user-token-expired',
+  'requires-recent-login',
+};
+
+/// Plain-language message for an unexpected error during gas payment.
+String gasPaymentErrorMessage(Object error) {
+  String? code;
+  if (error is FirebaseFunctionsException) code = error.code;
+  if (error is FirebaseException) code = error.code;
+  if (error is FirebaseAuthException) code = error.code;
+
+  if (error is SocketException ||
+      error is TimeoutException ||
+      (code != null && _kConnectionCodes.contains(code))) {
+    return "We couldn't reach CTSGo. Check your connection and try again.";
+  }
+  if (code != null && _kAuthCodes.contains(code)) {
+    return 'Your session has expired. Please sign in again to pay.';
+  }
+  return "Something went wrong with this payment. Check your wallet "
+      "balance, then try again.";
+}
+
+/// Logs [error] and shows the plain-language message in a snack bar.
+void showGasPaymentError(BuildContext context, Object error) {
+  debugPrint('Gas payment error: $error');
+  _showGasPaymentSnack(context, gasPaymentErrorMessage(error));
+}
+
+void _showGasPaymentSnack(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(message),
+    backgroundColor: CtsTheme.errorDeep,
+  ));
+}
+
 class GasPaymentSheet extends ConsumerStatefulWidget {
   final GasRefillType refillType;
   final CylinderSize cylinderSize;
@@ -19,6 +77,10 @@ class GasPaymentSheet extends ConsumerStatefulWidget {
   final double gasPrice;
   final double deliveryFee;
   final double total;
+
+  /// The order's price breakdown; when given, the summary shows its lines
+  /// (which add up to [total]) instead of working them out from [gasPrice].
+  final GasPriceBreakdown? pricing;
 
   const GasPaymentSheet({
     super.key,
@@ -29,6 +91,7 @@ class GasPaymentSheet extends ConsumerStatefulWidget {
     required this.gasPrice,
     required this.deliveryFee,
     required this.total,
+    this.pricing,
   });
 
   @override
@@ -39,6 +102,8 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
   bool _isProcessing = false;
 
   double get _brandPremium {
+    final p = widget.pricing;
+    if (p != null) return p.brandPremium;
     if (widget.brand == null || widget.brand!.priceMultiplier == 1.0) return 0;
     return widget.gasPrice *
         widget.quantity *
@@ -67,7 +132,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
       if (!mounted) return;
       Navigator.pop(context, true); // ← signals _placeOrder to run holdBalance
     } catch (e) {
-      if (mounted) _showError(e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) showGasPaymentError(context, e);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -85,19 +150,15 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
     setState(() => _isProcessing = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      final email = user?.email;
-      if (email == null) {
+      if (FirebaseAuth.instance.currentUser == null) {
         _showError('Unable to top up without a signed-in user.');
         return;
       }
 
-      final controller = ref.read(paymentControllerProvider);
-      final success = await controller.initializeTopUp(
-        amount: topUpAmount,
-        paymentMethod: 'card',
-        email: email,
-      );
+      // Same Mobile Money top-up as the wallet screen (The Bridge
+      // Solutions). It returns true only once the top-up is confirmed and
+      // credited; an unconfirmed payment is explained in the sheet itself.
+      final success = await showBridgeMomoSheet(context, amount: topUpAmount);
 
       if (!mounted) return;
 
@@ -109,18 +170,13 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
         await _payWithWallet(newBalance);
       }
     } catch (e) {
-      if (mounted) _showError(e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) showGasPaymentError(context, e);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
-      backgroundColor: Colors.red,
-    ));
-  }
+  void _showError(String message) => _showGasPaymentSnack(context, message);
 
   // ─────────────────────────────────────────────
   // Build
@@ -152,7 +208,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                     height: 4,
                     margin: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
-                      color: Colors.grey[700],
+                      color: CtsTheme.border,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -170,7 +226,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                       const SizedBox(height: 4),
                       Text('Review your order and pay from wallet',
                           style: AppColors.bodyMedium
-                              .copyWith(color: Colors.grey)),
+                              .copyWith(color: CtsTheme.textSecondary)),
 
                       const SizedBox(height: 20),
 
@@ -189,7 +245,8 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                             _SummaryRow(
                               label:
                                   '${widget.cylinderSize.displayName} × ${widget.quantity}',
-                              amount: widget.gasPrice * widget.quantity,
+                              amount: widget.pricing?.base ??
+                                  widget.gasPrice * widget.quantity,
                             ),
                             if (_brandPremium > 0) ...[
                               const SizedBox(height: 10),
@@ -203,7 +260,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                             _SummaryRow(
                                 label: 'Delivery fee',
                                 amount: widget.deliveryFee),
-                            Divider(height: 24, color: Colors.grey[800]),
+                            const Divider(height: 24, color: CtsTheme.border),
                             _SummaryRow(
                               label: 'Total',
                               amount: widget.total,
@@ -258,12 +315,12 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: hasFunds
-            ? Colors.green.withValues(alpha: 0.08)
+            ? CtsTheme.primary.withValues(alpha: 0.08)
             : Colors.orange.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: hasFunds
-              ? Colors.green.withValues(alpha: 0.3)
+              ? CtsTheme.primary.withValues(alpha: 0.3)
               : Colors.orange.withValues(alpha: 0.3),
         ),
       ),
@@ -273,13 +330,13 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: hasFunds
-                  ? Colors.green.withValues(alpha: 0.15)
+                  ? CtsTheme.primary.withValues(alpha: 0.15)
                   : Colors.orange.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.account_balance_wallet_rounded,
-              color: hasFunds ? Colors.green : Colors.orange,
+              color: hasFunds ? CtsTheme.primary : Colors.orange,
               size: 20,
             ),
           ),
@@ -289,13 +346,14 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Wallet Balance',
-                    style: AppColors.labelSmall.copyWith(color: Colors.grey)),
+                    style: AppColors.labelSmall
+                        .copyWith(color: CtsTheme.textSecondary)),
                 const SizedBox(height: 3),
                 Text(
-                  '₵${balance.toStringAsFixed(2)}',
+                  'GHS ${balance.toStringAsFixed(2)}',
                   style: AppColors.titleMedium.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: hasFunds ? Colors.green : Colors.orange,
+                    color: hasFunds ? CtsTheme.primary : Colors.orange,
                   ),
                 ),
               ],
@@ -306,9 +364,10 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('Short by',
-                    style: AppColors.labelSmall.copyWith(color: Colors.grey)),
+                    style: AppColors.labelSmall
+                        .copyWith(color: CtsTheme.textSecondary)),
                 Text(
-                  '₵${(widget.total - balance).toStringAsFixed(2)}',
+                  'GHS ${(widget.total - balance).toStringAsFixed(2)}',
                   style: AppColors.bodyMedium.copyWith(
                     color: Colors.orange,
                     fontWeight: FontWeight.w700,
@@ -355,10 +414,10 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
         child: ElevatedButton(
           onPressed: _isProcessing ? null : () => _payWithWallet(balance),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primaryColor,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor:
-                AppColors.primaryColor.withValues(alpha: 0.5),
+            backgroundColor: CtsTheme.vivid,
+            foregroundColor: CtsTheme.onVivid,
+            disabledBackgroundColor: CtsTheme.vivid.withValues(alpha: 0.5),
+            disabledForegroundColor: CtsTheme.onVivid,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -368,10 +427,10 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                      strokeWidth: 2, color: CtsTheme.onVivid),
                 )
               : Text(
-                  'Pay ₵${widget.total.toStringAsFixed(2)}',
+                  'Pay GHS ${widget.total.toStringAsFixed(2)}',
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w800),
                 ),
@@ -388,16 +447,17 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                      strokeWidth: 2, color: CtsTheme.onVivid),
                 )
               : Text(
-                  'Top Up & Pay ₵${widget.total.toStringAsFixed(2)}',
+                  'Top Up & Pay GHS ${widget.total.toStringAsFixed(2)}',
                   style: const TextStyle(
                       fontSize: 15, fontWeight: FontWeight.w800),
                 ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange,
-            foregroundColor: Colors.white,
+            // Was white on orange (2.1:1).
+            backgroundColor: CtsTheme.vivid,
+            foregroundColor: CtsTheme.onVivid,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -419,7 +479,8 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
         child: ElevatedButton(
           onPressed: () => ref.invalidate(walletStreamProvider),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.grey[800],
+            backgroundColor: CtsTheme.textPrimary,
+            foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -455,14 +516,18 @@ class _SummaryRow extends StatelessWidget {
                   ? AppColors.titleMedium.copyWith(fontWeight: FontWeight.bold)
                   : AppColors.bodyMedium),
         ),
-        Text(
-          '₵${amount.toStringAsFixed(2)}',
-          style: isTotal
-              ? AppColors.titleLarge.copyWith(
-                  color: AppColors.primaryColor,
-                  fontWeight: FontWeight.bold,
-                )
-              : AppColors.bodyMedium,
+        const SizedBox(width: 12),
+        Flexible(
+          child: Text(
+            'GHS ${amount.toStringAsFixed(2)}',
+            textAlign: TextAlign.end,
+            style: isTotal
+                ? AppColors.titleLarge.copyWith(
+                    color: AppColors.primaryColor,
+                    fontWeight: FontWeight.bold,
+                  )
+                : AppColors.bodyMedium,
+          ),
         ),
       ],
     );

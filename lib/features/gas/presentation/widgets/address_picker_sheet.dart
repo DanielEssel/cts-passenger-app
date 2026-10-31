@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/theme/cts_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -444,7 +445,8 @@ class _DetectedCard extends StatelessWidget {
               child: FilledButton(
                 onPressed: onConfirm,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _kPrimary,
+                  backgroundColor: CtsTheme.vivid,
+            foregroundColor: CtsTheme.onVivid,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
@@ -537,7 +539,7 @@ class _PlaceTile extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(subtitle,
                           style: const TextStyle(
-                              fontSize: 11, color: _kTextTert),
+                              fontSize: 12, color: _kTextTert),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                     ],

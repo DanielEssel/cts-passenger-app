@@ -6,21 +6,35 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cts_transport_app/core/services/pricing_service.dart';
 import 'package:cts_transport_app/core/widgets/cts_ui.dart';
+import 'package:cts_transport_app/features/delivery/domain/delivery_quote.dart';
 import 'package:cts_transport_app/features/delivery/presentation/delivery_screen.dart';
 import 'package:cts_transport_app/features/delivery/presentation/delivery_vehicle_screen.dart';
+import 'package:cts_transport_app/features/delivery/providers/delivery_provider.dart';
 import 'package:cts_transport_app/features/home/widgets/service_tile.dart';
-import 'package:cts_transport_app/features/ride/services/route_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-/// Route lookup the test controls: completes with [result] when told to.
-class _FakeRouteService extends RouteService {
-  final completer = Completer<RouteResult?>();
+/// The server's quotes, released when the test says (one per vehicle).
+class _FakeQuotes extends DeliveryQuoteService {
+  final completer = Completer<void>();
   @override
-  Future<RouteResult?> getRoute(LatLng origin, LatLng destination) =>
-      completer.future;
+  Future<ServerDeliveryQuote> quote({
+    required GeoPoint pickup,
+    required GeoPoint dropoff,
+    required String vehicleType,
+    required String weightTier,
+    required bool isFragile,
+    required bool requiresHelpers,
+  }) async {
+    await completer.future;
+    return ServerDeliveryQuote(
+        quoteId: 'q-$vehicleType', vehicleType: vehicleType, distanceKm: 7.2,
+        baseFare: 15, distanceCharge: 28.8, weightSurcharge: 5,
+        fragileSurcharge: 5, helperSurcharge: 0, minimumFare: 20,
+        minimumApplied: false, total: 53.8,
+        expiresAt: DateTime.now().add(const Duration(minutes: 10)));
+  }
 }
 
 Future<void> _setView(WidgetTester tester, Size size) async {
@@ -31,7 +45,11 @@ Future<void> _setView(WidgetTester tester, Size size) async {
 
 Widget _app(Widget home, {double textScale = 1.0, List overrides = const []}) =>
     ProviderScope(
-      overrides: [...overrides],
+      overrides: [
+        // No Firebase in tests: price from PricingService's defaults.
+        deliveryPricingLoaderProvider.overrideWithValue(() async => true),
+        ...overrides,
+      ],
       child: MaterialApp(
         home: Builder(
           builder: (context) => MediaQuery(
@@ -75,7 +93,7 @@ void main() {
       expect(find.text('Send a parcel'), findsOneWidget);
       final button =
           tester.widget<CtsPrimaryButton>(find.byType(CtsPrimaryButton));
-      expect(button.label, 'See vehicles & prices');
+      expect(button.label, 'Choose vehicle & see price');
       expect(button.onPressed, isNull);
       // A text hint (not colour alone) says what to do next.
       expect(find.byIcon(Icons.info_outline_rounded), findsWidgets);
@@ -87,13 +105,18 @@ void main() {
       await tester.pumpWidget(_app(const DeliveryScreen()));
       await tester.pump();
 
-      await tester.scrollUntilVisible(find.text('Small'), 200,
-          scrollable: find.byType(Scrollable).first);
+      // Sections are built ahead of the viewport; bring each into view.
+      await tester.ensureVisible(find.text('Small'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Small'));
       await tester.pump();
+      // Further down and not built yet: scroll the page list to it.
       await tester.scrollUntilVisible(
           find.text('Not available for this weight'), 200,
-          scrollable: find.byType(Scrollable).first);
+          scrollable: find
+              .descendant(
+                  of: find.byType(ListView), matching: find.byType(Scrollable))
+              .first);
       expect(find.text('Not available for this weight'), findsOneWidget);
     });
 
@@ -127,9 +150,9 @@ void main() {
     testWidgets('no fare or confirm until the route is measured',
         (tester) async {
       await _setView(tester, const Size(390, 844));
-      final route = _FakeRouteService();
+      final quotes = _FakeQuotes();
       await tester.pumpWidget(_app(_vehicleScreen(),
-          overrides: [routeServiceProvider.overrideWithValue(route)]));
+          overrides: [deliveryQuoteServiceProvider.overrideWithValue(quotes)]));
       await tester.pump();
 
       var button =
@@ -138,11 +161,11 @@ void main() {
       expect(button.onPressed, isNull);
       expect(find.text('Calculating…'), findsNWidgets(2)); // both vehicles
 
-      route.completer.complete(
-          const RouteResult(points: [], distanceKm: 7.2, durationMin: 20));
-      await tester.pump();
+      quotes.completer.complete();
+      await tester.pump(); // server quotes delivered
+      await tester.pump(); // rebuilt with the fare
       button = tester.widget<CtsPrimaryButton>(find.byType(CtsPrimaryButton));
-      expect(button.label, 'Confirm Okada delivery');
+      expect(button.label, 'Find a delivery driver');
       expect(button.onPressed, isNotNull);
       expect(find.text('Calculating…'), findsNothing);
     });
@@ -150,10 +173,10 @@ void main() {
     testWidgets('only Okada uses a photo; no invented arrival times',
         (tester) async {
       await _setView(tester, const Size(390, 844));
-      final route = _FakeRouteService()..completer.complete(null);
+      final quotes = _FakeQuotes()..completer.complete();
       await tester.pumpWidget(_app(
           _vehicleScreen(vehicles: const ['Okada', 'Aboboya', 'Mini Truck']),
-          overrides: [routeServiceProvider.overrideWithValue(route)]));
+          overrides: [deliveryQuoteServiceProvider.overrideWithValue(quotes)]));
       await tester.pump();
       expect(find.byType(ServiceImage), findsOneWidget);
       expect(find.textContaining('away'), findsNothing);
@@ -162,10 +185,10 @@ void main() {
     for (final scale in const [1.0, 1.3]) {
       testWidgets('no overflow at 320dp, text x$scale', (tester) async {
         await _setView(tester, const Size(320, 640));
-        final route = _FakeRouteService()..completer.complete(null);
+        final quotes = _FakeQuotes()..completer.complete();
         await tester.pumpWidget(_app(_vehicleScreen(),
             textScale: scale,
-            overrides: [routeServiceProvider.overrideWithValue(route)]));
+            overrides: [deliveryQuoteServiceProvider.overrideWithValue(quotes)]));
         await tester.pump();
         expect(tester.takeException(), isNull);
         await tester.drag(

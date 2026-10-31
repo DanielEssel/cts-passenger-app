@@ -2,6 +2,8 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
@@ -174,7 +176,9 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogCtx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            style: FilledButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white),
             child: const Text('Cancel request'),
           ),
         ],
@@ -272,7 +276,8 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
                   }
                 },
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: CtsTheme.vivid,
+                  foregroundColor: CtsTheme.onVivid,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -330,7 +335,8 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
                   if (context.mounted) Navigator.pop(context);
                 },
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: CtsTheme.vivid,
+                  foregroundColor: CtsTheme.onVivid,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),
@@ -368,168 +374,157 @@ class _DriverMatchingScreenState extends ConsumerState<DriverMatchingScreen>
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                // ── Top bar ──
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GestureDetector(
-                      onTap: _isCancelling ? null : _cancelTripRequest,
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceAlt,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: _isCancelling
-                            ? const Padding(
-                                padding: EdgeInsets.all(9),
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.close_rounded,
-                                size: 18, color: AppColors.textSecondary),
-                      ),
-                    ),
-                    Text(widget.rideType, style: AppTextStyles.heading4),
-                    // Timeout countdown
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _secondsLeft <= 30
-                            ? AppColors.errorLight
-                            : AppColors.surfaceAlt,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${_secondsLeft ~/ 60}:${(_secondsLeft % 60).toString().padLeft(2, '0')}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: _secondsLeft <= 30
-                              ? AppColors.error
-                              : AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const Spacer(),
-
-                // ── Pulsing ring ──
-                _PulsingRing(
-                    controller: _pulseController, rideType: widget.rideType),
-
-                const SizedBox(height: 32),
-
-                // ── Searching label ──
-                Text(
-                  'Finding your driver${'.' * _dotsCount}',
-                  style: AppTextStyles.heading2,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _timeoutNotRecorded
-                      ? 'Still looking. You can keep waiting or cancel the request.'
-                      : 'Looking for nearby ${_VehicleInfo.from(widget.rideType).label} drivers',
-                  style: AppTextStyles.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-
-                const SizedBox(height: 24),
-
-                // ── Progress bar ──
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 4,
-                    backgroundColor: AppColors.border,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _secondsLeft <= 30 ? AppColors.error : AppColors.primary,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // ── Trip summary ──
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
+          child: CtsFillScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  // ── Top bar ──
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _SummaryRow(
-                        icon: Icons.location_on_rounded,
-                        iconColor: AppColors.primary,
-                        label: 'Going to',
-                        value: widget.destination,
+                      CtsCloseButton(
+                        label: 'Cancel request',
+                        loading: _isCancelling,
+                        onTap: _cancelTripRequest,
                       ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: Divider(height: 0.5, color: AppColors.border),
-                      ),
-                      _SummaryRow(
-                        icon: Icons.account_balance_wallet_rounded,
-                        iconColor: AppColors.success,
-                        label: 'Estimated fare',
-                        value: widget.fare,
+                      Text(widget.rideType, style: AppTextStyles.heading4),
+                      // Timeout countdown
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _secondsLeft <= 30
+                              ? AppColors.errorLight
+                              : AppColors.surfaceAlt,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${_secondsLeft ~/ 60}:${(_secondsLeft % 60).toString().padLeft(2, '0')}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: _secondsLeft <= 30
+                                ? AppColors.error
+                                : AppColors.textSecondary,
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                ),
 
-                const Spacer(),
+                  const Spacer(),
 
-                // ── Cancel button ──
-                GestureDetector(
-                  onTap: _isCancelling ? null : _cancelTripRequest,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.errorLight,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: AppColors.error.withValues(alpha: 0.2)),
+                  // ── Pulsing ring ──
+                  _PulsingRing(
+                      controller: _pulseController, rideType: widget.rideType),
+
+                  const SizedBox(height: 32),
+
+                  // ── Searching label ──
+                  Text(
+                    'Finding your driver${'.' * _dotsCount}',
+                    style: AppTextStyles.heading2,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _timeoutNotRecorded
+                        ? 'Still looking. You can keep waiting or cancel the request.'
+                        : 'Looking for nearby ${_VehicleInfo.from(widget.rideType).label} drivers',
+                    style: AppTextStyles.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // ── Progress bar ──
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 4,
+                      backgroundColor: AppColors.border,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _secondsLeft <= 30
+                            ? AppColors.error
+                            : AppColors.primary,
+                      ),
                     ),
-                    child: _isCancelling
-                        ? const Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // ── Trip summary ──
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        _SummaryRow(
+                          icon: Icons.location_on_rounded,
+                          iconColor: AppColors.primary,
+                          label: 'Going to',
+                          value: widget.destination,
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 10),
+                          child: Divider(height: 0.5, color: AppColors.border),
+                        ),
+                        _SummaryRow(
+                          icon: Icons.account_balance_wallet_rounded,
+                          iconColor: AppColors.success,
+                          label: 'Estimated fare',
+                          value: widget.fare,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // ── Cancel button ──
+                  GestureDetector(
+                    onTap: _isCancelling ? null : _cancelTripRequest,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: AppColors.errorLight,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: AppColors.error.withValues(alpha: 0.2)),
+                      ),
+                      child: _isCancelling
+                          ? const Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.error,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              'Cancel request',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
                                 color: AppColors.error,
                               ),
+                              textAlign: TextAlign.center,
                             ),
-                          )
-                        : const Text(
-                            'Cancel request',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.error,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
+                    ),
                   ),
-                ),
 
-                const SizedBox(height: 8),
-              ],
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
           ),
         ),
@@ -709,10 +704,15 @@ class _SummaryRow extends StatelessWidget {
           Icon(icon, color: iconColor, size: 18),
           const SizedBox(width: 10),
           Expanded(child: Text(label, style: AppTextStyles.bodySmall)),
-          Text(value,
-              style: AppTextStyles.labelLarge,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
+          const SizedBox(width: 12),
+          Flexible(
+            flex: 2,
+            child: Text(value,
+                style: AppTextStyles.labelLarge,
+                textAlign: TextAlign.end,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+          ),
         ],
       );
 }

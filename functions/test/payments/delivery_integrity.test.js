@@ -284,6 +284,8 @@ describe("delivery completion settles only its own escrow", () => {
     const after = {
       status: "completed", passengerId: "p1", driverId: "d1", paymentMethod: "wallet",
       deliveryOtp: "1234", otpSubmitted: "1234", estimatedFare: 100, escrowId: "e1",
+      // Priced like a real booking (settlement checks the hold against it).
+      pickupLocation: PICKUP, dropoffLocation: DROPOFF, vehicleType: "Okada", weightTier: "Small",
       ...deliveryData,
     };
     await h.seed(`deliveries/${D}`, after);
@@ -343,12 +345,11 @@ describe("delivery completion settles only its own escrow", () => {
     await expectBlocked("escrow_owner_mismatch");
   });
 
-  test("DSC-05 a held amount different from the fare settles on the held amount, with an alert", async () => {
+  test("DSC-05 a held amount different from the fare releases nothing (2026-10-28: was settled on the hold)", async () => {
     await complete(await seedCompletion({ deliveryData: { estimatedFare: 90 } }));
-    const d = await delivery();
-    assert.equal(d.walletProcessed, true);
-    assert.equal(d.actualFare, 100);
-    assert.equal(await alerts("delivery_escrow_amount_mismatch"), 1);
+    await expectBlocked("hold_amount_mismatch");
+    assert.equal((await h.read("escrows/e1")).status, "HELD");
+    assert.equal((await h.read("drivers/d1")).walletBalance, 0);
   });
 
   test("DSC-06 an escrow already released for something else blocks settlement", async () => {
@@ -459,8 +460,10 @@ describe("delivery completion settles only its own escrow", () => {
         { userId: "p1", referenceId: "del-OTHER", referenceType: "delivery" }),
       (e) => e instanceof escrow.EscrowMismatchError && e.reason === "escrow_referenceId_mismatch");
     assert.equal((await h.read("escrows/e1")).status, "HELD");
-    // Callers without an expectation (rides, gas) are unchanged.
-    assert.equal(await escrow.releaseEscrow("e1", "d1", "trip_completed"), true);
+    // A caller without an expectation is refused too (rides and gas pass one).
+    await assert.rejects(escrow.releaseEscrow("e1", "d1", "trip_completed"),
+      (e) => e instanceof escrow.EscrowMismatchError && e.reason === "escrow_expectation_missing");
+    assert.equal((await h.read("escrows/e1")).status, "HELD");
   });
 });
 

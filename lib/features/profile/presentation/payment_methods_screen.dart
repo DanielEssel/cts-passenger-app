@@ -129,15 +129,15 @@ class PaymentMethodsScreen extends ConsumerWidget {
 
             const SizedBox(height: 24),
 
-            // ── Cards via Paystack ──
+            // ── Cards: not offered (top-ups are Mobile Money only) ──
             const Text('Debit / Credit Card', style: AppTextStyles.heading4),
             const SizedBox(height: 10),
             _InfoTile(
               icon: Icons.credit_card_rounded,
-              title: 'Pay by card via Paystack',
+              title: 'Card payments are not available',
               subtitle:
-                  'Cards are handled securely by Paystack during checkout. '
-                  'No card details are stored on our servers.',
+                  'Top up your wallet with Mobile Money (MTN, Telecel or '
+                  'AirtelTigo), or pay the driver in cash.',
             ),
 
             const SizedBox(height: 24),
@@ -495,7 +495,7 @@ class _WalletCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('CTSTransport Wallet',
+                Text('CTSGo Wallet',
                     style: AppTextStyles.labelLarge
                         .copyWith(color: AppColors.background)),
                 const SizedBox(height: 2),
@@ -747,7 +747,7 @@ class _HowItWorksCard extends StatelessWidget {
             _Step(
               number: '1',
               text:
-                  'Top up your CTSTransport Wallet using MoMo or card via Paystack',
+                  'Top up your CTSGo Wallet with Mobile Money',
             ),
             const SizedBox(height: 8),
             _Step(
@@ -758,7 +758,7 @@ class _HowItWorksCard extends StatelessWidget {
             const SizedBox(height: 8),
             _Step(
               number: '3',
-              text: 'All transactions are secured and processed by Paystack',
+              text: 'Mobile Money payments are processed by The Bridge Solutions',
             ),
           ],
         ),

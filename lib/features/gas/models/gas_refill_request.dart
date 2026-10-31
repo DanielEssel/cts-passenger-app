@@ -1,8 +1,8 @@
 // lib/features/gas/models/gas_refill_request.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../core/utils/otp_utils.dart';
 import '../../../core/utils/driver_location.dart';
+import '../../tracking/domain/tracking_view.dart' show readDriverLocationTime;
 import '../../../core/services/pricing_service.dart';
 import 'package:flutter/material.dart';
 
@@ -253,7 +253,7 @@ enum GasOrderStatus {
         GasOrderStatus.refilling => Colors.teal,
         GasOrderStatus.returning => Colors.cyan,
         GasOrderStatus.outForDelivery => Colors.cyan,
-        GasOrderStatus.delivered => Colors.green,
+        GasOrderStatus.delivered => const Color(0xFF15803D), // CTSGo green
         GasOrderStatus.cancelled => Colors.red,
         GasOrderStatus.failed => Colors.red,
       };
@@ -342,6 +342,13 @@ class GasRefillRequest {
   final String?   driverVehicle;    // e.g. "Motorcycle · GR-1234-22"
   final GeoPoint? driverLocation;
   final double?   driverHeading;   // live location, nullable
+
+  /// The status exactly as stored. [status] maps values this app does not
+  /// know to `pendingApproval`; tracking uses this so they show as unknown.
+  final String?   rawStatus;
+
+  /// When the Driver App last wrote [driverLocation] (read only).
+  final DateTime? driverLocationAt;
   final GasRefillType refillType;
   final CylinderSize cylinderSize;
   final GasBrand? preferredBrand;
@@ -412,6 +419,8 @@ class GasRefillRequest {
     required this.pickupLocation,
     required this.deliveryLocation,
     this.driverHeading,
+    this.rawStatus,
+    this.driverLocationAt,
     this.preferredStation,
     required this.pickupAddress,
     required this.deliveryAddress,
@@ -495,7 +504,9 @@ class GasRefillRequest {
       'passengerRating': passengerRating,
       'driverRating': driverRating,
       'metadata':    metadata,
-      'deliveryOtp':  deliveryOtp ?? OtpUtils.generate(),
+      // New orders carry no code: the server creates it where the driver
+      // cannot read it (functions/completion_codes.js).
+      if (deliveryOtp != null) 'deliveryOtp': deliveryOtp,
     };
   }
 
@@ -511,6 +522,9 @@ class GasRefillRequest {
       driverPhone:    d['driverPhone']    as String?,
       driverVehicle:  d['driverVehicle']  as String?,
       driverLocation: readDriverLocation(d),
+      driverHeading: (d['driverHeading'] as num?)?.toDouble(),
+      rawStatus: d['status'] as String?,
+      driverLocationAt: readDriverLocationTime(d),
       refillType: GasRefillType.fromFirestore(d['refillType'] as String),
       cylinderSize: CylinderSize.fromFirestore(d['cylinderSize'] as String),
       preferredBrand: d['preferredBrand'] != null
@@ -564,6 +578,8 @@ class GasRefillRequest {
     String?   driverPhone,
     String?   driverVehicle,
     GeoPoint? driverLocation,
+    String? rawStatus,
+    DateTime? driverLocationAt,
     GasRefillType? refillType,
     CylinderSize? cylinderSize,
     GasBrand? preferredBrand,
@@ -608,6 +624,9 @@ class GasRefillRequest {
       driverPhone:    driverPhone    ?? this.driverPhone,
       driverVehicle:  driverVehicle  ?? this.driverVehicle,
       driverLocation: driverLocation ?? this.driverLocation,
+      driverHeading: driverHeading,
+      rawStatus: rawStatus ?? this.rawStatus,
+      driverLocationAt: driverLocationAt ?? this.driverLocationAt,
       refillType: refillType ?? this.refillType,
       cylinderSize: cylinderSize ?? this.cylinderSize,
       preferredBrand: preferredBrand ?? this.preferredBrand,

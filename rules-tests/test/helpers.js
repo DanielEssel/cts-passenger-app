@@ -88,6 +88,7 @@ function driverDoc(uid, overrides = {}) {
     role: "driver_hailing",
     displayName: `Driver ${uid}`,
     serviceType: "taxi",
+    vehicleType: "taxi", // vehicle setup writes both together
     isApproved: true,
     isOnline: true,
     isAvailable: true,
@@ -164,7 +165,8 @@ async function seed() {
       delete t.createdAt; // serverTimestamp is fine here, but keep seeds plain
       return t;
     };
-    await put("trips/searching", trip());
+    // Cash: a direct claim of a wallet ride needs its linked hold (direct_claims_privacy.test.js).
+    await put("trips/searching", trip({ paymentMethod: "cash" }));
     await put(
       "trips/assigned",
       trip({ status: "tripAccepted", driverId: DRIVER, driverName: "Driver drvA" }),

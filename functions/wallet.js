@@ -1,13 +1,8 @@
 // functions/wallet.js
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { defineSecret }       = require("firebase-functions/params");
 const admin                  = require("firebase-admin");
-const axios                  = require("axios");
-const { PaymentConfigError, assertPaystackRequestAllowed } = require("./config");
 
 const getDb          = () => admin.firestore();
-const PAYSTACK_BASE  = "https://api.paystack.co";
-const paystackSecret = defineSecret("PAYSTACK_SECRET_KEY");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,20 +39,6 @@ async function getRole(uid) {
     driverDoc.exists ? driverDoc.data() : null,
     userDoc.exists ? userDoc.data() : null,
   );
-}
-
-// Paystack is retired. Production behaviour is unchanged until a separate
-// removal change; every other environment refuses before any write.
-function requirePaystackAllowed() {
-  try {
-    assertPaystackRequestAllowed();
-  } catch (err) {
-    if (err instanceof PaymentConfigError) {
-      console.error("[paystack] Blocked by config guard:", err.message);
-      throw new HttpsError("failed-precondition", "This payment method is not available.");
-    }
-    throw err;
-  }
 }
 
 function validateAmount(amount, min = 1) {
@@ -122,166 +103,8 @@ exports.getWalletBalance = onCall(
   return { ...doc.data(), role: "passenger" };
 });
 
-// ── initializePaystackPayment ─────────────────────────────────────────────────
-// Passengers only
-
-exports.initializePaystackPayment = onCall(
-  { region: "europe-west2", minInstances: 0, secrets: [paystackSecret] },
-  async (request) => {
-    const uid    = requireAuth(request);
-    requirePaystackAllowed();
-    const secret = paystackSecret.value();
-    const { amount, email, paymentMethod } = request.data;
-
-    validateAmount(amount, 1);
-
-    if (!email) {
-      throw new HttpsError("invalid-argument", "Email required for payment");
-    }
-
-    // Ensure passenger wallet exists
-    const walletRef = getDb().collection("wallets").doc(uid);
-    const wallet    = await walletRef.get();
-    if (!wallet.exists) {
-      await walletRef.set({
-        userId:    uid,
-        email,
-        balance:   0,
-        currency:  "GHS",
-        isActive:  true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-
-    // Create pending transaction with idempotency key
-    const idempotencyKey = `topup_${uid}_${Date.now()}`;
-    const txRef = getDb().collection("transactions").doc(idempotencyKey);
-
-    const txSnap = await txRef.get();
-    if (txSnap.exists && txSnap.data()?.status === "completed") {
-      throw new HttpsError("already-exists", "Payment already processed");
-    }
-
-    await txRef.set({
-      id:             idempotencyKey,
-      userId:         uid,
-      type:           "credit",
-      category:       "top_up",
-      amount,
-      currency:       "GHS",
-      status:         "pending",
-      description:    `Wallet top-up — GH₵ ${amount.toFixed(2)}`,
-      reference:      null,
-      idempotencyKey,
-      createdAt:      admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    try {
-      const response = await axios.post(
-        `${PAYSTACK_BASE}/transaction/initialize`,
-        {
-          email,
-          amount:       Math.round(amount * 100),
-          currency:     "GHS",
-          callback_url: "https://ctstransportapp.web.app/payment/callback",
-          channels: ["mobile_money", "card", "bank", "ussd"],
-          channels:     paymentMethod === "mobile_money"
-              ? ["mobile_money"] : ["card"],
-          metadata: {
-            userId:           uid,
-            transactionDocId: idempotencyKey,
-            type:             "wallet_topup",
-          },
-        },
-        {
-          headers: {
-            Authorization:  `Bearer ${secret}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const { authorization_url, reference } = response.data.data;
-      await txRef.update({ reference });
-      return { authorization_url, reference, transactionDocId: idempotencyKey };
-    } catch (err) {
-      await txRef.update({ status: "failed", failedAt: admin.firestore.FieldValue.serverTimestamp() });
-      throw new HttpsError(
-        "internal",
-        err.response?.data?.message ?? "Failed to initialize payment"
-      );
-    }
-  }
-);
-
-// ── verifyPaystackPayment ─────────────────────────────────────────────────────
-
-exports.verifyPaystackPayment = onCall(
-  { region: "europe-west2", minInstances: 0, secrets: [paystackSecret] },
-  async (request) => {
-    // ⚠️  Deprecated: wallet credits are now handled exclusively by
-    // the paystackWebhook Cloud Function (HMAC-verified).
-    // This callable is kept for backwards compatibility but does
-    // NOT credit the wallet — it only returns the payment status.
-    const uid       = requireAuth(request);
-    requirePaystackAllowed();
-    const secret    = paystackSecret.value();
-    const { reference } = request.data;
-
-    if (!reference) {
-      throw new HttpsError("invalid-argument", "Payment reference required");
-    }
-
-    // Verify with Paystack
-    let paystackData;
-    try {
-      const response = await axios.get(
-        `${PAYSTACK_BASE}/transaction/verify/${reference}`,
-        { headers: { Authorization: `Bearer ${secret}` } }
-      );
-      paystackData = response.data.data;
-    } catch (err) {
-      throw new HttpsError("internal", "Could not verify payment with Paystack");
-    }
-
-    if (paystackData.status !== "success") {
-      throw new HttpsError("failed-precondition", "Payment was not successful");
-    }
-
-    const amountPaid = paystackData.amount / 100;
-    const walletRef  = getDb().collection("wallets").doc(uid);
-
-    // Find transaction by reference
-    const txSnap = await getDb()
-      .collection("transactions")
-      .where("reference", "==", reference)
-      .where("userId",    "==", uid)
-      .limit(1)
-      .get();
-
-    if (txSnap.empty) {
-      throw new HttpsError("not-found", "Transaction record not found");
-    }
-
-    const txRef  = txSnap.docs[0].ref;
-    const txData = txSnap.docs[0].data();
-
-    // Idempotent — already processed
-    if (txData.status === "completed") {
-      return { success: true, alreadyProcessed: true };
-    }
-
-    // Wallet credit is handled by paystackWebhook — not here
-    // Just return payment status for UI confirmation
-    return {
-      success:        true,
-      alreadyProcessed: txData.status === "completed",
-      amount:         amountPaid,
-      message:        "Payment verified. Wallet will be credited via webhook.",
-    };
-  }
-);
+// Wallet top-ups go through The Bridge Solutions only (bridge.js
+// initiateBridgeTopUp). The Paystack callables were removed.
 
 // ── deductWalletBalance ───────────────────────────────────────────────────────
 // Passengers only — deducts from wallets/{uid}
@@ -369,182 +192,18 @@ exports.getTransactionHistory = onCall(
 exports.requestWithdrawal = onCall(
   { region: "europe-west2", minInstances: 0 },
   async (request) => {
-  const uid = requireAuth(request);
-  const { amount, method, phoneNumber, accountName } = request.data;
-
-  // ── Validation ──────────────────────────────────────────────────────────
-  validateAmount(amount, 10);
-
-  if (!method) {
-    throw new HttpsError("invalid-argument", "Payment method required");
-  }
-  if (!phoneNumber && !accountName) {
-    throw new HttpsError("invalid-argument", "Phone number or account name required");
-  }
-
-  // ── Determine role ──────────────────────────────────────────────────────
-  const { role } = await getRole(uid);
-
-  if (role === "unknown") {
-    throw new HttpsError("not-found", "User account not found");
-  }
-
-  const db = getDb();
-
-  // ── Idempotency check — prevent duplicate withdrawals ───────────────────
-  // Block if a pending withdrawal exists for this user
-  const pendingSnap = await db
-    .collection("withdrawals")
-    .where("userId",  "==", uid)
-    .where("status",  "==", "pending")
-    .limit(1)
-    .get();
-
-  if (!pendingSnap.empty) {
-    throw new HttpsError(
-      "already-exists",
-      "You have a pending withdrawal. Please wait for it to be processed."
-    );
-  }
-
-  // ── Process based on role ───────────────────────────────────────────────
-  if (role === "driver") {
-    await _processDriverWithdrawal(db, uid, amount, method, phoneNumber, accountName);
-  } else {
-    await _processPassengerWithdrawal(db, uid, amount, method, phoneNumber, accountName);
-  }
-
-  return {
-    success: true,
-    message: "Withdrawal request submitted. Processing within 24 hours.",
-  };
+  requireAuth(request);
+  // Retired: driver payouts are requested only through initiateBridgePayout
+  // (bridge.js), which holds the funds, enforces one open withdrawal per
+  // driver and queues the request for admin review. This older path
+  // reserved a different balance field (totalEarnings, not walletBalance),
+  // so the same funds could be reserved twice; its requests could never be
+  // approved or rejected; and requestWithdrawal also let passengers
+  // withdraw. No Passenger, Driver or admin build calls it. Refused before
+  // any read or write.
+  throw new HttpsError("failed-precondition",
+    "This withdrawal method is no longer available. Please update the app.");
 });
-
-// ── Driver withdrawal ─────────────────────────────────────────────────────────
-// Deducts from drivers/{uid}.totalEarnings
-
-async function _processDriverWithdrawal(db, uid, amount, method, phoneNumber, accountName) {
-  const driverRef     = db.collection("drivers").doc(uid);
-  const withdrawalRef = db.collection("withdrawals").doc();
-  const txRef         = db.collection("transactions").doc();
-
-  await db.runTransaction(async (t) => {
-    const driverDoc = await t.get(driverRef);
-
-    if (!driverDoc.exists) {
-      throw new HttpsError("not-found", "Driver account not found");
-    }
-
-    const totalEarnings = (driverDoc.data()?.totalEarnings ?? 0);
-    const minBalance    = 0; // driver can withdraw everything
-
-    if (totalEarnings < amount) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Insufficient earnings. Available: GH₵ ${totalEarnings.toFixed(2)}`
-      );
-    }
-
-    // Deduct from earnings
-    t.update(driverRef, {
-      totalEarnings: totalEarnings - amount,
-      updatedAt:     admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // Transaction record (for history)
-    t.set(txRef, {
-      id:          txRef.id,
-      userId:      uid,
-      type:        "debit",
-      category:    "withdrawal",
-      amount,
-      currency:    "GHS",
-      status:      "pending",
-      description: `Earnings withdrawal — ${method} ${phoneNumber ?? accountName ?? ""}`,
-      method,
-      phoneNumber:  phoneNumber ?? null,
-      accountName:  accountName ?? null,
-      role:        "driver",
-      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // Withdrawal record (for admin processing)
-    t.set(withdrawalRef, {
-      id:          withdrawalRef.id,
-      userId:      uid,
-      role:        "driver",
-      amount,
-      currency:    "GHS",
-      method,
-      phoneNumber:  phoneNumber ?? null,
-      accountName:  accountName ?? null,
-      status:      "pending",
-      txId:        txRef.id,
-      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-}
-
-// ── Passenger withdrawal ──────────────────────────────────────────────────────
-// Deducts from wallets/{uid}.balance
-
-async function _processPassengerWithdrawal(db, uid, amount, method, phoneNumber, accountName) {
-  const walletRef     = db.collection("wallets").doc(uid);
-  const withdrawalRef = db.collection("withdrawals").doc();
-  const txRef         = db.collection("transactions").doc();
-
-  await db.runTransaction(async (t) => {
-    const walletDoc = await t.get(walletRef);
-
-    if (!walletDoc.exists) {
-      throw new HttpsError("not-found", "Wallet not found");
-    }
-
-    const balance = walletDoc.data()?.balance ?? 0;
-
-    if (balance < amount) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Insufficient balance. Available: GH₵ ${balance.toFixed(2)}`
-      );
-    }
-
-    t.update(walletRef, {
-      balance:   balance - amount,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    t.set(txRef, {
-      id:          txRef.id,
-      userId:      uid,
-      type:        "debit",
-      category:    "withdrawal",
-      amount,
-      currency:    "GHS",
-      status:      "pending",
-      description: `Wallet withdrawal — ${method} ${phoneNumber ?? accountName ?? ""}`,
-      method,
-      phoneNumber:  phoneNumber ?? null,
-      accountName:  accountName ?? null,
-      role:        "passenger",
-      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    t.set(withdrawalRef, {
-      id:          withdrawalRef.id,
-      userId:      uid,
-      role:        "passenger",
-      amount,
-      currency:    "GHS",
-      method,
-      phoneNumber:  phoneNumber ?? null,
-      accountName:  accountName ?? null,
-      status:      "pending",
-      txId:        txRef.id,
-      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-}
 
 // ── approveDriver ─────────────────────────────────────────────────────────────
 
@@ -708,12 +367,17 @@ exports.getDriverWallet = onCall(
   if (!driverDoc.exists) throw new HttpsError("not-found", "Driver not found");
 
   const driver = driverDoc.data();
+  // The withdrawable balance is walletBalance (wallet-paid earnings).
+  // totalEarnings also counts cash fares the driver already holds, so it is
+  // reported as earnings, never as a balance.
+  const withdrawable = typeof driver.walletBalance === "number" &&
+    Number.isFinite(driver.walletBalance) ? driver.walletBalance : 0;
 
   // Create driver wallet if it doesn't exist
   if (!walletDoc.exists) {
     await getDb().collection("driver_wallets").doc(uid).set({
       driverId:        uid,
-      balance:         driver.totalEarnings    ?? 0,
+      balance:         withdrawable,
       pendingBalance:  driver.pendingEarnings  ?? 0,
       totalEarned:     driver.totalEarnings    ?? 0,
       totalWithdrawn:  0,
@@ -726,7 +390,8 @@ exports.getDriverWallet = onCall(
   const wallet = walletDoc.exists ? walletDoc.data() : {};
 
   return {
-    balance:        driver.totalEarnings    ?? wallet.balance ?? 0,
+    balance:        withdrawable,
+    totalEarnings:  driver.totalEarnings    ?? 0,
     todayEarnings:  driver.todayEarnings    ?? 0,
     completedTrips: driver.completedTrips   ?? 0,
     totalWithdrawn: wallet.totalWithdrawn   ?? 0,
@@ -740,100 +405,17 @@ exports.getDriverWallet = onCall(
 exports.requestDriverWithdrawal = onCall(
   { region: "europe-west2", minInstances: 0 },
   async (request) => {
-  const uid = requireAuth(request);
-  const { amount, phoneNumber, network, accountName } = request.data;
-
-  if (!amount || amount <= 0)     throw new HttpsError("invalid-argument", "Invalid amount");
-  if (!phoneNumber)               throw new HttpsError("invalid-argument", "Phone number required");
-  if (!network)                   throw new HttpsError("invalid-argument", "Mobile money network required");
-
-  const settings = await getDb().collection("settings").doc("platform").get();
-  const minWithdrawal = settings.data()?.minWithdrawalAmount ?? 10;
-  const maxWithdrawal = settings.data()?.maxWithdrawalAmount ?? 5000;
-
-  if (amount < minWithdrawal) throw new HttpsError("invalid-argument", `Minimum withdrawal is GH₵${minWithdrawal}`);
-  if (amount > maxWithdrawal) throw new HttpsError("invalid-argument", `Maximum withdrawal is GH₵${maxWithdrawal}`);
-
-  // Check driver balance
-  const driverDoc = await getDb().collection("drivers").doc(uid).get();
-  if (!driverDoc.exists) throw new HttpsError("not-found", "Driver not found");
-
-  const balance = driverDoc.data()?.totalEarnings ?? 0;
-  if (balance < amount) {
-    throw new HttpsError("failed-precondition",
-      `Insufficient earnings. Available: GH₵${balance.toFixed(2)}`,
-      { available: balance, requested: amount }
-    );
-  }
-
-  // Check no pending withdrawal
-  const pending = await getDb().collection("withdrawals")
-    .where("driverId", "==", uid)
-    .where("status", "==", "pending")
-    .limit(1).get();
-
-  if (!pending.empty) {
-    throw new HttpsError("failed-precondition", "You already have a pending withdrawal request");
-  }
-
-  // Deduct from driver earnings atomically
-  await getDb().runTransaction(async (tx) => {
-    const driverRef = getDb().collection("drivers").doc(uid);
-    const driver    = await tx.get(driverRef);
-    const current   = driver.data()?.totalEarnings ?? 0;
-
-    if (current < amount) throw new HttpsError("failed-precondition", "Insufficient balance");
-
-    tx.update(driverRef, {
-      totalEarnings:   admin.firestore.FieldValue.increment(-amount),
-      pendingWithdrawal: admin.firestore.FieldValue.increment(amount),
-    });
-
-    // Create withdrawal record
-    const withdrawalRef = getDb().collection("withdrawals").doc();
-    tx.set(withdrawalRef, {
-      driverId:    uid,
-      driverName:  driver.data()?.displayName ?? "",
-      amount,
-      currency:    "GHS",
-      phoneNumber,
-      network,
-      accountName: accountName ?? driver.data()?.displayName ?? "",
-      status:      "pending",
-      role:        "driver",
-      createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // Immutable ledger entry
-    const ledgerRef = getDb().collection("ledger").doc();
-    tx.set(ledgerRef, {
-      type:          "WITHDRAWAL_REQUEST",
-      status:        "PENDING",
-      fromUserId:    uid,
-      fromType:      "driver",
-      toType:        "mobile_money",
-      amount,
-      currency:      "GHS",
-      platformFee:   0,
-      driverNet:     amount,
-      referenceType: "withdrawal",
-      referenceId:   withdrawalRef.id,
-      idempotencyKey: `withdrawal_${uid}_${Date.now()}`,
-      createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-
-  // Write in-app notification
-  await getDb().collection("drivers").doc(uid)
-    .collection("notifications").add({
-      type:      "withdrawal_requested",
-      title:     "Withdrawal Requested",
-      body:      `Your withdrawal of GH₵${amount.toFixed(2)} is being processed.`,
-      isRead:    false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-  return { success: true, message: `Withdrawal of GH₵${amount.toFixed(2)} submitted successfully` };
+  requireAuth(request);
+  // Retired: driver payouts are requested only through initiateBridgePayout
+  // (bridge.js), which holds the funds, enforces one open withdrawal per
+  // driver and queues the request for admin review. This older path
+  // reserved a different balance field (totalEarnings, not walletBalance),
+  // so the same funds could be reserved twice; its requests could never be
+  // approved or rejected; and requestWithdrawal also let passengers
+  // withdraw. No Passenger, Driver or admin build calls it. Refused before
+  // any read or write.
+  throw new HttpsError("failed-precondition",
+    "This withdrawal method is no longer available. Please update the app.");
 });
 
 // ── Reset todayEarnings at midnight Ghana time ────────────────────────────────

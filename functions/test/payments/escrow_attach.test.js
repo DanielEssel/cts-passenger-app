@@ -12,6 +12,19 @@ const trips = require("../../trips");
 
 const P = "passenger-1";
 const OTHER = "passenger-2";
+const { GeoPoint } = h.admin.firestore;
+
+// Orders as the passenger app writes them for a wallet booking: the held
+// amount (100 in seedEscrow) is the booked fare, and the route (about 7 km)
+// gives a server minimum far below it (payment_verification.js).
+const PICKUP = new GeoPoint(5.556, -0.1969);
+const DROPOFF = new GeoPoint(5.6037, -0.155);
+// Booked with its server quote (release v5 round 3), at the quote's total.
+const deliveryOrder = (o = {}) => ({ passengerId: P, status: "pending", paymentMethod: "wallet",
+  estimatedFare: 100, pickupLocation: PICKUP, dropoffLocation: DROPOFF, vehicleType: "Okada",
+  weightTier: "Small", isFragile: false, requiresHelpers: false, deliveryQuoteId: "q-attach", ...o });
+const tripOrder = (o = {}) => ({ passengerId: P, status: "searching", paymentMethod: "wallet",
+  serviceType: "taxi", estimatedFare: 100, pickupLocation: PICKUP, dropoffLocation: DROPOFF, ...o });
 
 async function seedEscrow(id, overrides = {}) {
   await h.seed(`escrows/${id}`, {
@@ -32,12 +45,20 @@ async function rejects(promise, code, message) {
 }
 
 after(() => h.fft.cleanup());
-beforeEach(() => h.clearFirestore());
+// Wallet Delivery and Gas are offered once app_config/mobile requires the
+// app versions that keep the completion code secret (escrow.js); these tests
+// cover that state.
+beforeEach(async () => {
+  await h.clearFirestore();
+  await h.enableDeliveryGasWallet();
+  await h.quotedDelivery(deliveryOrder(), { quoteId: "q-attach",
+    settings: { platformFeePercent: 15, delivery: h.DELIVERY_RATES } });
+});
 
 describe("supported passenger flows", () => {
   test("ATT-01 ride: the trip already carries escrowId at attach time", async () => {
     await seedEscrow("e-trip", { referenceType: "trip" });
-    await h.seed("trips/t1", { passengerId: P, status: "searching", escrowId: "e-trip" });
+    await h.seed("trips/t1", tripOrder({ escrowId: "e-trip" }));
 
     assert.deepEqual(await attach({ escrowId: "e-trip", referenceId: "t1", referenceType: "trip" }),
       { success: true });
@@ -50,35 +71,37 @@ describe("supported passenger flows", () => {
 
   test("ATT-02 delivery: order created without escrowId, then attached", async () => {
     await seedEscrow("e-del");
-    await h.seed("deliveries/d1", { passengerId: P, status: "pending" });
+    await h.seed("deliveries/d1", deliveryOrder());
     await attach({ escrowId: "e-del", referenceId: "d1", referenceType: "delivery" });
     assert.equal((await h.read("escrows/e-del")).referenceId, "d1");
   });
 
   test("ATT-03 gas: order created without escrowId, then attached", async () => {
     await seedEscrow("e-gas", { referenceType: "gas_order" });
-    await h.seed("gas_orders/g1", { passengerId: P, status: "pendingApproval" });
+    // Priced like a real legacy Gas order (attach checks the hold against it).
+    await h.seed("gas_orders/g1", { passengerId: P, status: "pendingApproval", paymentMethod: "wallet",
+      totalPrice: 100, refillType: "exchangeEmpty", cylinderSize: "kg3", quantity: 1 });
     await attach({ escrowId: "e-gas", referenceId: "g1", referenceType: "gas_order" });
     assert.equal((await h.read("escrows/e-gas")).referenceId, "g1");
   });
 
   test("ATT-04 a driver accepting before the attach does not block it", async () => {
     await seedEscrow("e-fast");
-    await h.seed("deliveries/d1", { passengerId: P, status: "driverAssigned", driverId: "drv" });
+    await h.seed("deliveries/d1", deliveryOrder({ status: "driverAssigned", driverId: "drv" }));
     await attach({ escrowId: "e-fast", referenceId: "d1", referenceType: "delivery" });
     assert.equal((await h.read("escrows/e-fast")).referenceId, "d1");
   });
 
   test("ATT-05 legacy escrow held without a referenceType can still be attached", async () => {
     await seedEscrow("e-old", { referenceType: null });
-    await h.seed("deliveries/d1", { passengerId: P, status: "pending" });
+    await h.seed("deliveries/d1", deliveryOrder());
     await attach({ escrowId: "e-old", referenceId: "d1", referenceType: "delivery" });
     assert.equal((await h.read("escrows/e-old")).referenceType, "delivery");
   });
 
   test("ATT-06 the callable requires a signed-in caller", async () => {
     await seedEscrow("e-del");
-    await h.seed("deliveries/d1", { passengerId: P });
+    await h.seed("deliveries/d1", deliveryOrder());
     await rejects(h.callCallable(escrow.attachEscrowToOrder, null,
       { escrowId: "e-del", referenceId: "d1", referenceType: "delivery" }), "unauthenticated");
     const ok = await h.callCallable(escrow.attachEscrowToOrder, P,
@@ -90,7 +113,7 @@ describe("supported passenger flows", () => {
 describe("rejected attachments", () => {
   beforeEach(async () => {
     await seedEscrow("e1");
-    await h.seed("deliveries/d1", { passengerId: P, status: "pending" });
+    await h.seed("deliveries/d1", deliveryOrder());
   });
 
   test("ATT-10 someone else's escrow", async () => {
@@ -153,9 +176,11 @@ describe("rejected attachments", () => {
 describe("one escrow per order, one order per escrow", () => {
   beforeEach(async () => {
     await seedEscrow("e1");
-    await seedEscrow("e2", { amount: 1 });
-    await h.seed("deliveries/d1", { passengerId: P, status: "pending" });
-    await h.seed("deliveries/d2", { passengerId: P, status: "pending" });
+    // Both holds match the booked price, so ATT-24's race (not a price
+    // refusal) decides which one is linked.
+    await seedEscrow("e2");
+    await h.seed("deliveries/d1", deliveryOrder());
+    await h.seed("deliveries/d2", deliveryOrder());
   });
 
   test("ATT-20 repeating the same attach is accepted and changes nothing", async () => {
@@ -173,8 +198,12 @@ describe("one escrow per order, one order per escrow", () => {
 
   test("ATT-22 a second escrow cannot be attached to the same order (H1)", async () => {
     await attach({ escrowId: "e1", referenceId: "d1", referenceType: "delivery" });
+    // The attach now also records escrowId on the delivery, so the
+    // order-level check refuses first; the link-record check (H1) is
+    // exercised by ATT-23 and ATT-24.
+    assert.equal((await h.read("deliveries/d1")).escrowId, "e1");
     await rejects(attach({ escrowId: "e2", referenceId: "d1", referenceType: "delivery" }),
-      "failed-precondition", /already has an escrow/);
+      "failed-precondition", /paid by another escrow|already has an escrow/);
     assert.equal((await h.read("escrows/e2")).referenceId, null);
   });
 
@@ -202,7 +231,7 @@ describe("attachment feeds delivery settlement", () => {
     await h.seed("drivers/drv", { walletBalance: 0 });
     await seedEscrow("e1");
     await seedEscrow("e2", { amount: 1, driverNet: 0.85, platformFee: 0.15 });
-    await h.seed("deliveries/d1", { passengerId: P, status: "pending" });
+    await h.seed("deliveries/d1", deliveryOrder());
     await attach({ escrowId: "e1", referenceId: "d1", referenceType: "delivery" });
 
     // The swap the review found: a tiny escrow can no longer be linked.

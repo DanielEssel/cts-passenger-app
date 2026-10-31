@@ -1,8 +1,8 @@
 // lib/features/wallet/presentation/screens/wallet_screen.dart
 
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
+import '../../../../core/theme/cts_theme.dart';
+import '../../../../core/widgets/cts_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,56 +14,6 @@ import 'transaction_detail_screen.dart';
 import '../../domain/entities/transaction.dart';
 import '../../domain/entities/wallet.dart';
 import '../widgets/bridge_momo_sheet.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Derived stats provider — UNCHANGED
-// ─────────────────────────────────────────────────────────────────────────────
-
-final _walletStatsProvider = Provider.autoDispose<_WalletStats>((ref) {
-  final txList = ref.watch(recentTransactionsStreamProvider).value ?? [];
-
-  int tripCount = 0;
-  double totalSpent = 0;
-  double totalSaved = 0;
-
-  for (final tx in txList) {
-    if (tx.type == TransactionType.debit) {
-      totalSpent += tx.amount;
-      final cat = tx.metadata?['category'] as String? ?? '';
-      final desc = tx.description.toLowerCase();
-      if (cat == 'ride' ||
-          desc.contains('ride') ||
-          desc.contains('taxi') ||
-          desc.contains('okada')) {
-        tripCount++;
-      }
-    } else if (tx.type == TransactionType.credit) {
-      final desc = tx.description.toLowerCase();
-      if (desc.contains('promo') ||
-          desc.contains('bonus') ||
-          desc.contains('reward') ||
-          desc.contains('cashback')) {
-        totalSaved += tx.amount;
-      }
-    }
-  }
-
-  return _WalletStats(
-    tripCount: tripCount,
-    totalSpent: totalSpent,
-    totalSaved: totalSaved,
-  );
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Local presentational tokens — layered on top of the app's existing
-// AppColors/AppTextStyles. Fold into the shared design system if these
-// should become app-wide tokens; scoped to this file for now.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _WalletVisuals {
-  static const heroShadeEnd = Color(0xFF0E3B31); // deep teal-green, pairs with AppColors.darkNavy
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WALLET SCREEN
@@ -82,7 +32,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
     with SingleTickerProviderStateMixin {
   String _activeFilter = 'All';
   bool _balanceVisible = true;
-  final bool _isTopUpLoading = false; // ← FIX 1: loading overlay state (unchanged)
 
   late final AnimationController _entrance;
 
@@ -126,10 +75,12 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
   Widget build(BuildContext context) {
     final walletAsync = ref.watch(walletStreamProvider);
     final txAsync = ref.watch(recentTransactionsStreamProvider);
-    final stats = ref.watch(_walletStatsProvider);
 
     ref.listen<AsyncValue<Wallet>>(walletStreamProvider, (_, next) {
-      next.whenOrNull(error: (e, _) => _showError('Wallet error: $e'));
+      next.whenOrNull(error: (e, _) {
+        debugPrint('Wallet stream error: $e');
+        _showError("We couldn't load your wallet. Pull down to try again.");
+      });
     });
 
     final reduceMotion = MediaQuery.of(context).disableAnimations;
@@ -138,21 +89,18 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
       controller: widget.scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
+        const SliverToBoxAdapter(
+          child: SafeArea(bottom: false, child: CtsPageTitle('Wallet')),
+        ),
         SliverToBoxAdapter(
           child: walletAsync.when(
-            data: (w) => _buildBalanceHeader(w),
-            loading: () => _buildBalanceHeader(null),
-            error: (_, __) => _buildBalanceHeader(null),
+            data: (w) => _buildBalanceCard(w),
+            loading: () => _buildBalanceCard(null),
+            error: (_, __) => _buildBalanceCard(null),
           ),
         ),
-        SliverToBoxAdapter(child: _buildStatsRow(stats)),
-        SliverToBoxAdapter(child: _buildSectionHeader()),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: _buildFilterChips(),
-          ),
-        ),
+        SliverToBoxAdapter(child: _buildActivityHeader()),
+        SliverToBoxAdapter(child: _buildFilterChips()),
         txAsync.when(
           data: (txList) {
             final filtered = _filterTransactions(txList);
@@ -168,8 +116,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
             );
           },
           loading: () => SliverToBoxAdapter(child: _buildTxSkeleton()),
-          error: (e, _) =>
-              SliverToBoxAdapter(child: _buildTxError(e.toString())),
+          error: (e, _) {
+            debugPrint('Transactions stream error: $e');
+            return SliverToBoxAdapter(
+                child: _buildTxError('Check your connection and try again.'));
+          },
         ),
         SliverToBoxAdapter(
           child: SizedBox(height: MediaQuery.of(context).padding.bottom + 32),
@@ -193,303 +144,136 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
             ),
           );
 
-    return Stack(
-      children: [
-        Scaffold(
-          backgroundColor: AppColors.background,
-          body: RefreshIndicator(
-            color: AppColors.primary,
-            onRefresh: _refresh,
-            child: animatedContent,
-          ),
-        ),
-
-        // ── FIX 1: Loading overlay while Paystack WebView is open ──
-        if (_isTopUpLoading)
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.35),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(28),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.15),
-                          blurRadius: 24,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(
-                            color: AppColors.primary),
-                        const SizedBox(height: 16),
-                        Text('Processing payment...',
-                            style: AppTextStyles.labelLarge),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Please do not close the app',
-                          style: AppTextStyles.caption
-                              .copyWith(color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
+    // The MoMo sheet shows every payment stage itself, so the page needs
+    // no overlay of its own.
+    return Scaffold(
+      backgroundColor: CtsTheme.background,
+      body: RefreshIndicator(
+        color: CtsTheme.primary,
+        onRefresh: _refresh,
+        child: animatedContent,
+      ),
     );
   }
 
-  // ── Hero balance card — the one bold gesture on this screen ──
-  Widget _buildBalanceHeader(Wallet? wallet) {
-    final balance = wallet?.totalBalance ?? 0.0;
+  // ── Balance card — the one deep-green surface on this screen ──
+  //
+  // Shows the wallet's total; when part of it is held for a trip in
+  // progress, splits it into what can be spent now and what is on hold.
+  Widget _buildBalanceCard(Wallet? wallet) {
+    final total = wallet?.totalBalance ?? 0.0;
+    final held = wallet?.heldBalance ?? 0.0;
+    final available = wallet?.availableBalance ?? 0.0;
+    final showSplit = wallet != null && held > 0;
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        bottomLeft: Radius.circular(32),
-        bottomRight: Radius.circular(32),
-      ),
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [AppColors.darkNavy, _WalletVisuals.heroShadeEnd],
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _WeavePatternPainter(
-                  color: Colors.white.withValues(alpha: 0.05),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(ctsGutter, 0, ctsGutter, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(CtsTheme.radiusXl),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(gradient: CtsTheme.forestGradient),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _WeavePatternPainter(
+                    color: Colors.white.withValues(alpha: 0.05),
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 20,
-                left: 22,
-                right: 22,
-                bottom: 28,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text('My Wallet',
-                          style: AppTextStyles.heading3
-                              .copyWith(color: AppColors.background)),
-                      const Spacer(),
-                      _AddMoneyButton(onTap: _showTopUpSheet),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
-                  Text('Available balance',
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.textOnDarkMuted)),
-                  const SizedBox(height: 8),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 250),
-                        transitionBuilder: (child, anim) => FadeTransition(
-                          opacity: anim,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.12),
-                              end: Offset.zero,
-                            ).animate(anim),
-                            child: child,
-                          ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 8, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.account_balance_wallet_rounded,
+                            size: 18, color: CtsTheme.vivid),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                              showSplit ? 'Total balance' : 'Available balance',
+                              style: CtsText.label
+                                  .copyWith(color: CtsTheme.onForestMuted)),
                         ),
+                        _VisibilityToggle(
+                          visible: _balanceVisible,
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            setState(() => _balanceVisible = !_balanceVisible);
+                          },
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        transitionBuilder: (child, anim) =>
+                            FadeTransition(opacity: anim, child: child),
                         child: wallet == null
                             ? _BalanceSkeleton(key: const ValueKey('skeleton'))
-                            : _balanceVisible
-                                ? Text(
-                                    'GHS ${balance.toStringAsFixed(2)}',
-                                    key: const ValueKey('visible'),
-                                    style: TextStyle(
-                                      fontFamily: 'Inter',
-                                      fontSize: 38,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.background,
-                                      letterSpacing: -1,
-                                      fontFeatures: const [
-                                        ui.FontFeature.tabularFigures(),
-                                      ],
-                                    ),
-                                  )
-                                : const Text(
-                                    'GHS ••••••',
-                                    key: ValueKey('hidden'),
-                                    style: TextStyle(
-                                      fontFamily: 'Inter',
-                                      fontSize: 38,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.background,
-                                      letterSpacing: 3,
-                                    ),
-                                  ),
+                            : FittedBox(
+                                key: ValueKey(_balanceVisible),
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: _BalanceAmount(
+                                    amount: total, visible: _balanceVisible),
+                              ),
                       ),
-                      const SizedBox(width: 12),
-                      _VisibilityToggle(
-                        visible: _balanceVisible,
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          setState(() => _balanceVisible = !_balanceVisible);
-                        },
+                    ),
+                    if (showSplit) ...[
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: _BalanceSplit(
+                          available: available,
+                          held: held,
+                          visible: _balanceVisible,
+                        ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 26),
-                  Row(
-                    children: [
-                      _ActionBtn(
-                          icon: Icons.arrow_upward_rounded,
-                          label: 'Top Up',
-                          onTap: _showTopUpSheet),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatsRow(_WalletStats stats) => ColoredBox(
-        color: AppColors.surface,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-          child: Row(
-            children: [
-              _StatChip(
-                icon: Icons.route_rounded,
-                value: '${stats.tripCount}',
-                label: 'Trips',
-                color: AppColors.success,
-              ),
-              _StatsDiv(),
-              _StatChip(
-                icon: Icons.receipt_long_rounded,
-                value: 'GHS ${stats.totalSpent.toStringAsFixed(0)}',
-                label: 'Total spent',
-                color: AppColors.info,
-              ),
-              _StatsDiv(),
-              _StatChip(
-                icon: Icons.savings_rounded,
-                value: 'GHS ${stats.totalSaved.toStringAsFixed(0)}',
-                label: 'Saved',
-                color: AppColors.primary,
+                    const SizedBox(height: 20),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: CtsPrimaryButton(
+                        label: 'Top up',
+                        icon: Icons.add_rounded,
+                        onPressed: _showTopUpSheet,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-      );
+      ),
+    );
+  }
 
-  Widget _buildSectionHeader() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Transactions', style: AppTextStyles.heading4),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: _showFilterSheet,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceAlt,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.tune_rounded,
-                          size: 14, color: AppColors.textSecondary),
-                      const SizedBox(width: 4),
-                      Text('Filter',
-                          style: AppTextStyles.caption
-                              .copyWith(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
+  Widget _buildActivityHeader() => Padding(
+        padding: const EdgeInsets.fromLTRB(ctsGutter, 28, ctsGutter, 12),
+        child: Semantics(
+          header: true,
+          child: Text('Recent activity', style: CtsText.title3),
         ),
       );
 
   Widget _buildFilterChips() => SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
         child: Row(
           children: _filters.map((f) {
-            final isActive = _activeFilter == f;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Material(
-                color: isActive ? AppColors.primary : AppColors.surface,
-                borderRadius: BorderRadius.circular(22),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => setState(() => _activeFilter = f),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                          color: isActive
-                              ? AppColors.primary
-                              : AppColors.border),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _filterIcons[f] ?? Icons.circle,
-                          size: 14,
-                          color: isActive
-                              ? AppColors.background
-                              : AppColors.textSecondary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(f,
-                            style: AppTextStyles.labelMedium.copyWith(
-                              color: isActive
-                                  ? AppColors.background
-                                  : AppColors.textSecondary,
-                              fontWeight: isActive
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                            )),
-                      ],
-                    ),
-                  ),
-                ),
+              child: CtsFilterChip(
+                label: f,
+                icon: _filterIcons[f],
+                selected: _activeFilter == f,
+                onTap: () => setState(() => _activeFilter = f),
               ),
             );
           }).toList(),
@@ -511,16 +295,17 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
     return map;
   }
 
+  // One ledger card per date group, rows separated by hairlines.
   List<Widget> _buildFlatItemList(Map<String, List<Transaction>> grouped) {
     final widgets = <Widget>[];
     for (final entry in grouped.entries) {
-      widgets.add(_groupHeader(entry.key));
-      for (final tx in entry.value) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _buildTxTile(tx),
-        ));
-      }
+      widgets.add(CtsGroupLabel(entry.key));
+      widgets.add(Padding(
+        padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+        child: _LedgerCard(children: [
+          for (final tx in entry.value) _buildTxRow(tx, entry.key),
+        ]),
+      ));
     }
     return widgets;
   }
@@ -549,25 +334,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
     return 'Earlier';
   }
 
-  Widget _groupHeader(String label) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-        child: Row(
-          children: [
-            Text(label,
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                )),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Container(height: 0.6, color: AppColors.border),
-            ),
-          ],
-        ),
-      );
-
-  Widget _buildTxTile(Transaction tx) {
+  Widget _buildTxRow(Transaction tx, String group) {
     final isCredit = tx.type == TransactionType.credit;
     final category = _categoryLabel(tx);
     final meta = _txMeta(isCredit, category);
@@ -578,7 +345,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
       iconColor: meta.fg,
       label: tx.description,
       sub: _formatDate(tx.createdAt),
-      amount: '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
+      amount: '${isCredit ? '+' : '-'}GHS ${ctsMoney(tx.amount)}',
       isCredit: isCredit,
       type: category,
       ref: tx.reference,
@@ -587,183 +354,137 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
       note: tx.metadata?['note'] as String? ?? '',
     );
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        elevation: 0,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (_) => TransactionDetailScreen(tx: txItem)),
-          ),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.darkNavy.withValues(alpha: 0.04),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                      color: meta.bg, borderRadius: BorderRadius.circular(13)),
-                  child: Icon(meta.icon, color: meta.fg, size: 19),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(tx.description,
-                          style: AppTextStyles.labelLarge,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 3),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_formatDate(tx.createdAt),
-                              style: AppTextStyles.caption),
-                          const SizedBox(width: 6),
-                          _StatusBadge(status: tx.status.toString()),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${isCredit ? '+' : '-'}GHS ${tx.amount.toStringAsFixed(2)}',
-                  style: AppTextStyles.labelLarge.copyWith(
-                    color: isCredit ? AppColors.success : AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [ui.FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+    final when = _rowTime(tx.createdAt, group);
+    final kind = meta.kind;
+    final statusName = tx.status.name;
+    final statusText = statusName[0].toUpperCase() + statusName.substring(1);
+
+    return _TxRow(
+      icon: meta.icon,
+      tone: meta.tone,
+      title: tx.description.isEmpty ? kind : tx.description,
+      subtitle: '$kind · $when',
+      amount: ctsMoney(tx.amount),
+      isCredit: isCredit,
+      status: tx.status,
+      semanticsLabel: '${tx.description.isEmpty ? kind : tx.description}, '
+          '${isCredit ? 'received' : 'paid'} GHS ${ctsMoney(tx.amount)}, '
+          '$statusText, $when',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => TransactionDetailScreen(tx: txItem)),
       ),
     );
   }
 
+  // Time for rows under "Today"/"Yesterday"; day and time further back.
+  String _rowTime(DateTime d, String group) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final time = '$h:${d.minute.toString().padLeft(2, '0')} '
+        '${d.hour >= 12 ? 'PM' : 'AM'}';
+    if (group == 'Today' || group == 'Yesterday') return time;
+    final year = d.year == DateTime.now().year ? '' : ' ${d.year}';
+    return '${d.day} ${months[d.month - 1]}$year';
+  }
+
+  // Same service colours as Trips: rides green, deliveries sky, gas ember.
   _TxMeta _txMeta(bool isCredit, String category) {
     if (isCredit) {
       return _TxMeta(
-          icon: Icons.arrow_upward_rounded,
-          bg: AppColors.successLight,
-          fg: AppColors.success);
+          icon: Icons.south_west_rounded,
+          tone: CtsTone.success,
+          kind: 'Money in');
     }
     switch (category) {
       case 'Gas':
         return _TxMeta(
             icon: Icons.local_fire_department_rounded,
-            bg: const Color(0xFFFEF3C7),
-            fg: const Color(0xFFD97706));
+            tone: CtsTone.gas,
+            kind: 'Gas');
       case 'Deliveries':
         return _TxMeta(
             icon: Icons.inventory_2_rounded,
-            bg: AppColors.infoLight,
-            fg: AppColors.info);
+            tone: CtsTone.delivery,
+            kind: 'Delivery');
       case 'Transfers':
         return _TxMeta(
             icon: Icons.swap_horiz_rounded,
-            bg: const Color(0xFFF3E8FF),
-            fg: const Color(0xFF7C3AED));
+            tone: CtsTone.info,
+            kind: 'Transfer');
       default:
         return _TxMeta(
             icon: Icons.directions_car_rounded,
-            bg: AppColors.errorLight,
-            fg: AppColors.error);
+            tone: CtsTone.brand,
+            kind: 'Ride');
     }
   }
 
-  Widget _buildEmptyState() => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 20),
-        child: Center(
-          child: Column(children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.receipt_long_rounded,
-                  size: 34, color: AppColors.textTertiary),
-            ),
-            const SizedBox(height: 16),
-            Text('No transactions yet', style: AppTextStyles.heading4),
-            const SizedBox(height: 6),
-            Text('Your transaction history will appear here',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.textSecondary),
-                textAlign: TextAlign.center),
-          ]),
-        ),
-      );
+  Widget _buildEmptyState() => _activeFilter == 'All'
+      ? const CtsEmptyState(
+          icon: Icons.receipt_long_rounded,
+          title: 'No transactions yet',
+          message: 'Your top-ups and payments will appear here.',
+        )
+      : CtsEmptyState(
+          icon: _filterIcons[_activeFilter] ?? Icons.receipt_long_rounded,
+          title: 'No ${_activeFilter.toLowerCase()} yet',
+          message: 'Nothing in this category among your recent activity.',
+          actionLabel: 'Show all activity',
+          onAction: () => setState(() => _activeFilter = 'All'),
+        );
 
   Widget _buildTxSkeleton() => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        child: Column(
-          children: List.generate(
-            5,
-            (_) => Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(14),
+        padding: const EdgeInsets.fromLTRB(ctsGutter, 22, ctsGutter, 0),
+        child: Semantics(
+          label: 'Loading transactions',
+          child: _LedgerCard(
+            children: List.generate(
+              4,
+              (_) => const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    CtsSkeleton(width: 40, height: 40, radius: 20),
+                    SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CtsSkeleton(width: 150),
+                          SizedBox(height: 8),
+                          CtsSkeleton(width: 90, height: 11),
+                        ],
+                      ),
+                    ),
+                    CtsSkeleton(width: 60),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       );
 
-  Widget _buildTxError(String message) => Padding(
-        padding: const EdgeInsets.all(32),
-        child: Center(
-          child: Column(children: [
-            const Icon(Icons.cloud_off_rounded,
-                color: AppColors.textTertiary, size: 40),
-            const SizedBox(height: 12),
-            Text('Could not load transactions', style: AppTextStyles.heading4),
-            const SizedBox(height: 6),
-            Text(message,
-                style: AppTextStyles.caption
-                    .copyWith(color: AppColors.textSecondary),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            Material(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(20),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: _refresh,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 10),
-                  child: Text('Retry',
-                      style: AppTextStyles.labelMedium
-                          .copyWith(color: AppColors.background)),
-                ),
-              ),
-            ),
-          ]),
-        ),
+  Widget _buildTxError(String message) => CtsEmptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Could not load transactions',
+        message: message,
+        actionLabel: 'Retry',
+        onAction: _refresh,
       );
 
   // ─────────────────────────────────────────────
@@ -805,7 +526,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
                 const SizedBox(height: 16),
                 Text('Top up wallet', style: AppTextStyles.heading3),
                 const SizedBox(height: 4),
-                Text('Powered by Paystack — your details are secure',
+                Text('Mobile Money via The Bridge Solutions',
                     style: AppTextStyles.caption
                         .copyWith(color: AppColors.textSecondary)),
                 const SizedBox(height: 20),
@@ -821,9 +542,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
                       return Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: Material(
-                          color: isSel
-                              ? AppColors.primary
-                              : AppColors.surfaceAlt,
+                          color:
+                              isSel ? AppColors.primary : AppColors.surfaceAlt,
                           borderRadius: BorderRadius.circular(22),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(22),
@@ -847,8 +567,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
                                 children: [
                                   if (isSel) ...[
                                     Icon(Icons.check_rounded,
-                                        size: 14,
-                                        color: AppColors.background),
+                                        size: 14, color: AppColors.background),
                                     const SizedBox(width: 4),
                                   ],
                                   Text(
@@ -922,9 +641,8 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: isSel
-                                  ? AppColors.primary
-                                  : AppColors.border,
+                              color:
+                                  isSel ? AppColors.primary : AppColors.border,
                               width: isSel ? 1.5 : 0.8,
                             ),
                           ),
@@ -1008,11 +726,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
     );
   }
 
-  // ── FIX 1 + 2: loading state + correct channel mapping — UNCHANGED ──
+  // The amount sheet has already closed itself (Navigator.pop(ctx) above),
+  // so nothing else is popped here: an extra pop would close the Wallet
+  // page itself when it was opened as /wallet from a booking screen.
+  // The MoMo sheet returns true only after a confirmed success.
   Future<void> _processTopUp(double amount, String method) async {
-    if (!mounted) return;
-    if (Navigator.canPop(context)) Navigator.pop(context);
-
     if (!mounted) return;
     final success = await showBridgeMomoSheet(context, amount: amount);
 
@@ -1050,85 +768,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
         ),
       );
 
-  void _showFilterSheet() {
-    String tempFilter = _activeFilter;
-    showModalBottomSheet(
-      context: context,
-      useSafeArea: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setLocal) => Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SheetHandle(),
-              const SizedBox(height: 16),
-              Text('Filter transactions', style: AppTextStyles.heading3),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _filters.map((f) {
-                  final isSel = tempFilter == f;
-                  return Material(
-                    color:
-                        isSel ? AppColors.primary : AppColors.surfaceAlt,
-                    borderRadius: BorderRadius.circular(20),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () => setLocal(() => tempFilter = f),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: isSel
-                                  ? AppColors.primary
-                                  : AppColors.border),
-                        ),
-                        child: Text(f,
-                            style: AppTextStyles.labelMedium.copyWith(
-                              color: isSel
-                                  ? AppColors.background
-                                  : AppColors.textSecondary,
-                            )),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              PrimaryButton(
-                label: 'Apply',
-                onTap: () {
-                  setState(() => _activeFilter = tempFilter);
-                  Navigator.pop(ctx);
-                },
-              ),
-              const SizedBox(height: 8),
-              Center(
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() => _activeFilter = 'All');
-                    Navigator.pop(ctx);
-                  },
-                  child: Text('Clear filter',
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.textSecondary)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── FIX 3: correct refresh for StreamProviders — UNCHANGED ──
   Future<void> _refresh() async {
     await ref.read(walletProvider.notifier).refresh();
@@ -1161,7 +800,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen>
     ));
   }
 
-  // ── FIX 2: UI labels unchanged, values mapped in _toPaystackChannel — UNCHANGED ──
+  // ── FIX 2: Mobile Money networks offered for Bridge top-ups ──
   List<_PayMethod> _payMethods() => [
         _PayMethod(
           label: 'MTN Mobile Money',
@@ -1245,21 +884,13 @@ class TxItem {
   });
 }
 
-class _WalletStats {
-  final int tripCount;
-  final double totalSpent;
-  final double totalSaved;
-  const _WalletStats({
-    required this.tripCount,
-    required this.totalSpent,
-    required this.totalSaved,
-  });
-}
-
 class _TxMeta {
   final IconData icon;
-  final Color bg, fg;
-  const _TxMeta({required this.icon, required this.bg, required this.fg});
+  final CtsTone tone;
+  final String kind; // short category shown under the description
+  _TxMeta({required this.icon, required this.tone, required this.kind});
+  Color get bg => tone.background;
+  Color get fg => tone.foreground;
 }
 
 class _PayMethod {
@@ -1320,60 +951,19 @@ class _WeavePatternPainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-class _AddMoneyButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AddMoneyButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_rounded, color: AppColors.background, size: 15),
-                const SizedBox(width: 5),
-                Text('Add Money',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.background,
-                    )),
-              ],
-            ),
-          ),
-        ),
-      );
-}
-
 class _VisibilityToggle extends StatelessWidget {
   final bool visible;
   final VoidCallback onTap;
   const _VisibilityToggle({required this.visible, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Icon(
-              visible
-                  ? Icons.visibility_outlined
-                  : Icons.visibility_off_outlined,
-              color: AppColors.textOnDarkMuted,
-              size: 20,
-            ),
-          ),
+  Widget build(BuildContext context) => IconButton(
+        onPressed: onTap,
+        tooltip: visible ? 'Hide balance' : 'Show balance',
+        icon: Icon(
+          visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+          color: CtsTheme.onForestMuted,
+          size: 22,
         ),
       );
 }
@@ -1392,94 +982,18 @@ class _BalanceSkeleton extends StatelessWidget {
       );
 }
 
-class _ActionBtn extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _ActionBtn(
-      {required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-        child: Material(
-          color: AppColors.background,
-          borderRadius: BorderRadius.circular(14),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, color: AppColors.darkNavy, size: 18),
-                  const SizedBox(width: 8),
-                  Text(label,
-                      style: AppTextStyles.labelLarge.copyWith(
-                        color: AppColors.darkNavy,
-                        fontWeight: FontWeight.w700,
-                      )),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String value, label;
-  final Color color;
-  const _StatChip({
-    required this.icon,
-    required this.value,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-        child: Column(children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 15, color: color),
-          ),
-          const SizedBox(height: 8),
-          Text(value, style: AppTextStyles.heading4.copyWith(color: color)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: AppTextStyles.caption, textAlign: TextAlign.center),
-        ]),
-      );
-}
-
-class _StatsDiv extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-      width: 0.5,
-      height: 36,
-      color: AppColors.border,
-      margin: const EdgeInsets.symmetric(horizontal: 12));
-}
-
 class _StatusBadge extends StatelessWidget {
   final String status;
   const _StatusBadge({required this.status});
 
-  Color get _color {
+  CtsTone get _tone {
     final s = status.toLowerCase();
     if (s.contains('complete') || s.contains('success')) {
-      return AppColors.success;
+      return CtsTone.success;
     }
-    if (s.contains('fail') || s.contains('cancel')) return AppColors.error;
-    if (s.contains('pending')) return AppColors.warning;
-    return AppColors.warning;
+    if (s.contains('fail') || s.contains('cancel')) return CtsTone.error;
+    if (s.contains('refund')) return CtsTone.info;
+    return CtsTone.warning;
   }
 
   String get _label {
@@ -1488,19 +1002,7 @@ class _StatusBadge extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: _color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(_label,
-            style: AppTextStyles.caption.copyWith(
-              color: _color,
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-            )),
-      );
+  Widget build(BuildContext context) => CtsStatusPill(_label, tone: _tone);
 }
 
 class _SheetHandle extends StatelessWidget {
@@ -1530,12 +1032,257 @@ class _SecurityBadge extends StatelessWidget {
           children: [
             const Icon(Icons.lock_rounded, color: AppColors.success, size: 14),
             const SizedBox(width: 6),
-            Text('Secured by Bridge · MoMo payments only',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.success,
-                  fontWeight: FontWeight.w600,
-                )),
+            Flexible(
+              child: Text('Secured by Bridge · MoMo payments only',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.success,
+                    fontWeight: FontWeight.w600,
+                  )),
+            ),
           ],
         ),
       );
+}
+
+// "GHS 1,290.50" with the cedi figure dominant and the currency and pesewas
+// quieter, as on a bank card.
+class _BalanceAmount extends StatelessWidget {
+  final double amount;
+  final bool visible;
+  const _BalanceAmount({required this.amount, required this.visible});
+
+  @override
+  Widget build(BuildContext context) {
+    const big = TextStyle(
+      fontFamily: CtsTheme.fontFamily,
+      fontSize: 40,
+      height: 1.1,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -1.2,
+      color: Colors.white,
+      fontFeatures: [FontFeature.tabularFigures()],
+    );
+    final small = big.copyWith(
+        fontSize: 20, letterSpacing: -0.2, color: CtsTheme.onForestMuted);
+    if (!visible) {
+      return Semantics(
+        label: 'Balance hidden',
+        excludeSemantics: true,
+        child: Text.rich(TextSpan(children: [
+          TextSpan(text: 'GHS ', style: small),
+          TextSpan(text: '••••••', style: big.copyWith(letterSpacing: 2)),
+        ])),
+      );
+    }
+    final text = ctsMoney(amount);
+    final dot = text.lastIndexOf('.');
+    return Semantics(
+      label: 'GHS $text',
+      excludeSemantics: true,
+      child: Text.rich(TextSpan(children: [
+        TextSpan(text: 'GHS ', style: small),
+        TextSpan(text: text.substring(0, dot), style: big),
+        TextSpan(text: text.substring(dot), style: small),
+      ])),
+    );
+  }
+}
+
+// Available and on-hold amounts side by side (stacked with large text).
+class _BalanceSplit extends StatelessWidget {
+  final double available;
+  final double held;
+  final bool visible;
+  const _BalanceSplit(
+      {required this.available, required this.held, required this.visible});
+
+  Widget _figure(String label, double value, IconData icon) => Semantics(
+        label: visible ? '$label: GHS ${ctsMoney(value)}' : '$label: hidden',
+        excludeSemantics: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(icon, size: 14, color: CtsTheme.onForestMuted),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(label,
+                    style: CtsText.caption
+                        .copyWith(color: CtsTheme.onForestMuted)),
+              ),
+            ]),
+            const SizedBox(height: 4),
+            Text(visible ? 'GHS ${ctsMoney(value)}' : 'GHS ••••',
+                style:
+                    CtsText.price.copyWith(fontSize: 16, color: Colors.white)),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final a = _figure('Available', available, Icons.check_circle_rounded);
+    final h = _figure('On hold', held, Icons.lock_clock_rounded);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: ctsLargeText(context)
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [a, const SizedBox(height: 12), h],
+            )
+          : IntrinsicHeight(
+              child: Row(children: [
+                Expanded(child: a),
+                VerticalDivider(
+                    width: 24, color: Colors.white.withValues(alpha: 0.14)),
+                Expanded(child: h),
+              ]),
+            ),
+    );
+  }
+}
+
+// White card holding one day's transactions, separated by hairlines.
+class _LedgerCard extends StatelessWidget {
+  final List<Widget> children;
+  const _LedgerCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: CtsTheme.surface,
+          borderRadius: BorderRadius.circular(CtsTheme.radiusLg),
+          border: Border.all(color: CtsTheme.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0)
+                const Divider(
+                    height: 1, indent: 70, color: CtsTheme.borderLight),
+              children[i],
+            ],
+          ],
+        ),
+      );
+}
+
+// One ledger row. Amount sits right-aligned beside the description; with
+// large text it moves under it so neither is squeezed.
+class _TxRow extends StatelessWidget {
+  final IconData icon;
+  final CtsTone tone;
+  final String title;
+  final String subtitle;
+  final String amount;
+  final bool isCredit;
+  final TransactionStatus status;
+  final String semanticsLabel;
+  final VoidCallback onTap;
+
+  const _TxRow({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.subtitle,
+    required this.amount,
+    required this.isCredit,
+    required this.status,
+    required this.semanticsLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final large = ctsLargeText(context);
+    final failed = status == TransactionStatus.failed;
+    final amountText = Text(
+      '${isCredit ? '+' : '−'} GHS $amount',
+      textAlign: TextAlign.right,
+      style: CtsText.price.copyWith(
+        fontSize: 15.5,
+        color: failed
+            ? CtsTheme.textTertiary
+            : isCredit
+                ? CtsTheme.primary
+                : CtsTheme.textPrimary,
+        decoration: failed ? TextDecoration.lineThrough : null,
+      ),
+    );
+    final pill = status == TransactionStatus.completed
+        ? null
+        : _StatusBadge(status: status.toString());
+
+    final iconDisc = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(color: tone.background, shape: BoxShape.circle),
+      child: Icon(icon, size: 19, color: tone.foreground),
+    );
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            maxLines: large ? 3 : 1,
+            overflow: TextOverflow.ellipsis,
+            style: CtsText.cardTitle),
+        const SizedBox(height: 2),
+        Text(subtitle, style: CtsText.caption),
+      ],
+    );
+
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
+      excludeSemantics: true,
+      onTap: onTap,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: large
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          iconDisc,
+                          const SizedBox(width: 14),
+                          Expanded(child: text),
+                        ]),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [amountText, if (pill != null) pill],
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    iconDisc,
+                    const SizedBox(width: 14),
+                    Expanded(child: text),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        amountText,
+                        if (pill != null) ...[const SizedBox(height: 4), pill],
+                      ],
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }

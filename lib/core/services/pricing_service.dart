@@ -116,8 +116,53 @@ class PricingService {
         debugPrint('✅ PricingService: settings loaded from Firestore');
       }
     } catch (e) {
-      debugPrint('⚠️ PricingService: using defaults ($e)');
+      debugPrint(_settings.isEmpty
+          ? '⚠️ PricingService: settings unavailable, display uses defaults ($e)'
+          : '⚠️ PricingService: settings refresh failed, keeping loaded ones ($e)');
     }
+  }
+
+  /// Reads `settings/platform` from the server only — never the offline
+  /// cache or the built-in defaults — before money is held or an order is
+  /// created. True when the server's settings are now loaded; false when
+  /// the read failed (offline, denied) or the document is missing or empty.
+  /// On false the loaded settings are kept for display only.
+  Future<bool> fetchFromServer() async {
+    try {
+      final reader = debugServerReader ??
+          () async => (await FirebaseFirestore.instance
+                  .doc(_doc)
+                  .get(const GetOptions(source: Source.server)))
+              .data();
+      final data = await reader();
+      if (data == null || data.isEmpty) {
+        debugPrint('⚠️ PricingService: $_doc is missing or empty');
+        return false;
+      }
+      _settings = Map<String, dynamic>.from(data);
+      _lastFetched = DateTime.now();
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ PricingService: current prices unavailable ($e)');
+      return false;
+    }
+  }
+
+  /// Test hook: replaces the server read in [fetchFromServer] (null restores
+  /// it). Returns the document's data, null when it does not exist, or throws.
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> Function()? debugServerReader;
+
+  /// True once `settings/platform` has been read (from the server or the
+  /// offline cache). False means every price comes from the built-in
+  /// defaults, which may not match what the admin panel configured.
+  bool get hasLoadedSettings => _settings.isNotEmpty;
+
+  /// Test hook: replaces the cached settings (null clears them).
+  @visibleForTesting
+  void debugSetSettings(Map<String, dynamic>? settings) {
+    _settings = settings ?? {};
+    _lastFetched = settings == null ? null : DateTime.now();
   }
 
   // ── Generic getter with fallback ───────────────────────────────────────────
@@ -145,8 +190,50 @@ class PricingService {
     return obj;
   }
 
-  double _getDouble(List<String> path) =>
-      (_get(path) as num?)?.toDouble() ?? 0.0;
+  double _getDouble(List<String> path) => configAmount(_get(path)) ?? 0.0;
+
+  /// A configured amount as functions/gas_pricing.js reads it: a finite,
+  /// non-negative number or a numeric string ("50", "7.5"); null otherwise.
+  @visibleForTesting
+  static double? configAmount(Object? v) {
+    if (v is num) return v.isFinite && v >= 0 ? v.toDouble() : null;
+    if (v is String && RegExp(r'^\s*\d+(\.\d+)?\s*$').hasMatch(v)) {
+      return double.parse(v.trim());
+    }
+    return null;
+  }
+
+  /// The settings keys a legacy Gas price is made from.
+  static const gasPriceKeys = [
+    'refill3kg', 'refill6kg', 'refill12kg', 'refill14kg', 'refill19kg', 'refill45kg',
+    'full3kg', 'full6kg', 'full12kg', 'full14kg', 'full19kg', 'full45kg',
+    'baseFare', 'perKm', 'minDeliveryFee', 'roundTripFee', 'commercialRate',
+  ];
+
+  /// Why Gas cannot be priced from the loaded settings, or null. The server
+  /// (gas_pricing.js) refuses the same configurations, so the app does not
+  /// offer an order it would cancel: a present but malformed amount (text,
+  /// negative), a zero product price or commercial rate, a `gas` entry that
+  /// is not a map, or a platform fee outside 0–100. Missing keys use the
+  /// built-in prices on both sides.
+  String? get gasPricingProblem {
+    final gas = _settings['gas'];
+    if (gas != null && gas is! Map) return 'gas_config_invalid';
+    for (final k in gasPriceKeys) {
+      final raw = gas is Map ? gas[k] : null;
+      if (raw == null) continue;
+      final v = configAmount(raw);
+      if (v == null) return 'gas_config_invalid';
+      final mustBePositive = k.startsWith('refill') || k.startsWith('full') || k == 'commercialRate';
+      if (mustBePositive && v <= 0) return 'gas_config_invalid';
+    }
+    final fee = _settings['platformFeePercent'];
+    if (fee != null) {
+      final v = configAmount(fee);
+      if (v == null || v > 100) return 'platform_fee_invalid';
+    }
+    return null;
+  }
   bool _getBool(List<String> path) => (_get(path) as bool?) ?? true;
 
   // ── Platform ───────────────────────────────────────────────────────────────
@@ -243,7 +330,8 @@ class PricingService {
 
   double get gasCommercialRate {
     final r = _getDouble(['gas', 'commercialRate']);
-    return r > 0 ? r : 1.0; // never zero-out bulk pricing
+    // Never zero-out bulk pricing (gasPricingProblem blocks ordering then).
+    return r > 0 ? r : 1.0;
   }
 
   // ── Fare calculators ───────────────────────────────────────────────────────
@@ -269,6 +357,23 @@ class PricingService {
     String weightTier = 'small',
     bool isFragile = false,
     bool requiresHelpers = false,
+  }) =>
+      deliveryFareBreakdown(
+        distanceKm,
+        vehicleType: vehicleType,
+        weightTier: weightTier,
+        isFragile: isFragile,
+        requiresHelpers: requiresHelpers,
+      ).total;
+
+  /// The components behind [calculateDeliveryFare], so the UI can itemise
+  /// the fare and say when the vehicle's minimum fare applied.
+  DeliveryFareBreakdown deliveryFareBreakdown(
+    double distanceKm, {
+    required String vehicleType,
+    String weightTier = 'small',
+    bool isFragile = false,
+    bool requiresHelpers = false,
   }) {
     final base = _deliveryVehicleBase(vehicleType);
     final perKm = _deliveryVehiclePerKm(vehicleType);
@@ -281,7 +386,16 @@ class PricingService {
     final fragile = isFragile ? deliveryFragileSurcharge : 0.0;
     final helpers = requiresHelpers ? deliveryHelperSurcharge : 0.0;
     final fare = base + (perKm * distanceKm) + weightSurcharge + fragile + helpers;
-    return fare < minFare ? minFare : double.parse(fare.toStringAsFixed(2));
+    return DeliveryFareBreakdown(
+      baseFare: base,
+      distanceCharge: perKm * distanceKm,
+      weightSurcharge: weightSurcharge,
+      fragileSurcharge: fragile,
+      helperSurcharge: helpers,
+      minimumFare: minFare,
+      minimumApplied: fare < minFare,
+      total: fare < minFare ? minFare : double.parse(fare.toStringAsFixed(2)),
+    );
   }
 
   double calculateGasFare(String cylinderSize, int quantity) {
@@ -310,4 +424,31 @@ class PricingService {
     if (weightKg <= 19) return gasCylinder19kg;
     return gasCylinder45kg;
   }
+}
+
+/// One delivery fare, itemised. [total] is what is charged: the sum of the
+/// components (rounded), or [minimumFare] when the sum falls below it.
+class DeliveryFareBreakdown {
+  final double baseFare;
+  final double distanceCharge;
+  final double weightSurcharge;
+  final double fragileSurcharge;
+  final double helperSurcharge;
+  final double minimumFare;
+  final bool minimumApplied;
+  final double total;
+
+  const DeliveryFareBreakdown({
+    required this.baseFare,
+    required this.distanceCharge,
+    required this.weightSurcharge,
+    required this.fragileSurcharge,
+    required this.helperSurcharge,
+    required this.minimumFare,
+    required this.minimumApplied,
+    required this.total,
+  });
+
+  /// Base fare plus the per-km charge.
+  double get distanceFare => baseFare + distanceCharge;
 }

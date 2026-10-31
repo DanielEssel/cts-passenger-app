@@ -20,8 +20,7 @@ class ConfirmRideBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (state.selectedRide == null) return const SizedBox.shrink();
-
+    final ride = state.selectedRide;
     return ScaleTransition(
       scale: animation,
       child: Container(
@@ -36,13 +35,19 @@ class ConfirmRideBar extends StatelessWidget {
           border: Border(top: BorderSide(color: CtsTheme.border)),
         ),
         // While a booking is in flight the button shows a spinner and
-        // ignores taps (the screen also guards on state.isLoading).
-        child: CtsPrimaryButton(
-          label: 'Confirm ${state.selectedRide!.name}',
-          trailingText: formatGhs(state.calculatedFare),
-          loading: state.isLoading,
-          onPressed: onConfirm,
-        ),
+        // ignores taps (the screen also guards on state.isLoading). With no
+        // vehicle chosen yet it stays visible but disabled and says why.
+        child: ride == null
+            ? const CtsPrimaryButton(
+                label: 'Choose a ride to continue',
+                onPressed: null,
+              )
+            : CtsPrimaryButton(
+                label: 'Confirm ${ride.name}',
+                trailingText: formatGhs(state.calculatedFare),
+                loading: state.isLoading,
+                onPressed: onConfirm,
+              ),
       ),
     );
   }

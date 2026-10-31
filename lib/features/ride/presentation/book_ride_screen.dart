@@ -18,6 +18,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/cts_theme.dart';
 import '../../bookings/service_request_manager.dart';
 import '../constants/ride_constants.dart';
+import '../models/book_ride_args.dart';
 import '../domain/ride_fare_estimate.dart';
 import '../providers/ride_request_provider.dart';
 import '../providers/wallet_provider.dart';
@@ -62,43 +63,108 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
       curve: Curves.easeOutBack,
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Route args from Home (service / pickup / destinationAddress).
-      final args =
-          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    // The confirm bar grows in once a destination is set. Listening from the
+    // start (and firing now) also covers a destination prefilled from the
+    // route arguments: registered after it, the listener never saw a change
+    // and the bar stayed at scale 0.
+    ref.listenManual(
+      rideRequestProvider.select((s) => s.isDestinationSet),
+      (_, isSet) =>
+          isSet ? _fabController.forward() : _fabController.reverse(),
+      fireImmediately: true,
+    );
 
-      // Fresh booking session.
-      ref.read(rideRequestProvider.notifier).reset();
-      await PricingService.instance.fetch(force: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prepareBooking());
+  }
+
+  // Destination search opens by itself at most once per screen.
+  bool _searchOpenedOnEntry = false;
+
+  /// A fresh booking prefilled from the route arguments (BookRideArgs). It
+  /// never books: the passenger still reviews and confirms.
+  Future<void> _prepareBooking() async {
+    final args =
+        BookRideArgs.fromRoute(ModalRoute.of(context)?.settings.arguments);
+    final notifier = ref.read(rideRequestProvider.notifier);
+
+    // Fresh booking session.
+    notifier.reset();
+    if (args.service != null) notifier.preselectService(args.service!);
+    await PricingService.instance.fetch(force: true);
+    if (!mounted) return;
+
+    await _preparePickup(args);
+    if (!mounted) return;
+    await _prepareDestination(args);
+    if (!mounted) return;
+
+    // Home's search bar and vehicle tiles go straight to destination entry,
+    // unless another screen has been opened on top meanwhile.
+    if (args.openSearch &&
+        !_searchOpenedOnEntry &&
+        !ref.read(rideRequestProvider).isDestinationSet &&
+        (ModalRoute.of(context)?.isCurrent ?? false)) {
+      _searchOpenedOnEntry = true;
+      await _openDestinationSearch();
+    }
+  }
+
+  // ── Pickup: the trip's original pickup, else Home's fix, else GPS ────────
+  Future<void> _preparePickup(BookRideArgs args) async {
+    if (args.pickupLocation != null) {
+      final p = args.pickupLocation!;
+      ref.read(rideRequestProvider.notifier).setOrigin(
+            args.pickupAddress ?? 'Pickup',
+            GeoPoint(p.latitude, p.longitude),
+          );
+      return;
+    }
+    if (args.pickupAddress != null) {
+      final found = await _lookUpAddress(args.pickupAddress!);
       if (!mounted) return;
-
-      // Pickup: use the one Home already resolved; only re-acquire if absent.
-      if (args != null && args['pickup'] is LatLng) {
-        await _applyPickupFromArgs(args['pickup'] as LatLng);
-      } else {
-        await _initUserLocation();
+      if (found != null) {
+        ref.read(rideRequestProvider.notifier).setOrigin(args.pickupAddress!, found);
+        return;
       }
-      if (!mounted) return;
+      // Never a silent substitute: say the current location is used instead.
+      _showErrorSnack("We couldn't find the original pickup. Using your "
+          'current location — check it before you confirm.');
+    }
+    if (args.currentLocation != null) {
+      await _applyPickupFromArgs(args.currentLocation!);
+    } else {
+      await _initUserLocation();
+    }
+  }
 
-      // Destination: a saved place / rebook passes an address → geocode it so
-      // the options list appears immediately (skips the empty state).
-      final destAddress = args?['destinationAddress'] as String?;
-      if (destAddress != null && destAddress.trim().isNotEmpty) {
-        await _applyDestinationFromArgs(destAddress);
-      }
-      if (!mounted) return;
+  // ── Destination: saved coordinates, else the address looked up ──────────
+  Future<void> _prepareDestination(BookRideArgs args) async {
+    if (args.destinationLocation != null) {
+      final d = args.destinationLocation!;
+      await _setDestination(
+          args.destinationAddress ?? 'Destination', GeoPoint(d.latitude, d.longitude));
+      return;
+    }
+    final address = args.destinationAddress;
+    if (address == null) return;
+    final found = await _lookUpAddress(address);
+    if (!mounted) return;
+    if (found == null) {
+      _showErrorSnack("We couldn't find \"$address\". Search for your "
+          'destination instead.');
+      return;
+    }
+    await _setDestination(address, found);
+  }
 
-      // // Service hint from Home (rebook / launcher). Pre-selecting the matching
-      // // RideOption needs the provider's select API — wire once confirmed:
-      //   final svc = args?['service'] as ServiceType?;
-      //   if (svc != null) ref.read(rideRequestProvider.notifier).preselectService(svc);
-
-      ref.listenManual(
-        rideRequestProvider.select((s) => s.isDestinationSet),
-        (_, isSet) =>
-            isSet ? _fabController.forward() : _fabController.reverse(),
-      );
-    });
+  Future<GeoPoint?> _lookUpAddress(String address) async {
+    try {
+      final locs = await locationFromAddress(address);
+      if (locs.isEmpty) return null;
+      return GeoPoint(locs.first.latitude, locs.first.longitude);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Pickup straight from Home (no second GPS prompt) ──────────────────────
@@ -115,34 +181,6 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
           address,
           GeoPoint(pickup.latitude, pickup.longitude),
         );
-  }
-
-  // ── Destination from a passed address (saved place / rebook) ──────────────
-  Future<void> _applyDestinationFromArgs(String destAddress) async {
-    try {
-      final locs = await locationFromAddress(destAddress);
-      if (locs.isEmpty || !mounted) return;
-      final loc = locs.first;
-      final origin = ref.read(rideRequestProvider).pickupLocation;
-      final km = origin == null
-          ? RideConstants.defaultDistanceKm
-          : Geolocator.distanceBetween(
-                origin.latitude,
-                origin.longitude,
-                loc.latitude,
-                loc.longitude,
-              ) /
-              1000.0;
-      final mins = (km / 30.0 * 60).ceil(); // rough ETA; refined by options
-      ref.read(rideRequestProvider.notifier).setDestination(
-            destAddress,
-            GeoPoint(loc.latitude, loc.longitude),
-            km,
-            mins,
-          );
-    } catch (_) {
-      // Geocode failed — leave destination empty; user searches manually.
-    }
   }
 
   // GPS state for the pickup row (only used when Home had no real fix).
@@ -331,12 +369,27 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
 
     if (!mounted || result is! Map<String, dynamic>) return;
 
-    final destLoc = result['location'] as GeoPoint;
+    await _setDestination(
+      result['address'] as String,
+      result['location'] as GeoPoint,
+      hintKm: (result['distance'] as double?) ?? 0,
+      hintMins: (result['duration'] as int?) ?? 0,
+    );
+  }
+
+  /// Sets the destination with the road distance from the pickup (straight
+  /// line if Directions fails), for search results and prefilled places alike.
+  Future<void> _setDestination(
+    String address,
+    GeoPoint destLoc, {
+    double hintKm = 0,
+    int hintMins = 0,
+  }) async {
     final origin = ref.read(rideRequestProvider).pickupLocation;
 
     // Compute REAL road distance via Directions (like delivery A5).
-    double km = (result['distance'] as double?) ?? 0;
-    int mins = (result['duration'] as int?) ?? 0;
+    double km = hintKm;
+    int mins = hintMins;
 
     if (origin != null) {
       try {
@@ -367,7 +420,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
 
     if (!mounted) return;
     ref.read(rideRequestProvider.notifier).setDestination(
-          result['address'] as String,
+          address,
           destLoc,
           km,
           mins,
@@ -395,6 +448,26 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
 
     HapticFeedback.heavyImpact();
     ref.read(rideRequestProvider.notifier).setLoading(true);
+
+    // ✅ Never hold or book a fare built from cached or built-in prices:
+    // read the current fares first, and if they differ from the fare shown,
+    // let the passenger review the new one before confirming again.
+    final shownFare = state.calculatedFare;
+    final faresLoaded = await PricingService.instance.fetchFromServer();
+    if (!mounted) return;
+    if (!faresLoaded) {
+      ref.read(rideRequestProvider.notifier).setLoading(false);
+      _showErrorSnack("Couldn't confirm current fares. Check your connection "
+          'and try again.');
+      return;
+    }
+    if (ref.read(rideRequestProvider).calculatedFare != shownFare) {
+      ref.read(rideRequestProvider.notifier).setLoading(false);
+      setState(() {});
+      _showErrorSnack('Fares were updated. Please review the new fare and '
+          'confirm again.');
+      return;
+    }
 
     String escrowId = '';
     // ✅ Only wallet payments hold escrow. Cash is collected by the driver.
@@ -424,7 +497,7 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
                     style: TextStyle(fontWeight: FontWeight.w800)),
                 content: Text(
                   shortfall != null
-                      ? 'You need GH\u20b5${shortfall.toStringAsFixed(2)} more. Please top up your wallet.'
+                      ? 'You need GHS ${shortfall.toStringAsFixed(2)} more. Please top up your wallet.'
                       : escrowResult.error ?? 'Payment hold failed.',
                 ),
                 actions: [
@@ -439,7 +512,8 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
                           .pushNamed('/wallet');
                     },
                     style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF16A34A)),
+                        backgroundColor: CtsTheme.vivid,
+                        foregroundColor: CtsTheme.onVivid),
                     child: const Text('Top Up Wallet'),
                   ),
                 ],

@@ -171,7 +171,7 @@ describe("recoverStaleEscrows (emulator)", () => {
   test("ESC-13 a failed gas order (no cancel trigger for 'failed') is recovered", async () => {
     await seedWallet({ balance: 0, held: 100 });
     await seedEscrow("e-failed", { referenceId: "g-failed" });
-    await h.seed("gas_orders/g-failed", { status: "failed", escrowId: "e-failed" });
+    await h.seed("gas_orders/g-failed", { status: "failed", escrowId: "e-failed", passengerId: PASSENGER });
 
     await escrow.recoverStaleEscrows();
 
@@ -229,7 +229,7 @@ describe("cancellation and completion settle through the escrow", () => {
     // Held 3 h ago (over the old cut-off) and still in progress.
     await seedEscrow("e-pr", { referenceId: "g-pr" });
     const active = {
-      status: "returning", refillType: "pickupAndReturn", escrowId: "e-pr",
+      status: "returning", refillType: "pickupAndReturn", cylinderSize: "kg3", quantity: 1, escrowId: "e-pr",
       passengerId: PASSENGER, driverId: DRIVER, totalPrice: 100,
       paymentMethod: "wallet", deliveryOtp: "1234",
     };
@@ -279,11 +279,12 @@ describe("repeated and concurrent settlement", () => {
   test("ESC-31 a refund racing a release: exactly one wins", async () => {
     await seedWallet({ balance: 0, held: 100 });
     await h.seed(`drivers/${DRIVER}`, { walletBalance: 0 });
-    await seedEscrow("e-split", { heldAt: ago(10 * 60 * 1000) });
+    await seedEscrow("e-split", { heldAt: ago(10 * 60 * 1000), referenceId: "order-split" });
 
     const [refunded, released] = await Promise.all([
       escrow.refundEscrow("e-split", "cancel"),
-      escrow.releaseEscrow("e-split", DRIVER, "done"),
+      escrow.releaseEscrow("e-split", DRIVER, "done",
+        { userId: PASSENGER, referenceId: "order-split", referenceType: "gas_order" }),
     ]);
 
     assert.equal(Number(refunded) + Number(released), 1);
@@ -417,5 +418,19 @@ describe("nightly reconciliation", () => {
     assert.equal(report.stuckEscrows, 0);
     assert.equal(report.longHeldEscrows, 1);
     assert.equal(await h.count("admin_alerts", "type", "reconciliation_anomaly"), 1);
+  });
+
+  test("REC-06 a missing composite index fails reconciliation before it writes anything", async () => {
+    // Production lacks both indexes the report needs; each alone must stop it.
+    await seedMix();
+    for (const index of [{ collection: "ledger", field: "createdAt" },
+      { collection: "escrows", field: "heldAt" }]) {
+      const intercepted = await h.withMissingIndex(index,
+        () => assert.rejects(escrow.runDailyReconciliation(), /FAILED_PRECONDITION/));
+      assert.ok(intercepted >= 1, `${index.collection} query failed`);
+    }
+    assert.equal((await h.db().collection("reconciliation").get()).size, 0);
+    assert.equal((await h.db().collection("admin_alerts").get()).size, 0);
+    assert.deepEqual(await wallet(), { balance: 50, heldBalance: 400 });
   });
 });

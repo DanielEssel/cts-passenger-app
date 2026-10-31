@@ -14,10 +14,12 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_booking.dart';
 import '../../../core/widgets/cts_ui.dart';
 import '../../ride/models/place_result.dart';
 import '../../ride/repositories/google_places_repository.dart';
 import '../domain/delivery_form_validator.dart';
+import '../domain/delivery_vehicle_policy.dart';
 import 'delivery_vehicle_screen.dart';
 import 'widgets/extra_options.dart';
 import 'widgets/receiver_section.dart';
@@ -75,33 +77,34 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     (icon: Icons.construction_rounded, label: 'Materials'),
   ];
 
-  static const _weightTiers = [
+  // Vehicles per tier: delivery_vehicle_policy.dart (enforced by the backend).
+  static final _weightTiers = [
     (
       label: 'Small',
       range: '0–5 kg',
       example: 'Documents, food, small parcels',
-      vehicles: ['Okada'],
+      vehicles: deliveryTierVehicles['Small']!,
       icon: Icons.two_wheeler_rounded,
     ),
     (
       label: 'Medium',
       range: '5–20 kg',
       example: 'Groceries, boxes, electronics',
-      vehicles: ['Okada', 'Aboboya'],
+      vehicles: deliveryTierVehicles['Medium']!,
       icon: Icons.inventory_2_rounded,
     ),
     (
       label: 'Large',
       range: '20–100 kg',
       example: 'Market goods, appliances',
-      vehicles: ['Aboboya'],
+      vehicles: deliveryTierVehicles['Large']!,
       icon: Icons.shopping_cart_rounded,
     ),
     (
       label: 'Bulk',
       range: '100 kg+',
       example: 'Furniture, construction materials',
-      vehicles: ['Mini Truck'],
+      vehicles: deliveryTierVehicles['Bulk']!,
       icon: Icons.local_shipping_rounded,
     ),
   ];
@@ -337,93 +340,135 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
-  // Layout: light service header, one scrolling form grouped as the journey
-  // reads (route → parcel → weight → receiver → extras → photo → note), and a
-  // fixed bottom bar with the next step. The bar sits above the keyboard.
+  // Step 1 of 2. Forest header, then numbered sections in the order the
+  // journey reads (route → parcel → receiver → optional extras), and a
+  // pinned bar with the next step. The bar is part of the page column, so
+  // it rises above the keyboard and never covers a field or its error.
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: ctsBrandOverlay,
       child: GestureDetector(
         onTap: () {
           FocusScope.of(context).unfocus();
           setState(() => _showSuggestions = false);
         },
         child: Scaffold(
-          backgroundColor: CtsTheme.background,
+          backgroundColor: CtsTheme.canvas,
           body: Column(
             children: [
-              const CtsServiceHeader(
-                title: 'Send a parcel',
-                subtitle: 'Picked up and delivered across town',
-              ),
+              const CtsStatusBarStrip(),
               Expanded(
                 child: ListView(
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding:
-                      const EdgeInsets.fromLTRB(ctsGutter, 6, ctsGutter, 24),
+                  padding: const EdgeInsets.only(bottom: 24),
                   children: [
-                    _buildRouteCard(),
-                    _gap,
-                    const CtsSectionHeader('What are you sending?'),
-                    _buildParcelTypes(),
-                    _gap,
-                    const CtsSectionHeader('How heavy is it?',
-                        caption: 'This decides which vehicles can carry it'),
-                    _buildWeightTiers(),
-                    _gap,
-                    const CtsSectionHeader('Receiver'),
-                    ReceiverSection(
-                      phoneController: _receiverPhoneCtrl,
-                      nameController: _receiverNameCtrl,
-                      phoneError: _phoneError,
-                      nameError: _nameError,
-                      onPhoneChanged: (v) => setState(() {
-                        _phoneError = v.trim().isEmpty
-                            ? null
-                            : DeliveryFormValidator.receiverPhone(v);
-                      }),
-                      onNameChanged: (v) => setState(() {
-                        _nameError = DeliveryFormValidator.receiverName(v);
-                      }),
+                    const CtsBrandHeader(
+                      eyebrow: 'Step 1 of 2 · Route & parcel',
+                      title: 'Send a parcel',
+                      subtitle: 'Picked up from you and delivered across '
+                          'town, tracked all the way.',
+                      icon: Icons.inventory_2_rounded,
                     ),
+                    const SizedBox(height: 18),
+                    _padded(CtsFormSection(
+                      number: '1',
+                      title: 'Route',
+                      caption: 'Where we collect the parcel and where it goes',
+                      child: _buildRouteCard(),
+                    )),
                     _gap,
-                    const CtsSectionHeader('Extras'),
-                    ExtraOptions(
-                      isFragile: _isFragile,
-                      requiresHelpers: _requiresHelpers,
-                      onFragileChanged: (v) => setState(() => _isFragile = v),
-                      onHelpersChanged: (v) =>
-                          setState(() => _requiresHelpers = v),
-                      selectedTierVehicles: _selectedWeight >= 0
-                          ? _weightTiers[_selectedWeight].vehicles
-                          : null,
-                    ),
+                    _padded(CtsFormSection(
+                      number: '2',
+                      title: 'Parcel',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const CtsSubheading('What are you sending?'),
+                          _buildParcelTypes(),
+                          const SizedBox(height: 18),
+                          const CtsSubheading('How heavy is it?',
+                              caption:
+                                  'This decides which vehicles can carry it'),
+                          _buildWeightTiers(),
+                        ],
+                      ),
+                    )),
                     _gap,
-                    const CtsSectionHeader('Photo of items',
-                        caption:
-                            'Optional · helps the rider confirm the items'),
-                    _buildPhotoUpload(),
+                    _padded(CtsFormSection(
+                      number: '3',
+                      title: 'Receiver',
+                      caption: 'Who the driver hands the parcel to',
+                      child: ReceiverSection(
+                        phoneController: _receiverPhoneCtrl,
+                        nameController: _receiverNameCtrl,
+                        phoneError: _phoneError,
+                        nameError: _nameError,
+                        onPhoneChanged: (v) => setState(() {
+                          _phoneError = v.trim().isEmpty
+                              ? null
+                              : DeliveryFormValidator.receiverPhone(v);
+                        }),
+                        onNameChanged: (v) => setState(() {
+                          _nameError = DeliveryFormValidator.receiverName(v);
+                        }),
+                      ),
+                    )),
                     _gap,
-                    CtsTextField(
-                      controller: _noteCtrl,
-                      label: 'Note for the rider',
+                    _padded(CtsFormSection(
+                      title: 'Extras & notes',
                       optional: true,
-                      hint: 'Gate code, landmark, handling instructions…',
-                      icon: Icons.notes_rounded,
-                      maxLines: 3,
-                      maxLength: DeliveryFormValidator.notesMaxLength,
-                      textCapitalization: TextCapitalization.sentences,
-                      errorText: DeliveryFormValidator.notes(_noteCtrl.text),
-                      helperText:
-                          '${_noteCtrl.text.length}/${DeliveryFormValidator.notesMaxLength}',
-                      onChanged: (_) => setState(() {}),
-                    ),
+                      caption: 'Handling, a photo and instructions for the '
+                          'driver',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ExtraOptions(
+                            isFragile: _isFragile,
+                            requiresHelpers: _requiresHelpers,
+                            onFragileChanged: (v) =>
+                                setState(() => _isFragile = v),
+                            onHelpersChanged: (v) =>
+                                setState(() => _requiresHelpers = v),
+                            selectedTierVehicles: _selectedWeight >= 0
+                                ? _weightTiers[_selectedWeight].vehicles
+                                : null,
+                          ),
+                          const SizedBox(height: 18),
+                          const CtsSubheading('Photo of items',
+                              caption: 'Helps the driver confirm the items'),
+                          _buildPhotoUpload(),
+                          const SizedBox(height: 18),
+                          CtsTextField(
+                            controller: _noteCtrl,
+                            label: 'Note for the driver',
+                            optional: true,
+                            hint: 'Gate code, landmark, handling instructions…',
+                            icon: Icons.notes_rounded,
+                            maxLines: 3,
+                            maxLength: DeliveryFormValidator.notesMaxLength,
+                            textCapitalization: TextCapitalization.sentences,
+                            errorText:
+                                DeliveryFormValidator.notes(_noteCtrl.text),
+                            helperText:
+                                '${_noteCtrl.text.length}/${DeliveryFormValidator.notesMaxLength}',
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ],
+                      ),
+                    )),
                   ],
                 ),
               ),
-              _buildBottomBar(),
+              CtsBookingBar(
+                hint: _canProceed ? null : _validationHint,
+                action: CtsPrimaryButton(
+                  label: 'Choose vehicle & see price',
+                  icon: Icons.arrow_forward_rounded,
+                  onPressed: _canProceed ? _goToVehicles : null,
+                ),
+              ),
             ],
           ),
         ),
@@ -431,56 +476,11 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
     );
   }
 
-  static const Widget _gap = SizedBox(height: 22);
+  static const Widget _gap = SizedBox(height: 16);
 
-  // ── Bottom bar: what's missing + next step ────────────────────────────────
-  Widget _buildBottomBar() => Container(
-        decoration: const BoxDecoration(
-          color: CtsTheme.surface,
-          border: Border(top: BorderSide(color: CtsTheme.border)),
-        ),
-        child: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.only(bottom: 12),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(ctsGutter, 12, ctsGutter, 0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!_canProceed) ...[
-                  Semantics(
-                    liveRegion: true,
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline_rounded,
-                            size: 16, color: CtsTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _validationHint,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12.5,
-                              color: CtsTheme.textSecondary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                CtsPrimaryButton(
-                  label: 'See vehicles & prices',
-                  icon: Icons.local_shipping_rounded,
-                  onPressed: _canProceed ? _goToVehicles : null,
-                ),
-              ],
-            ),
-          ),
-        ),
+  static Widget _padded(Widget child) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+        child: child,
       );
 
   // ── Route card: pickup → drop-off ─────────────────────────────────────────
@@ -498,9 +498,9 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: CtsTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: CtsTheme.border),
+        color: CtsTheme.mint,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CtsTheme.mintBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -530,9 +530,9 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                         children: [
                           const Text('Pickup · your current location',
                               style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: CtsTheme.textSecondary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: CtsTheme.forest,
                               )),
                           const SizedBox(height: 2),
                           Text(
@@ -541,7 +541,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontFamily: 'Inter',
-                              fontSize: 14.5,
+                              fontSize: 15.5,
                               fontWeight: _pickupAddress != null
                                   ? FontWeight.w700
                                   : FontWeight.w500,
@@ -573,7 +573,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           ),
           const Padding(
             padding: EdgeInsets.only(left: 38),
-            child: Divider(height: 1, color: CtsTheme.border),
+            child: Divider(height: 1, color: CtsTheme.mintBorder),
           ),
 
           // Drop-off — Places search
@@ -593,9 +593,9 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                     children: [
                       const Text('Drop-off',
                           style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: CtsTheme.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: CtsTheme.forest,
                           )),
                       TextField(
                         controller: _dropoffCtrl,
@@ -603,14 +603,14 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(
                           fontFamily: 'Inter',
-                          fontSize: 14.5,
+                          fontSize: 15.5,
                           fontWeight: FontWeight.w700,
                           color: CtsTheme.textPrimary,
                         ),
                         decoration: const InputDecoration(
                           hintText: 'Search a street, landmark or area',
                           hintStyle: TextStyle(
-                            fontSize: 14.5,
+                            fontSize: 15,
                             fontWeight: FontWeight.w500,
                             color: CtsTheme.textTertiary,
                           ),
@@ -682,7 +682,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
           // Suggestions from the Places search
           if (_showSuggestions && _suggestions.isNotEmpty) ...[
-            const Divider(height: 1, color: CtsTheme.border),
+            const Divider(height: 1, color: CtsTheme.mintBorder),
             for (final p in _suggestions.take(5))
               InkWell(
                 onTap: () => _selectDropoff(p),
@@ -696,11 +696,10 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                           width: 32,
                           height: 32,
                           decoration: BoxDecoration(
-                            color: CtsTheme.surfaceAlt,
+                            color: CtsTheme.surface,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(p.icon,
-                              size: 16, color: CtsTheme.textSecondary),
+                          child: Icon(p.icon, size: 16, color: CtsTheme.forest),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -711,7 +710,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    fontSize: 13.5,
+                                    fontSize: 14.5,
                                     fontWeight: FontWeight.w700,
                                     color: CtsTheme.textPrimary,
                                   )),
@@ -719,7 +718,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     color: CtsTheme.textSecondary,
                                   )),
                             ],
@@ -732,7 +731,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
               ),
           ],
           if (noMatches) ...[
-            const Divider(height: 1, color: CtsTheme.border),
+            const Divider(height: 1, color: CtsTheme.mintBorder),
             const Padding(
               padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: Row(
@@ -839,13 +838,13 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                 const SizedBox(height: 2),
                 Text(t.example,
                     style: const TextStyle(
-                        fontSize: 12, color: CtsTheme.textSecondary)),
+                        fontSize: 13, color: CtsTheme.textSecondary)),
                 const SizedBox(height: 2),
                 Text('Vehicles: ${t.vehicles.join(', ')}',
                     style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: CtsTheme.textTertiary)),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: CtsTheme.forest)),
               ],
             ),
           ),

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../../core/routes/deep_link.dart';
 import 'push_token_cleanup.dart';
 import 'push_token_store.dart';
 
@@ -99,12 +100,9 @@ class NotificationService {
           requestSoundPermission: true,
         ),
       ),
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        final route = response.payload;
-        if (route != null && route.isNotEmpty) {
-          navigatorKey.currentState?.pushNamed(route);
-        }
-      },
+      // Foreground taps route like background and launch taps.
+      onDidReceiveNotificationResponse: (NotificationResponse response) =>
+          _navigate(navigatorKey, response.payload),
     );
     final android = _local.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
@@ -161,26 +159,12 @@ class NotificationService {
   }
 
   void _navigate(GlobalKey<NavigatorState> nav, String? route) {
-    if (route == null || route.isEmpty) return;
-
     // Notification payloads carry deep links like "/delivery-tracking?deliveryId=abc".
     // The route generator matches on PATH only and reads ids from `arguments`, so
     // split the query off and pass its params as arguments.
-    final uri  = Uri.parse(route);
-    final path = uri.path.isEmpty ? route : uri.path;
-    final qp   = uri.queryParameters;
-
-    final args = <String, dynamic>{
-      if (qp['deliveryId'] != null) 'deliveryId': qp['deliveryId'],
-      if (qp['rideId']     != null) 'rideId':     qp['rideId'],
-      if (qp['orderId']    != null) 'orderId':    qp['orderId'],
-      if (qp['tripId']     != null) 'tripId':     qp['tripId'],
-    };
-
-    nav.currentState?.pushNamed(
-      path,
-      arguments: args.isEmpty ? null : args,
-    );
+    final link = DeepLink.parse(route);
+    if (link == null) return;
+    nav.currentState?.pushNamed(link.path, arguments: link.arguments);
   }
 
   Future<void> _saveToken() async {

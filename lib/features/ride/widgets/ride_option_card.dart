@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_text_styles.dart';
 import '../../../core/theme/cts_theme.dart';
 import '../../home/widgets/service_tile.dart';
 import '../domain/ride_availability.dart';
@@ -125,28 +124,26 @@ class RideOptionCard extends StatelessWidget {
             option.badge.toUpperCase(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.overline.copyWith(
+            style: CtsText.overline.copyWith(
               color: isSelected ? CtsTheme.primaryDeep : CtsTheme.textSecondary,
-              fontSize: 9.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
+              fontSize: 11.5,
             ),
           ),
         Text(option.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.labelLarge
-                .copyWith(fontWeight: FontWeight.w700)),
+            style: CtsText.cardTitle.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
         Text(option.description,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.caption),
+            style: CtsText.bodySmall.copyWith(fontSize: 13)),
         const SizedBox(height: 4),
         Row(
           children: [
             Container(
-              width: 6, height: 6,
+              margin: const EdgeInsets.only(top: 1),
+              width: 7, height: 7,
               decoration: BoxDecoration(
                 color:  etaColor,
                 shape:  BoxShape.circle,
@@ -156,11 +153,12 @@ class RideOptionCard extends StatelessWidget {
             Flexible(
               child: Text(
                 etaText,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.caption.copyWith(
+                style: CtsText.caption.copyWith(
+                  fontSize:   12.5,
                   color:      etaColor,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -180,18 +178,14 @@ class RideOptionCard extends StatelessWidget {
               fit: BoxFit.scaleDown,
               child: Text(
                 formatGhs(calculatedPrice),
-                style: AppTextStyles.amountSmall.copyWith(
-                  fontSize:   17,
-                  fontWeight: FontWeight.w800,
-                  color:      AppColors.textPrimary,
-                ),
+                style: CtsText.price.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
             const SizedBox(height: 2),
             Text('Estimate · ${option.duration}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.caption),
+                style: CtsText.caption),
           ],
         ),
       );
@@ -204,7 +198,7 @@ class RideOptionCard extends StatelessWidget {
             children: [
               Divider(
                   height: 1,
-                  color: AppColors.primary.withValues(alpha: 0.15)),
+                  color: CtsTheme.mintBorder),
               const SizedBox(height: 10),
               Wrap(
                 spacing:    8,
@@ -212,17 +206,16 @@ class RideOptionCard extends StatelessWidget {
                 children: option.perks
                     .map((perk) => Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                              horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: AppColors.primary
-                                .withValues(alpha: 0.10),
+                            color: CtsTheme.surface,
                             borderRadius: BorderRadius.circular(99),
+                            border: Border.all(color: CtsTheme.mintBorder),
                           ),
                           child: Text(perk,
-                              style: AppTextStyles.overline.copyWith(
-                                color:      AppColors.primary,
-                                fontWeight: FontWeight.w700,
-                                fontSize:   11,
+                              style: CtsText.caption.copyWith(
+                                color:      CtsTheme.primaryDeep,
+                                fontWeight: FontWeight.w600,
                               )),
                         ))
                     .toList(),

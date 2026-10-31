@@ -2,8 +2,12 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:cts_transport_app/core/widgets/cts_ui.dart';
+import 'package:cts_transport_app/core/theme/cts_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/routes/app_routes.dart';
+import '../../../core/routes/deep_link.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../models/notification_item.dart';
 import '../providers/notification_providers.dart';
@@ -20,7 +24,11 @@ class NotificationsScreen extends ConsumerWidget {
       appBar: _buildAppBar(context, ref, notifAsync.value ?? []),
       body: notifAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error:   (e, _) => _ErrorState(message: e.toString()),
+        error:   (e, _) {
+          debugPrint('Notifications load error: $e');
+          return const _ErrorState(
+              message: 'Check your connection and try again.');
+        },
         data:    (items) => items.isEmpty
             ? const _EmptyState()
             : _NotifList(items: items),
@@ -35,28 +43,44 @@ class NotificationsScreen extends ConsumerWidget {
   ) {
     final unread = items.where((n) => !n.isRead).length;
 
+    final canPop = Navigator.of(context).canPop();
     return AppBar(
       backgroundColor:  AppColors.surface,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
+      // Same back control as the other account screens.
+      automaticallyImplyLeading: false,
+      leadingWidth: canPop ? 64 : null,
+      leading: canPop
+          ? const Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Center(child: CtsBackButton()),
+            )
+          : null,
       title: Row(
         children: [
-          Text('Notifications', style: AppTextStyles.heading4),
+          const Flexible(
+            child: Text('Notifications',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: CtsText.title3),
+          ),
           if (unread > 0) ...[
             const SizedBox(width: 10),
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: AppColors.primary,
+                color: CtsTheme.vivid,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 '$unread',
-                style: AppTextStyles.captionSmall.copyWith(
-                  color:      Colors.white,
-                  fontWeight: FontWeight.w700,
+                semanticsLabel: '$unread unread',
+                style: CtsText.caption.copyWith(
+                  color:      CtsTheme.onVivid,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ),
@@ -71,18 +95,12 @@ class NotificationsScreen extends ConsumerWidget {
               if (uid == null) return;
               await markAllNotificationsRead(uid, items);
             },
-            child: Text(
-              'Mark all read',
-              style: AppTextStyles.caption.copyWith(
-                color:      AppColors.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: const Text('Mark all read'),
           ),
       ],
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(0.5),
-        child: Divider(height: 0.5, thickness: 0.5),
+        child: Divider(height: 0.5, thickness: 0.5, color: CtsTheme.border),
       ),
     );
   }
@@ -271,52 +289,29 @@ class _NotifTile extends ConsumerWidget {
     String route,
     NotificationItem item,
   ) {
-    // Parse route and navigate with correct arguments
-    if (route.contains('ride-tracking')) {
-      final tripId = item.metadata['tripId'] as String?;
-      if (tripId != null) {
-        Navigator.pushNamed(context, '/ride-tracking',
-            arguments: tripId);
-      }
-      return;
-    }
-
-    if (route.contains('gas-tracking')) {
-      final orderId = item.metadata['orderId'] as String?;
-      if (orderId != null) {
-        Navigator.of(context, rootNavigator: true).pushNamed('/gas-tracking',
-            arguments: {'orderId': orderId});
-      }
-      return;
-    }
-
-    if (route.contains('delivery-tracking')) {
-      final deliveryId = item.metadata['deliveryId'] as String?;
-      if (deliveryId != null) {
-        Navigator.pushNamed(context, '/delivery-tracking',
-            arguments: {'deliveryId': deliveryId});
-      }
-      return;
-    }
-
-    if (route.contains('trip-complete')) {
-      final tripId = item.metadata['tripId'] as String?;
-      if (tripId != null) {
-        Navigator.pushNamed(context, '/trip-complete',
-            arguments: {'tripId': tripId});
-      }
-      return;
-    }
-
-    if (route == '/shell') {
+    if (route == AppRoutes.shell) {
       Navigator.pushNamedAndRemoveUntil(
-          context, '/shell', (_) => false);
+          context, AppRoutes.shell, (_) => false);
       return;
     }
 
-    // Fallback — push the raw route
-    Navigator.pushNamed(context, route);
+    // Parsed like a push tap (ids from the route's query, else the stored
+    // metadata) and opened on the root navigator, as push taps are: it knows
+    // every tracking route and shows "Route not found" for anything else.
+    final link = DeepLink.parse(route, metadata: item.metadata);
+    if (link == null) return;
+    final requiredId = _requiredIds[link.path];
+    if (requiredId != null && link.arguments?[requiredId] == null) return;
+    Navigator.of(context, rootNavigator: true)
+        .pushNamed(link.path, arguments: link.arguments);
   }
+
+  static const _requiredIds = {
+    AppRoutes.rideTracking: 'tripId',
+    AppRoutes.tripComplete: 'tripId',
+    AppRoutes.gasTracking: 'orderId',
+    AppRoutes.deliveryTracking: 'deliveryId',
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -327,33 +322,14 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                Icons.notifications_off_rounded,
-                size: 34,
-                color: AppColors.textTertiary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('All caught up!',
-                style: AppTextStyles.heading4),
-            const SizedBox(height: 6),
-            Text(
-              'No notifications yet.\nWe\'ll let you know when something happens.',
-              style: AppTextStyles.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
+  Widget build(BuildContext context) => const Center(
+        child: SingleChildScrollView(
+          child: CtsEmptyState(
+            icon: Icons.notifications_none_rounded,
+            title: 'All caught up!',
+            message:
+                "No notifications yet.\nWe'll let you know when something happens.",
+          ),
         ),
       );
 }
@@ -364,21 +340,11 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.cloud_off_rounded,
-                  size: 40, color: AppColors.textTertiary),
-              const SizedBox(height: 12),
-              const Text('Could not load notifications',
-                  style: AppTextStyles.heading4),
-              const SizedBox(height: 6),
-              Text(message,
-                  style: AppTextStyles.caption,
-                  textAlign: TextAlign.center),
-            ],
+        child: SingleChildScrollView(
+          child: CtsEmptyState(
+            icon: Icons.cloud_off_rounded,
+            title: 'Could not load notifications',
+            message: message,
           ),
         ),
       );

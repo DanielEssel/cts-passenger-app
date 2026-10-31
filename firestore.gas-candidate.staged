@@ -1,0 +1,952 @@
+// RULES CANDIDATE (not deployed). Built by rules-candidate/build.py from
+//   the deployed production rules (ruleset b0b4eafc, sha256 b4e6595babc1dd0f) + supplier pricing-field guard on trips/deliveries/gas_orders
+//   + passenger working-copy Gas supplier section (at 9dcabda, sha256 4be1b568221bd94b, reserved members rule closed)
+//   + rules-candidate/portal-collections.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function isParty(passengerId, driverId) {
+      return isAuth() && (
+        request.auth.uid == passengerId ||
+        request.auth.uid == driverId
+      );
+    }
+    function isAdmin() {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
+
+    // Gas supplier pricing fields: written only by gas_supplier_orders.js
+    // (Admin SDK). No party may set or change them on a legacy order.
+    function gasSupplierFields() {
+      return ['supplierId', 'stationId', 'productId', 'priceSnapshot', 'quoteId'];
+    }
+    function createsNoGasSupplierFields() {
+      return !request.resource.data.keys().hasAny(gasSupplierFields());
+    }
+    function gasSupplierFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(gasSupplierFields());
+    }
+
+    // An approved driver who is not suspended. isApproved is admin-only
+    // (drivers update allow-list). NOTE: signupStep is still owner-writable,
+    // so the suspension check is only as strong as DRV-S04's fix.
+    function isActiveDriver() {
+      return isAuth()
+        && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.get('isApproved', false) == true
+        && get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.get('signupStep', '') != 'suspended';
+    }
+
+    // deliveryOtp is the proof-of-delivery code that onDeliveryCompleted /
+    // onGasOrderCompleted compare against otpSubmitted before settling an
+    // order. The passenger app sets it at creation; no client may change it
+    // afterwards (otherwise the assigned driver could set both values and
+    // "complete" without the recipient). Server code uses the Admin SDK.
+    function confirmationCodeUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['deliveryOtp']);
+    }
+
+    // An active driver in the delivery bucket — the only drivers the Driver
+    // App shows deliveries and gas orders to, the role dispatch notifies,
+    // and the role acceptGasOrder accepts.
+    function isActiveDeliveryDriver() {
+      return isActiveDriver()
+        && get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.get('role', '') == 'driver_delivery';
+    }
+
+    // ── Public app configuration ──────────────────────────────────────────
+// Read-only configuration needed before authentication during startup.
+match /app_config/mobile {
+  allow read: if true;
+  allow write: if false;
+}
+
+    // ── Admins ────────────────────────────────────────────────────────────
+    match /admins/{uid} {
+      allow read:  if isAuth() && request.auth.uid == uid;
+      allow write: if isAdmin();
+    }
+
+    // ── Drivers ───────────────────────────────────────────────────────────
+    match /drivers/{driverId} {
+      // Read: the driver themselves, or an admin. NOT every authenticated user —
+      // driver docs hold phone, email, earnings, and ID/passport document URLs.
+      allow read: if isOwner(driverId) || isAdmin();
+
+      // Create: a driver creates their own doc at signup; admin can too.
+      // The owner may only create an UNAPPROVED profile with signup, device
+      // and location fields — never approval, money, rating or signupStep
+      // (DRV-S01/S02). The list covers every Driver App write that can create
+      // the doc: createDriverDocument, goOnline, location and documents
+      // updates (set with merge), and older app versions' token saver.
+      allow create: if isAdmin() || (
+        isOwner(driverId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'phone', 'role', 'displayName', 'email', 'photoUrl',
+          'accountSetupComplete', 'vehicleSetupComplete', 'documentsUploaded',
+          'isApproved', 'isOnline', 'isAvailable', 'serviceType',
+          'location', 'currentLocation', 'locationUpdatedAt',
+          'lastLocationUpdate', 'lastSeen', 'lastStatusChange',
+          'fcmToken', 'fcmTokenUpdatedAt', 'platform', 'documents',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.get('isApproved', false) == false
+        && request.resource.data.get('uid', driverId) == driverId
+        && ownerDocumentsChangeAllowed()
+      );
+
+      // Update: the OWNER may only touch profile / location / device fields —
+      // never approval, money, or rating. Those are Cloud Functions / admin only.
+      allow update: if isAdmin() || (
+  isOwner(driverId) &&
+  request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+    'displayName', 'email', 'phone', 'photoUrl',
+    'vehicleType', 'vehicleModel', 'vehiclePlate', 'vehicleDetails',
+    'vehicleSetupComplete',
+    'serviceType',
+    'location', 'currentLocation',
+    'locationUpdatedAt', 'lastLocationUpdate', 'lastSeen',
+    'isOnline', 'isAvailable', 'currentTripId',
+    'lastStatusChange',
+    'fcmToken', 'fcmTokenUpdatedAt', 'platform', 'updatedAt',
+    'documents', 'documentsUploaded', 'submittedForReviewAt',
+    'accountSetupComplete',
+    'signupStep', 'role',
+    'termsAcceptedAt', 'termsVersion'
+  ])
+  && ownerSignupStepChangeAllowed()
+  && ownerDocumentsChangeAllowed()
+  && ownerEligibilityChangeAllowed()
+);
+
+      // Policy A: role, ride type and vehicle type decide which requests a
+      // driver sees and can claim (rides by serviceType, deliveries and gas
+      // by role, gas capability by vehicleType). Once a driver is approved —
+      // or suspended, since the Admin app's unsuspend restores approval as
+      // is — only an admin may change them. Drivers still set them freely
+      // while onboarding (not yet approved). Re-writing the same value is not
+      // a change, so the released vehicle-setup write still works unchanged.
+      function ownerEligibilityChangeAllowed() {
+        return !(resource.data.get('isApproved', false) == true
+                 || resource.data.get('signupStep', '') == 'suspended')
+          || !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['role', 'serviceType', 'vehicleType']);
+      }
+
+      // Document review status is an admin decision ('approved' /
+      // 'rejected' + rejectionReason, written by the approveDriver
+      // function). A driver may add or replace one of the known document
+      // entries only as a fresh upload — exactly what the Driver App writes
+      // (driver_documents_screens.dart) — so resubmitting a rejected or
+      // expiring document still works, but no driver can mark a document
+      // approved, forge a review field, or remove an entry.
+      // The app writes with set(merge: true), which merges nested maps, so a
+      // resubmitted rejected document still carries the old rejectionReason.
+      // That leftover is allowed only if unchanged — the driver can never
+      // add, edit or clear a review field.
+      function isOwnerDocumentUpload(entry, previous) {
+        return entry is map
+          && entry.keys().hasOnly(['status', 'url', 'fileType', 'uploadedAt',
+                                   'expiryDate', 'rejectionReason'])
+          && entry.get('status', '') == 'uploaded'
+          && entry.get('url', null) is string
+          && (!('rejectionReason' in entry)
+              || (previous is map
+                  && entry.rejectionReason == previous.get('rejectionReason', null)));
+      }
+      function ownerDocumentsChangeAllowed() {
+        let newDocs = request.resource.data.get('documents', {});
+        let oldDocs = resource == null ? {} : resource.data.get('documents', {});
+        let changed = newDocs.diff(oldDocs).affectedKeys();
+        return newDocs is map
+          && changed.hasOnly([
+               'national_id', 'drivers_license', 'vehicle_registration',
+               'roadworthy_certificate', 'insurance', 'police_clearance',
+               'vehicle_photo_front', 'vehicle_photo_side', 'profile_photo'])
+          && (!changed.hasAny(['national_id']) || isOwnerDocumentUpload(newDocs.get('national_id', null), oldDocs.get('national_id', null)))
+          && (!changed.hasAny(['drivers_license']) || isOwnerDocumentUpload(newDocs.get('drivers_license', null), oldDocs.get('drivers_license', null)))
+          && (!changed.hasAny(['vehicle_registration']) || isOwnerDocumentUpload(newDocs.get('vehicle_registration', null), oldDocs.get('vehicle_registration', null)))
+          && (!changed.hasAny(['roadworthy_certificate']) || isOwnerDocumentUpload(newDocs.get('roadworthy_certificate', null), oldDocs.get('roadworthy_certificate', null)))
+          && (!changed.hasAny(['insurance']) || isOwnerDocumentUpload(newDocs.get('insurance', null), oldDocs.get('insurance', null)))
+          && (!changed.hasAny(['police_clearance']) || isOwnerDocumentUpload(newDocs.get('police_clearance', null), oldDocs.get('police_clearance', null)))
+          && (!changed.hasAny(['vehicle_photo_front']) || isOwnerDocumentUpload(newDocs.get('vehicle_photo_front', null), oldDocs.get('vehicle_photo_front', null)))
+          && (!changed.hasAny(['vehicle_photo_side']) || isOwnerDocumentUpload(newDocs.get('vehicle_photo_side', null), oldDocs.get('vehicle_photo_side', null)))
+          && (!changed.hasAny(['profile_photo']) || isOwnerDocumentUpload(newDocs.get('profile_photo', null), oldDocs.get('profile_photo', null)));
+      }
+
+      // DRV-S04: 'approved', 'suspended' and 'rejected' are admin decisions
+      // (Admin app, approveDriver function). The owner may move signupStep
+      // between onboarding steps, but may never set an admin value, and may
+      // not change it at all while suspended or rejected. Moving from
+      // 'approved' to an onboarding step (document re-upload) stays allowed:
+      // it grants nothing, since isApproved is admin-only.
+      function ownerSignupStepChangeAllowed() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['signupStep'])
+          || (!(resource.data.get('signupStep', '') in ['suspended', 'rejected'])
+              && !(request.resource.data.get('signupStep', '')
+                     in ['approved', 'suspended', 'rejected']));
+      }
+
+      // Delete: admin only.
+      allow delete: if isAdmin();
+
+      match /notifications/{notifId} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+      match /earnings/{document=**} {
+        // Earnings are written by Cloud Functions only. Rules allow a write if
+        // ANY matching rule allows it, so an owner write here would override
+        // the drivers/{driverId}/earnings/{doc} "write: if false" below.
+        allow read:  if isOwner(driverId) || isAdmin();
+        allow write: if isAdmin();
+      }
+      match /stats/{document=**} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+      match /settings/{document=**} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+      match /withdrawals/{document=**} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+      match /dismissed_requests/{document=**} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+    }
+
+    // ── Users (passengers) ────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+
+      match /saved_places/{placeId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /momo_methods/{momoId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ── Passengers (legacy) ───────────────────────────────────────────────
+    match /passengers/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+      match /savedPlaces/{placeId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ── Notifications ─────────────────────────────────────────────────────
+    match /notifications/{userId}/items/{notifId} {
+      allow read, delete: if isOwner(userId) || isAdmin();
+      allow update: if (isOwner(userId)
+          && request.resource.data.diff(resource.data)
+             .affectedKeys().hasOnly(['isRead']))
+        || isAdmin();
+      allow create: if isAdmin(); // Cloud Functions + admin panel
+    }
+
+    // ── Wallets (legacy rule — superseded above) ─────────────────────────
+
+    // ── Ledger — immutable, append-only, no client writes ────────────────
+    match /ledger/{txId} {
+      allow read:  if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId   == request.auth.uid
+      ) || isAdmin();
+      allow write: if false; // Cloud Functions via Admin SDK only
+    }
+
+    // ── Escrows — read only for owner ─────────────────────────────────────
+    match /escrows/{escrowId} {
+      allow read:  if isAuth() && resource.data.userId == request.auth.uid
+                || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Webhook events — no client access ever ────────────────────────────
+    match /webhook_events/{ref} {
+      allow read, write: if false;
+    }
+
+    // ── Reconciliation — admin only ───────────────────────────────────────
+    match /reconciliation/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── Driver wallets — read only for owner ────────────────────────────
+    match /driver_wallets/{driverId} {
+      allow read:  if isAuth() && request.auth.uid == driverId || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Driver earnings summary — read only for owner ─────────────────────
+    match /drivers/{driverId}/earnings/{doc} {
+      allow read:  if isAuth() && request.auth.uid == driverId || isAdmin();
+      allow write: if false; // Cloud Functions only
+    }
+
+    // ── Admin alerts — admin only ─────────────────────────────────────────────
+    match /admin_alerts/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Wallets — admin can write for migration; clients cannot ──────────
+    match /wallets/{userId} {
+      allow read:   if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && request.resource.data.balance == 0;
+      allow update, delete: if isAdmin(); // balance changes via Cloud Functions only
+    }
+
+    // ── Transactions ──────────────────────────────────────────────────────
+    match /transactions/{txId} {
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      // Created by Cloud Functions (payouts, top-ups, settlement) and the
+      // admin panel; no app creates one. A client record could forge a
+      // "completed" credit in its own history.
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /tip_transactions/{txId} {
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      // No current app or function writes these; the old client tip batch
+      // also updated the driver's doc, which these rules already refuse.
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Driver map markers ────────────────────────────────────────────────
+    // Written only by the syncDriverMap function: rounded position and
+    // vehicle type of online, available drivers. No personal data.
+    match /driver_map/{driverId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
+    // ── Trips ─────────────────────────────────────────────────────────────
+    match /trips/{tripId} {
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid
+          && createsNoGasSupplierFields())
+        || isAdmin();
+      // Read (AUTH-01): only the trip's passenger and driver, admins, and
+      // active drivers looking at open requests. Trips hold names, exact
+      // pickup/drop-off addresses and the driver's phone, so being signed in
+      // is not enough. A 'searching' trip is unassigned by construction
+      // (accepting sets driverId and moves status off 'searching' in one
+      // transaction), so status alone identifies open requests. This keeps
+      // the Driver App's existing request query (status == 'searching')
+      // working for builds already installed.
+      allow read: if isParty(
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (resource.data.status == 'searching' && isActiveDriver())
+            || isAdmin();
+      // Update:
+      //  - parties may update their trip but never change who is on it
+      //    (TRIP-S06 passenger assigning a driver, S14 handing the trip to
+      //    another driver, S15 changing the passenger);
+      //  - an unassigned 'searching' trip may be claimed only by an active
+      //    (approved, not suspended) driver, for themselves, writing only the
+      //    fields the Driver App's accept transaction writes (TRIP-S18/19/20).
+      allow update: if isAdmin()
+            || (isParty(resource.data.passengerId, resource.data.driverId)
+                && request.resource.data.get('driverId', null)
+                     == resource.data.get('driverId', null)
+                && request.resource.data.get('passengerId', null)
+                     == resource.data.get('passengerId', null)
+                && gasSupplierFieldsUnchanged())
+            || (resource.data.get('driverId', null) == null
+                && resource.data.status == 'searching'
+                && isActiveDriver()
+                && request.resource.data.driverId == request.auth.uid
+                && request.resource.data.status == 'tripAccepted'
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['driverId', 'driverName', 'driverPhone',
+                               'driverRating', 'driverPlate', 'status',
+                               'acceptedAt']));
+      allow delete: if isAdmin();
+
+      // Live positions for one trip: its parties (and admins) only. Only the
+      // assigned driver may write them (previously any signed-in user could
+      // create one, and anyone could read all of them).
+      match /locations/{locationId} {
+        allow read: if isAdmin() || isParty(
+          get(/databases/$(database)/documents/trips/$(tripId)).data.passengerId,
+          get(/databases/$(database)/documents/trips/$(tripId)).data.driverId
+        );
+        allow create, update: if isAuth()
+          && get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == request.auth.uid;
+      }
+    }
+
+    // ── Rides (legacy) ────────────────────────────────────────────────────
+    match /rides/{rideId} {
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid)
+        || isAdmin();
+      allow read: if isAuth()
+          && (resource.data.driverId    == null
+              || resource.data.driverId == request.auth.uid
+              || resource.data.passengerId == request.auth.uid)
+        || isAdmin();
+      allow update: if (isAuth()
+          && (resource.data.passengerId == request.auth.uid
+              || resource.data.driverId  == request.auth.uid
+              || (resource.data.driverId == null
+                  && request.resource.data.driverId == request.auth.uid)))
+        || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Ride Requests ─────────────────────────────────────────────────────
+    match /rideRequests/{requestId} {
+      allow create: if isAuth();
+      allow read:   if isAuth();
+      allow update: if (isAuth()
+          && (resource.data.passengerId == request.auth.uid
+              || resource.data.driverId  == request.auth.uid
+              || (resource.data.driverId  == null
+                  && request.resource.data.driverId == request.auth.uid)))
+        || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Active Trips ──────────────────────────────────────────────────────
+    match /active_trips/{tripId} {
+      allow create: if isAuth();
+      allow read, update: if isParty(
+          resource.data.passengerId,
+          resource.data.driverId
+        ) || isAdmin();
+      allow delete: if (isAuth()
+          && resource.data.driverId == request.auth.uid)
+        || isAdmin();
+    }
+
+    // ── Deliveries ────────────────────────────────────────────────────────
+    match /deliveries/{deliveryId} {
+      // Created unassigned by the passenger (DeliveryRequest.toFirestore
+      // writes driverId: null) — a driver can only be attached by a claim.
+      allow create: if (isAuth()
+          && request.resource.data.passengerId == request.auth.uid
+          && request.resource.data.get('driverId', null) == null
+          && createsNoGasSupplierFields())
+        || isAdmin();
+      // Read: the parties, admins, and active delivery drivers looking at
+      // open requests. The Driver App query filters status == 'pending' AND
+      // driverId == null, so it satisfies this as released.
+      allow read: if isParty(
+              resource.data.passengerId,
+              resource.data.driverId
+            )
+            || (resource.data.status   == "pending"
+                && resource.data.driverId == null
+                && isActiveDeliveryDriver())
+            || isAdmin();
+      // Update:
+      //  - parties may update their delivery but never change who is on it;
+      //  - an unassigned 'pending' delivery may be claimed only by an active
+      //    delivery driver, for themselves, writing only what the Driver
+      //    App's accept transaction writes (requests_section.dart).
+      allow update: if isAdmin()
+            || (isParty(resource.data.passengerId, resource.data.driverId)
+                && request.resource.data.get('driverId', null)
+                     == resource.data.get('driverId', null)
+                && request.resource.data.get('passengerId', null)
+                     == resource.data.get('passengerId', null)
+                && confirmationCodeUnchanged()
+                && gasSupplierFieldsUnchanged())
+            || (resource.data.get('driverId', null) == null
+                && resource.data.status == 'pending'
+                && isActiveDeliveryDriver()
+                && request.resource.data.driverId == request.auth.uid
+                && request.resource.data.status == 'driverAssigned'
+                && request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['driverId', 'driverName', 'driverPhone',
+                               'driverRating', 'status', 'acceptedAt']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Gas Orders ────────────────────────────────────────────────────────
+match /gas_orders/{orderId} {
+  // Created unassigned; assignment is server-side only (acceptGasOrder).
+  allow create: if (isAuth()
+      && request.resource.data.passengerId == request.auth.uid
+      && request.resource.data.get('driverId', null) == null
+      && createsNoGasSupplierFields())
+    || isAdmin();
+
+  // Read: the customer, the assigned driver, admins, and active delivery
+  // drivers (the only role acceptGasOrder accepts) browsing open orders.
+  // The Driver App query filters status == 'pendingApproval' AND
+  // driverId == null, so it satisfies this as released.
+  allow read: if isParty(
+          resource.data.passengerId,
+          resource.data.driverId
+        )
+        || (resource.data.status == "pendingApproval"
+            && resource.data.driverId == null
+            && isActiveDeliveryDriver())
+        || isAdmin();
+
+  // Driver assignment is server-authoritative through acceptGasOrder.
+  // A client may update an order only if it cannot change driverId.
+  allow update: if (
+          isParty(
+            resource.data.passengerId,
+            resource.data.driverId
+          )
+          && request.resource.data.driverId == resource.data.driverId
+          && confirmationCodeUnchanged()
+          && gasSupplierFieldsUnchanged()
+        )
+        || isAdmin();
+
+  allow delete: if isAdmin();
+}
+
+    // ── Withdrawals (top-level) ───────────────────────────────────────────
+    match /withdrawals/{withdrawalId} {
+      allow read: if (isAuth()
+          && resource.data.userId == request.auth.uid)
+        || isAdmin();
+      // Created only by initiateBridgePayout (Admin SDK, which bypasses these
+      // rules) in the same transaction that debits and holds the funds. No
+      // client, admin panel included, creates one: a client-created record
+      // would be an unfunded request that looks real to an admin.
+      allow create: if false;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Promotions ────────────────────────────────────────────────────────
+    match /promotions/{promoId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Driver Alerts ─────────────────────────────────────────────────────
+    match /driver_alerts/{alertId} {
+      allow read, write, delete: if isAuth();
+    }
+
+    // ── Support Tickets ───────────────────────────────────────────────────
+   match /supportTickets/{ticketId} {
+  allow create: if isAuth()
+    && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+    && request.resource.data.driverId == request.auth.uid;
+
+  allow read: if isAdmin() ||
+    (isAuth() &&
+     resource.data.driverId == request.auth.uid);
+
+  allow update, delete: if isAdmin();
+}
+
+    // ── Profile Photos ────────────────────────────────────────────────────
+    match /profile_photos/{userId} {
+      allow read:  if true;
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // ── Data Export Requests ──────────────────────────────────────────────
+    match /data_export_requests/{id} {
+      allow create: if isAuth()
+          && request.resource.data.userId == request.auth.uid;
+      allow read, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Gas suppliers (admin onboarding) ──────────────────────────────────
+    // Staff-only for now; no supplier, passenger or driver can read any of
+    // it. Nothing is ever deleted. Privileged steps (approve, reject,
+    // suspend, reinstate, enabling orders, verifying a station or product)
+    // need admins/{uid}.role == 'super_admin', and approval needs a
+    // different admin from the one who created the supplier.
+    //
+    // Every status or orders change bumps auditSeq and must create
+    // status_history/{auditSeq} in the same write; every price change bumps
+    // priceVersion and must create price_history/{priceVersion}. Both
+    // histories are append-only, record the acting uid and the server time,
+    // and must agree with the record they describe.
+    //
+    // Approval alone does not make a supplier orderable: ordersEnabled is
+    // separate, is forced off by every status change, and may be turned on
+    // only for an approved supplier. Station and product prerequisites
+    // cannot be queried here; the admin app checks them (supplierReadiness),
+    // and dispatch must check them again server-side before it uses
+    // suppliers. Dispatch does not read these collections yet.
+
+    function isSuperAdmin() {
+      return isAdmin()
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', '') == 'super_admin';
+    }
+    function supplierDoc(sid) {
+      return /databases/$(database)/documents/gas_suppliers/$(sid);
+    }
+    function stationDoc(sid, stid) {
+      return /databases/$(database)/documents/gas_suppliers/$(sid)/stations/$(stid);
+    }
+    function productDoc(sid, stid, pid) {
+      return /databases/$(database)/documents/gas_suppliers/$(sid)/stations/$(stid)/products/$(pid);
+    }
+    function optString(d, k, max) {
+      return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= max);
+    }
+    function optMap(d, k) {
+      return !(k in d) || d[k] == null || d[k] is map;
+    }
+    function stampedCreate(d) {
+      return d.createdBy == request.auth.uid && d.createdAt == request.time
+        && d.updatedBy == request.auth.uid && d.updatedAt == request.time;
+    }
+    function stampedUpdate(n, o) {
+      return n.createdBy == o.createdBy && n.createdAt == o.createdAt
+        && n.updatedBy == request.auth.uid && n.updatedAt == request.time;
+    }
+
+    // ── Supplier ──
+    function supplierControlKeys() {
+      return ['status', 'statusReason', 'statusChangedAt', 'statusChangedBy', 'ordersEnabled', 'auditSeq'];
+    }
+    function supplierShapeOk(d) {
+      return d.keys().hasOnly(['legalName', 'tradingName', 'operatingModel', 'contact', 'address',
+               'registration', 'fulfillment', 'riderArrangement', 'verificationNotes', 'internalNotes',
+               'status', 'statusReason', 'statusChangedAt', 'statusChangedBy', 'ordersEnabled', 'auditSeq',
+               'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['legalName', 'status', 'ordersEnabled', 'auditSeq', 'statusChangedAt',
+               'statusChangedBy', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+        && d.legalName is string && d.legalName.size() > 0 && d.legalName.size() <= 200
+        && d.status in ['draft', 'pending_verification', 'approved', 'rejected', 'suspended']
+        && d.ordersEnabled is bool
+        && d.auditSeq is int
+        && (d.status == 'approved' || d.ordersEnabled == false)
+        && optString(d, 'tradingName', 200) && optString(d, 'operatingModel', 40)
+        && optString(d, 'address', 500) && optString(d, 'riderArrangement', 40)
+        && optString(d, 'verificationNotes', 4000) && optString(d, 'internalNotes', 4000)
+        && optString(d, 'statusReason', 1000)
+        && optMap(d, 'contact') && optMap(d, 'registration') && optMap(d, 'fulfillment');
+    }
+    function reasonGiven(n) {
+      return n.get('statusReason', null) is string && n.statusReason.size() >= 3;
+    }
+    function supplierTransitionOk(o, n) {
+      return n.status != o.status && n.ordersEnabled == false && (
+           (o.status == 'draft' && n.status == 'pending_verification')
+        || (o.status == 'pending_verification' && n.status == 'draft')
+        || (o.status == 'approved' && n.status == 'pending_verification' && reasonGiven(n))
+        || (isSuperAdmin() && (
+              (o.status == 'pending_verification' && n.status == 'approved' && o.createdBy != request.auth.uid)
+           || (o.status == 'pending_verification' && n.status == 'rejected' && reasonGiven(n))
+           || (o.status == 'approved' && n.status == 'suspended' && reasonGiven(n))
+           || (o.status == 'suspended' && n.status == 'approved' && o.createdBy != request.auth.uid)
+           || (o.status == 'rejected' && n.status == 'draft' && reasonGiven(n)))));
+    }
+    function supplierOrdersToggleOk(o, n) {
+      // Any admin may stop orders; only a super admin may start them.
+      return n.status == o.status && n.ordersEnabled != o.ordersEnabled
+        && (n.ordersEnabled == false || (isSuperAdmin() && n.status == 'approved'));
+    }
+
+    match /gas_suppliers/{sid} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && supplierShapeOk(request.resource.data)
+        && stampedCreate(request.resource.data)
+        && request.resource.data.status == 'draft'
+        && request.resource.data.ordersEnabled == false
+        && request.resource.data.auditSeq == 1
+        && request.resource.data.statusChangedBy == request.auth.uid
+        && request.resource.data.statusChangedAt == request.time
+        && existsAfter(/databases/$(database)/documents/gas_suppliers/$(sid)/status_history/1);
+
+      // Either a details edit (control fields untouched; once approved,
+      // suspended or rejected only contact and notes may change), or a
+      // status / orders change recorded in status_history.
+      allow update: if isAdmin()
+        && supplierShapeOk(request.resource.data)
+        && stampedUpdate(request.resource.data, resource.data)
+        && (
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(supplierControlKeys())
+            && (resource.data.status in ['draft', 'pending_verification']
+                || request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['contact', 'verificationNotes', 'internalNotes', 'updatedAt', 'updatedBy'])))
+          || (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['status', 'statusReason', 'statusChangedAt', 'statusChangedBy',
+                          'ordersEnabled', 'auditSeq', 'updatedAt', 'updatedBy'])
+            && request.resource.data.auditSeq == resource.data.auditSeq + 1
+            && request.resource.data.statusChangedBy == request.auth.uid
+            && request.resource.data.statusChangedAt == request.time
+            && existsAfter(/databases/$(database)/documents/gas_suppliers/$(sid)/status_history/$(string(request.resource.data.auditSeq)))
+            && (supplierTransitionOk(resource.data, request.resource.data)
+                || supplierOrdersToggleOk(resource.data, request.resource.data)))
+        );
+
+      allow delete: if false;
+
+      // Append-only record of every status and orders change.
+      match /status_history/{seq} {
+        allow read: if isAdmin();
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['seq', 'type', 'fromStatus', 'toStatus',
+               'ordersEnabled', 'reason', 'by', 'byEmail', 'at'])
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.at == request.time
+          && request.resource.data.seq == int(seq)
+          && getAfter(supplierDoc(sid)).data.auditSeq == int(seq)
+          && request.resource.data.toStatus == getAfter(supplierDoc(sid)).data.status
+          && request.resource.data.ordersEnabled == getAfter(supplierDoc(sid)).data.ordersEnabled
+          && optString(request.resource.data, 'reason', 1000)
+          && optString(request.resource.data, 'byEmail', 200)
+          && (
+            (request.resource.data.type == 'created'
+              && !exists(supplierDoc(sid))
+              && request.resource.data.fromStatus == null)
+            || (request.resource.data.type == 'status_changed'
+              && exists(supplierDoc(sid))
+              && request.resource.data.fromStatus == get(supplierDoc(sid)).data.status
+              && request.resource.data.toStatus != request.resource.data.fromStatus
+              && request.resource.data.get('reason', null) == getAfter(supplierDoc(sid)).data.get('statusReason', null))
+            || (request.resource.data.type in ['orders_enabled', 'orders_disabled']
+              && exists(supplierDoc(sid))
+              && request.resource.data.fromStatus == get(supplierDoc(sid)).data.status
+              && request.resource.data.toStatus == request.resource.data.fromStatus
+              && request.resource.data.ordersEnabled == (request.resource.data.type == 'orders_enabled'))
+          );
+        allow update, delete: if false;
+      }
+
+      // Reserved for the future supplier portal (supplier staff accounts).
+      // No other rule grants a member any access yet.
+      match /members/{uid} {
+        // Closed in the candidate: supplier membership lives in the
+        // top-level gas_supplier_members collection, written only by
+        // server-side staff actions.
+        allow read, write: if false;
+      }
+
+      // ── Stations ──
+      function stationShapeOk(d) {
+        return d.keys().hasOnly(['name', 'supplierId', 'address', 'location', 'contact', 'operatingHours',
+                 'serviceArea', 'serviceRadiusKm', 'supportedSizes', 'fulfillment', 'stockApproach',
+                 'status', 'verificationNotes', 'verifiedBy', 'verifiedAt',
+                 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+          && d.keys().hasAll(['name', 'supplierId', 'status', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+          && d.name is string && d.name.size() > 0 && d.name.size() <= 200
+          && d.supplierId == sid
+          && d.status in ['draft', 'verified', 'inactive']
+          && (!('location' in d) || d.location == null || d.location is latlng)
+          && (!('serviceRadiusKm' in d) || d.serviceRadiusKm == null
+              || (d.serviceRadiusKm is number && d.serviceRadiusKm > 0 && d.serviceRadiusKm <= 200))
+          && (!('supportedSizes' in d) || d.supportedSizes is list)
+          && optString(d, 'address', 500) && optString(d, 'operatingHours', 500)
+          && optString(d, 'serviceArea', 1000) && optString(d, 'stockApproach', 40)
+          && optString(d, 'verificationNotes', 4000)
+          && optMap(d, 'contact') && optMap(d, 'fulfillment')
+          // A verified station always has an address and coordinates.
+          && (d.status != 'verified'
+              || (d.get('location', null) is latlng && d.get('address', '') is string && d.address.size() > 0));
+      }
+
+      match /stations/{stid} {
+        allow read: if isAdmin();
+
+        allow create: if isAdmin()
+          && exists(supplierDoc(sid))
+          && stationShapeOk(request.resource.data)
+          && stampedCreate(request.resource.data)
+          && request.resource.data.status == 'draft'
+          && !('verifiedBy' in request.resource.data) && !('verifiedAt' in request.resource.data);
+
+        // Verifying is a super-admin step that records who and when. While a
+        // station stays verified only contact, hours, stock approach and notes
+        // may change; anything else must un-verify it first.
+        allow update: if isAdmin()
+          && stationShapeOk(request.resource.data)
+          && stampedUpdate(request.resource.data, resource.data)
+          && (
+            (request.resource.data.status == 'verified' && resource.data.status != 'verified'
+              && isSuperAdmin()
+              && request.resource.data.verifiedBy == request.auth.uid
+              && request.resource.data.verifiedAt == request.time)
+            || (request.resource.data.status == 'verified' && resource.data.status == 'verified'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['contact', 'operatingHours', 'stockApproach', 'verificationNotes', 'updatedAt', 'updatedBy']))
+            || (request.resource.data.status != 'verified'
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verifiedBy', 'verifiedAt']))
+          );
+
+        allow delete: if false;
+
+        // ── Products and prices ──
+        function productShapeOk(d, pid) {
+          return d.keys().hasOnly(['orderType', 'cylinderSize', 'brand', 'price', 'handlingFee', 'currency',
+                   'priceVersion', 'availability', 'verified', 'verifiedBy', 'verifiedAt', 'notes',
+                   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+            && d.keys().hasAll(['orderType', 'cylinderSize', 'brand', 'price', 'handlingFee', 'currency',
+                   'priceVersion', 'availability', 'verified', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+            && d.orderType in ['exchangeEmpty', 'newCylinder', 'pickupAndReturn', 'commercialBulk']
+            && d.cylinderSize in ['kg3', 'kg6', 'kg12_5', 'kg14_5', 'kg19', 'kg45']
+            && d.brand in ['goGas', 'totalEnergies', 'goil', 'shell', 'benab', 'blueOcean', 'newGas',
+                           'louisGas', 'manbahGas', 'rootsenaf', 'zola', 'radix', 'soilGroup']
+            && pid == d.orderType + '_' + d.cylinderSize + '_' + d.brand
+            && d.price is number && d.price > 0 && d.price <= 100000
+            && d.handlingFee is number && d.handlingFee >= 0 && d.handlingFee <= 100000
+            && d.currency == 'GHS'
+            && d.priceVersion is int
+            && d.availability in ['unavailable', 'available', 'out_of_stock']
+            && d.verified is bool
+            // An unverified product is never offered.
+            && (d.availability != 'available' || d.verified == true)
+            && optString(d, 'notes', 2000);
+        }
+        function priceFieldsChanged(n, o) {
+          return n.price != o.price || n.handlingFee != o.handlingFee;
+        }
+
+        match /products/{pid} {
+          allow read: if isAdmin();
+
+          allow create: if isAdmin()
+            && exists(stationDoc(sid, stid))
+            && productShapeOk(request.resource.data, pid)
+            && stampedCreate(request.resource.data)
+            && request.resource.data.verified == false
+            && !('verifiedBy' in request.resource.data) && !('verifiedAt' in request.resource.data)
+            && request.resource.data.priceVersion == 1
+            && existsAfter(/databases/$(database)/documents/gas_suppliers/$(sid)/stations/$(stid)/products/$(pid)/price_history/1);
+
+          // A price change bumps priceVersion and is recorded. Only a super
+          // admin can leave or make a product verified with a new price; an
+          // admin's price change un-verifies it (and so takes it off sale).
+          allow update: if isAdmin()
+            && productShapeOk(request.resource.data, pid)
+            && stampedUpdate(request.resource.data, resource.data)
+            && request.resource.data.orderType == resource.data.orderType
+            && request.resource.data.cylinderSize == resource.data.cylinderSize
+            && request.resource.data.brand == resource.data.brand
+            && (priceFieldsChanged(request.resource.data, resource.data)
+                ? (request.resource.data.priceVersion == resource.data.priceVersion + 1
+                   && existsAfter(/databases/$(database)/documents/gas_suppliers/$(sid)/stations/$(stid)/products/$(pid)/price_history/$(string(request.resource.data.priceVersion))))
+                : request.resource.data.priceVersion == resource.data.priceVersion)
+            && (request.resource.data.verified == false
+                || (resource.data.verified == true
+                    && !priceFieldsChanged(request.resource.data, resource.data)
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verifiedBy', 'verifiedAt']))
+                || (isSuperAdmin()
+                    && request.resource.data.verifiedBy == request.auth.uid
+                    && request.resource.data.verifiedAt == request.time));
+
+          allow delete: if false;
+
+          match /price_history/{version} {
+            allow read: if isAdmin();
+            allow create: if isAdmin()
+              && request.resource.data.keys().hasOnly(['version', 'price', 'handlingFee', 'previousPrice',
+                   'previousHandlingFee', 'reason', 'changedBy', 'changedAt'])
+              && request.resource.data.version == int(version)
+              && request.resource.data.changedBy == request.auth.uid
+              && request.resource.data.changedAt == request.time
+              && getAfter(productDoc(sid, stid, pid)).data.priceVersion == int(version)
+              && request.resource.data.price == getAfter(productDoc(sid, stid, pid)).data.price
+              && request.resource.data.handlingFee == getAfter(productDoc(sid, stid, pid)).data.handlingFee
+              && (exists(productDoc(sid, stid, pid))
+                  ? (request.resource.data.previousPrice == get(productDoc(sid, stid, pid)).data.price
+                     && request.resource.data.previousHandlingFee == get(productDoc(sid, stid, pid)).data.handlingFee)
+                  : (request.resource.data.previousPrice == null && request.resource.data.previousHandlingFee == null))
+              && optString(request.resource.data, 'reason', 1000);
+            allow update, delete: if false;
+          }
+        }
+      }
+    }
+
+    // ── Gas supplier quotes and orders (gas_supplier_orders.js) ───────────
+    // Written only by the callables (Admin SDK). Quotes hold the server's
+    // price and are never readable by clients; a supplier order and its
+    // price snapshot are readable by its passenger and by admins, and no
+    // client can create, change or delete either.
+    match /gas_quotes/{quoteId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_supplier_orders/{orderId} {
+      allow read: if (isAuth() && resource.data.passengerId == request.auth.uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // ── Gas supplier settlement (gas_settlement_ledger.js) ────────────────
+    // Accounting records written only by Cloud Functions (Admin SDK):
+    // append-only entitlement entries, statement claims, daily statements,
+    // and the approved commission terms (set by an authorised person in the
+    // Firebase console, never by a client). Admins may read them; no client
+    // may write any of them.
+    match /gas_settlement_ledger/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_settlement_claims/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_settlement_statements/{statementId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_commission_terms/{termsId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ── Gas supplier portal (server-only collections) ─────────────────────
+    // Written only by the supplier portal's server and staff functions
+    // (Admin SDK). Suppliers reach their data through the portal API, never
+    // through these rules, so no supplier or passenger gets any access here.
+    match /gas_supplier_members/{uid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_supplier_member_audit/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_supplier_stock_events/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /gas_supplier_provisioning/{emailKey} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // Order history written by gas_supplier_fulfilment.js (Admin SDK).
+    match /gas_supplier_orders/{orderId}/events/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}

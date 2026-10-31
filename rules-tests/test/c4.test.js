@@ -53,13 +53,17 @@ describe("C4 driver writes (rules unchanged)", () => {
   });
 
   // ── C4-D ────────────────────────────────────────────────────────────────
-  it("C4D-01 driver marks itself busy after accepting (new payload)", () =>
-    assertSucceeds(
+  it("C4D-01 driver marks itself busy after accepting (new payload)", async () => {
+    // Free first: the seeded driver is busy with d1.
+    await h.env().withSecurityRulesDisabled((ctx) => updateDoc(
+      doc(ctx.firestore(), `drivers/${h.DRIVER}`), { currentTripId: deleteField() }));
+    await assertSucceeds(
       updateDoc(doc(h.db(h.DRIVER), `drivers/${h.DRIVER}`), {
         isAvailable: false,
-        currentTripId: "searching",
+        currentTripId: "g1",
       }),
-    ));
+    );
+  });
 
   it("C4D-02 currentTripType remains outside the owner allow-list", () =>
     assertFails(
@@ -98,8 +102,23 @@ describe("C4 driver writes (rules unchanged)", () => {
       }),
     ));
 
-  it("C4C-02 assigned driver cancels a gas order and is released in one transaction", () =>
-    assertSucceeds(
+  it("C4C-02 assigned driver cancels a gas order and is released in one transaction", async () => {
+    await h.env().withSecurityRulesDisabled((ctx) => updateDoc(
+      doc(ctx.firestore(), `drivers/${h.DRIVER}`), { currentTripId: "g1" }));
+    await assertSucceeds(
+      cancelTx(h.DRIVER, "gas_orders/g1", {
+        status: "cancelled",
+        cancelledAt: serverTimestamp(),
+        cancelReason: "Cancelled by driver",
+      }),
+    );
+  });
+
+  // The app releases only when currentTripId is the cancelled order
+  // (decideDriverCancellation); a release while another job is open is
+  // refused (currentTripId is server-owned).
+  it("C4C-05 cancelling one order cannot clear a different job still open", () =>
+    assertFails(
       cancelTx(h.DRIVER, "gas_orders/g1", {
         status: "cancelled",
         cancelledAt: serverTimestamp(),

@@ -25,7 +25,13 @@ Future<void> _pump(WidgetTester tester,
   await tester.pump();
 }
 
-String _price(double v) => '₵${v.toStringAsFixed(0)}';
+String _price(double v) => 'GHS ${v.toStringAsFixed(0)}';
+
+/// Drags the page until [f] is on screen and tappable (the branded header
+/// pushes later sections below the first viewport).
+Future<void> _reveal(WidgetTester tester, Finder f, {double dy = -150}) =>
+    tester.dragUntilVisible(
+        f.hitTestable(), find.byType(CustomScrollView), Offset(0, dy));
 
 void main() {
   testWidgets('form is fully visible on the first frame (no fade-in)',
@@ -50,10 +56,13 @@ void main() {
   testWidgets('cylinder prices follow the selected service', (tester) async {
     await _pump(tester);
     const size = CylinderSize.kg6;
+    await _reveal(tester, find.text('Price per refill'));
     expect(find.text(_price(size.refillPrice)), findsWidgets);
 
+    await _reveal(tester, find.text('New Cylinder'), dy: 150);
     await tester.tap(find.text('New Cylinder'));
     await tester.pump();
+    await _reveal(tester, find.text('Price per new cylinder'));
     expect(find.text('Price per new cylinder'), findsOneWidget);
     expect(find.text(_price(size.fullCylinderPrice)), findsWidgets);
   });

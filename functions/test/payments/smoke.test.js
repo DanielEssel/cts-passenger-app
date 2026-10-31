@@ -141,12 +141,8 @@ describe("config guard", () => {
     );
   });
 
-  test("SMK-10 Paystack is refused locally and in staging, allowed only in production", () => {
-    assert.throws(() => config.assertPaystackRequestAllowed(), config.PaymentConfigError);
-    withEnv(deployedAs("ctsgo-staging"), () =>
-      assert.throws(() => config.assertPaystackRequestAllowed(), config.PaymentConfigError),
-    );
-    withEnv(deployedAs("ctstransportapp"), () => config.assertPaystackRequestAllowed());
+  test("SMK-10 Paystack is removed: no Paystack guard remains in the payment configuration", () => {
+    assert.equal(config.assertPaystackRequestAllowed, undefined);
   });
 });
 
@@ -215,7 +211,7 @@ describe("harness and wiring", () => {
           phone: "0240000001",
           network: "MTN",
         }),
-        /temporarily unavailable/,
+        /Payments are temporarily unavailable/,
       );
     } finally {
       process.env.BRIDGE_API_BASE = saved;
@@ -225,21 +221,15 @@ describe("harness and wiring", () => {
     assert.equal(payments.size, 0);
   });
 
-  test("SMK-14 the retired Paystack callables refuse locally before any write", async () => {
-    await assert.rejects(
-      h.callCallable(wallet.initializePaystackPayment, "pax1", {
-        amount: 20,
-        email: "x@example.com",
-        paymentMethod: "card",
-      }),
-      /not available/,
-    );
-    await assert.rejects(
-      h.callCallable(wallet.verifyPaystackPayment, "pax1", { reference: "abc" }),
-      /not available/,
-    );
-    const tx = await h.db().collection("transactions").get();
-    assert.equal(tx.size, 0);
+  test("SMK-14 the Paystack callables are removed from the wallet module and the entry point", () => {
+    assert.equal(wallet.initializePaystackPayment, undefined);
+    assert.equal(wallet.verifyPaystackPayment, undefined);
+    // index.js initialises firebase-admin itself, so its exports are checked
+    // from the source rather than by loading it a second time here.
+    const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../../index.js"), "utf8");
+    for (const name of ["initializePaystackPayment", "verifyPaystackPayment", "paystackWebhook"]) {
+      assert.doesNotMatch(src, new RegExp(`^exports\\.${name}\\s*=`, "m"), name);
+    }
   });
 });
 
@@ -415,7 +405,8 @@ describe("B0 corrections (R-1 to R-4)", () => {
     });
   });
 
-  // ── R-1: staging deploy gate stays documented while Paystack declares a secret
+  // ── R-1: only Bridge secrets are declared (Paystack's was removed); any
+  // other secret added later must be documented as a staging deploy blocker
   test("R1-01 the runbook blocks staging Functions deploys while a non-Bridge secret is declared", () => {
     const { execFileSync } = require("node:child_process");
     const fs = require("node:fs");

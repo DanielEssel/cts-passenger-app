@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/theme/cts_theme.dart';
 import '../../core/startup/startup_resolver.dart';
 import '../../core/startup/route_destination.dart';
 import '../../core/services/app_update_service.dart';
@@ -86,7 +87,7 @@ class _SplashScreenState extends State<SplashScreen>
       value: SystemUiOverlayStyle.light
           .copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B1019),
+        backgroundColor: CtsTheme.forest,
         body: Stack(
           children: [
             // Center positioned logo (using Positioned.fill for full screen)
@@ -148,13 +149,12 @@ class _SplashScreenState extends State<SplashScreen>
               const SizedBox(height: 32),
               // Brand Name
               Text(
-                'CTS TRANSPORT',
+                'CTSGo',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.95),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 8,
-                  fontFamily: 'Poppins',
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
                 ),
               ),
               const SizedBox(height: 16),
@@ -166,7 +166,7 @@ class _SplashScreenState extends State<SplashScreen>
                   gradient: LinearGradient(
                     colors: [
                       Colors.transparent,
-                      AppColors.primaryColor,
+                      CtsTheme.apple,
                       Colors.transparent,
                     ],
                   ),
@@ -177,11 +177,10 @@ class _SplashScreenState extends State<SplashScreen>
               Text(
                 'Safe • Fast • Reliable',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
+                  color: CtsTheme.onForestMuted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                   letterSpacing: 2,
-                  fontFamily: 'Inter',
                 ),
               ),
             ],
@@ -202,26 +201,26 @@ class _SplashScreenState extends State<SplashScreen>
             height: 24,
             child: CircularProgressIndicator(
               strokeWidth: 1.5,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white24),
+              valueColor: AlwaysStoppedAnimation<Color>(CtsTheme.apple),
             ),
           ),
           const SizedBox(height: 16),
           const Text(
             "GHANA'S CHOICE FOR LOGISTICS",
             style: TextStyle(
-              color: Colors.white24,
-              fontSize: 10,
-              letterSpacing: 2,
-              fontWeight: FontWeight.w500,
+              color: CtsTheme.onForestMuted,
+              fontSize: 12,
+              letterSpacing: 1.6,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Version ${_getAppVersion()}',
-            style: const TextStyle(
-              color: Colors.white12,
-              fontSize: 8,
-              letterSpacing: 1,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 12,
+              letterSpacing: 0.5,
             ),
           ),
         ],

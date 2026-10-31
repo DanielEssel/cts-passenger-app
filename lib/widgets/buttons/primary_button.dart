@@ -1,8 +1,7 @@
 // widgets/buttons/primary_button.dart
 
 import 'package:flutter/material.dart';
-import '../../core/constants/app_colors.dart';
-import '../../core/constants/app_text_styles.dart';
+import '../../core/theme/cts_theme.dart';
 
 class PrimaryButton extends StatelessWidget {
   final String label;
@@ -26,50 +25,57 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = _isDisabled
-        ? AppColors.textDisabledColor
-        : (color ?? AppColors.primary);
+    // Default: vivid brand green with forest text (5.4:1). A custom
+    // [color] is assumed dark and keeps white text.
+    final bgColor =
+        _isDisabled ? CtsTheme.surfaceAlt : (color ?? CtsTheme.vivid);
+    final fgColor = _isDisabled
+        ? CtsTheme.textTertiary
+        : (color == null ? CtsTheme.onVivid : Colors.white);
 
-    return GestureDetector(
-      onTap: _isDisabled || isLoading ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: _isDisabled
-              ? []
-              : [
-                  BoxShadow(
-                    color: bgColor.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+    return Semantics(
+      button: true,
+      enabled: !_isDisabled && !isLoading,
+      child: GestureDetector(
+        onTap: _isDisabled || isLoading ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: CtsTheme.buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
+            border: _isDisabled ? Border.all(color: CtsTheme.border) : null,
+          ),
+          child: isLoading
+              ? Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      color: color == null ? CtsTheme.onVivid : Colors.white,
+                      strokeWidth: 2.5,
+                    ),
                   ),
-                ],
-        ),
-        child: isLoading
-            ? const Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    color: AppColors.background,
-                    strokeWidth: 2,
-                  ),
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, color: AppColors.background, size: 18),
-                    const SizedBox(width: 8),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, color: fgColor, size: 19),
+                      const SizedBox(width: 8),
+                    ],
+                    Flexible(
+                      child: Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: CtsText.button.copyWith(color: fgColor),
+                      ),
+                    ),
                   ],
-                  Text(label, style: AppTextStyles.button),
-                ],
-              ),
+                ),
+        ),
       ),
     );
   }

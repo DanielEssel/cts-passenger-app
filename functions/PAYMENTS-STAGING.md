@@ -1,8 +1,9 @@
 # Payments: environments, staging and local tests
 
-Bridge (`api.bridgeagw.com`) is the only active payment gateway, used for
-mobile-money top-ups and driver payouts. Paystack is **retired**: do not
-configure it anywhere new (see "Paystack" below).
+The Bridge Solutions (https://thebridgesolutions.com/, gateway
+`api.bridgeagw.com`) is the only payment provider, used for mobile-money
+top-ups and driver payouts. Paystack has been **removed** from the code
+(see "Paystack" below).
 
 ## How environments are kept apart
 
@@ -27,7 +28,6 @@ and refuses it unless all of these agree:
   loopback only.
 - Sandbox mode refuses the live gateway host `api.bridgeagw.com` until Bridge
   confirms how its sandbox is reached.
-- Paystack: refused everywhere except production.
 
 A refused request returns "Payments are temporarily unavailable." to the app
 and logs the reason; it never falls back to another host.
@@ -71,19 +71,26 @@ the real provider; update it when Bridge documentation is available.
 6. **Gate before the first staging Functions deploy.** Every Functions deploy,
    even `--only functions:<name>`, checks *every* secret declared anywhere in
    the codebase, because `defineSecret` registers each secret when its file
-   loads. The retired Paystack code still declares `PAYSTACK_SECRET_KEY`
-   (`wallet.js`, `escrow.js`), so a staging deploy today would either fail
-   (non-interactive) or prompt you to create a Paystack secret in staging.
-   Do neither. Do not create a placeholder secret either.
-
-   STAGING FUNCTIONS DEPLOY BLOCKED until the separate Paystack retirement
-   change has removed both `defineSecret("PAYSTACK_SECRET_KEY")` declarations.
-   Confirm with:
+   loads. The Paystack code and its `PAYSTACK_SECRET_KEY` declarations have
+   been removed, so only the Bridge secrets remain. Do not create a Paystack
+   or placeholder secret. Confirm before deploying with:
 
        GCLOUD_PROJECT=demo-check node -e "require('./index.js'); console.log(require('firebase-functions/params').declaredParams.filter(p => p.constructor.name === 'SecretParam').map(p => p.name))"
 
    The output must list only `BRIDGE_CLIENT_KEY`, `BRIDGE_SECRET_KEY` and
-   `BRIDGE_SERVICE_ID`. Then deploy only the functions under test:
+   `BRIDGE_SERVICE_ID`, plus `ROUTES_API_KEY` (below). Then deploy only the functions under test:
+
+   **STAGING FUNCTIONS DEPLOY BLOCKED until `ROUTES_API_KEY` exists in that
+   project.** Release v5 declares `ROUTES_API_KEY` (`delivery_quotes.js`: a
+   Google Maps Platform key restricted to the Routes API, used server-side by
+   `quoteDelivery` to measure Delivery routes). Because every deploy checks
+   every declared secret, no Functions deploy from this source succeeds in a
+   project without it — staging or production. Create a project-specific key
+   (never the Passenger App's client key) and set it first:
+
+       firebase functions:secrets:set ROUTES_API_KEY --project staging
+
+   Then the functions under test:
 
        firebase deploy --project staging --only "functions:initiateBridgeTopUp,functions:bridgeTopUpCallback,functions:checkBridgeTopUpStatus,functions:initiateBridgePayout,functions:bridgePayoutCallback,functions:approveWithdrawal,functions:rejectWithdrawal,functions:createWallet,functions:createPassengerWallet"
 
@@ -95,25 +102,90 @@ the real provider; update it when Bridge documentation is available.
 
 Always pass `--project`. `.firebaserc` still defaults to production.
 
-## Production deploy freeze (until B1)
+## Payment safety (local code; not yet deployed)
 
-A full `firebase deploy --only functions` from this repository would deploy
-`approveWithdrawal` and `rejectWithdrawal` (not live today) with known payout
-defects, and the current `initiateBridgePayout`, which fails after holding
-funds. Do not deploy payout functions to production before B1.
+There is no global payment freeze. Safety is per transaction:
 
-## Paystack (retired)
+- Top-ups start normally and stay **pending** until their result is
+  confirmed through a documented, authenticated mechanism. None exists yet
+  (see "Open questions for Bridge"), so no top-up is credited automatically.
+  `checkBridgeTopUpStatus` returns `awaitingVerification: true` once Bridge
+  has reported a result that cannot be verified; the app then tells the
+  customer not to pay again.
+- `initiateBridgePayout` queues every request for admin review (no automatic
+  payout), one open withdrawal per driver, from `walletBalance` only.
+  `approveWithdrawal`, `rejectWithdrawal` and `resolveUnconfirmedPayout` are
+  admin-only; the Admin app calls them and writes nothing itself.
+- Callbacks never move money. `requestWithdrawal` and
+  `requestDriverWithdrawal` are retired.
 
-No Paystack credentials, callbacks or staging endpoints are to be configured.
-Remaining references are documented in the B0 report; removal is a separate,
-tightly scoped change. Until then the production endpoints are unchanged, and
-`config.js` refuses Paystack calls in every other environment.
+Deploy the Firestore rules (withdrawals and wallets admin-create) before any
+of these. Do not run a full `firebase deploy --only functions` from this
+repository.
+
+## Paystack (removed)
+
+`initializePaystackPayment`, `verifyPaystackPayment` and `paystackWebhook`,
+the Paystack configuration guard and the `PAYSTACK_SECRET_KEY` declarations
+were removed from the code, and the Passenger app no longer calls Paystack.
+Removing an export does **not** delete a deployed function: after the
+replacement code is deployed, the three deployed Paystack functions must be
+deleted explicitly (`firebase functions:delete initializePaystackPayment
+verifyPaystackPayment paystackWebhook --region europe-west2 --project
+ctstransportapp`), and the Paystack webhook URL removed from the Paystack
+dashboard. Both are production changes that need separate approval.
 
 ## Open questions for Bridge
 
 See the B0 report. Until they are answered, do not assume Bridge offers
 callback signatures, IP allow-lists, idempotency headers, a sandbox, or a
 transaction-status API.
+
+What the code knows today: outbound requests go to `POST {apiBase}/make_payment`
+(`trans_type` CTM for top-ups, MTC for payouts) with HTTP Basic auth
+(client key : secret key). Callbacks arrive as JSON
+`{ trans_ref, trans_status, trans_id, amount }` with nothing that proves they
+came from Bridge.
+
+The provider's public website and merchant portal publish no API
+documentation (checked 2026-10-16); the API host requires credentials. The
+answers must come from The Bridge Solutions directly.
+
+**Current behaviour:** `bridgeTopUpCallback` and
+`bridgePayoutCallback` verify nothing they cannot verify. Every callback is
+recorded in `bridge_callbacks` (one `bridge_callback_unverified` admin alert
+per payment) and **never** credits a wallet, refunds a payout or marks one
+paid. Payouts are settled only by an admin with `resolveUnconfirmedPayout`
+after confirming the result with Bridge; top-ups stay pending (not credited)
+until verification exists. `verifyBridgeCallback` in `bridge.js` is the
+single place to implement verification once Bridge answers.
+
+Questions to send Bridge (all needed before callbacks may move money):
+
+1. Do callbacks carry a signature? Header name, algorithm (e.g. HMAC-SHA256),
+   the exact bytes signed (raw body? which fields, in what order?), the key
+   used (our secret key or a separate webhook secret), and any timestamp or
+   nonce for replay protection with its tolerance.
+2. If not signed: is there a fixed list of source IP addresses for callbacks,
+   and is it guaranteed and announced before it changes?
+3. Is there an authenticated transaction-status endpoint (path, method,
+   parameters, response fields) we can call server-to-server to confirm a
+   `trans_ref` before acting on its callback? Its rate limits?
+4. The meaning of every `trans_status` (000, 001, 002, 003, others): which are
+   final, and can a final status ever change?
+5. Can a callback for one `trans_ref` arrive more than once, out of order, or
+   with a different `trans_id`; which value identifies the payment uniquely?
+6. Is `amount` in the callback always the requested amount, in GHS, as a
+   number or a string; can a payment settle for a different amount?
+7. For `make_payment`: when the HTTP request times out or returns 5xx, can the
+   payout still be executed? Is resending the same `transaction_id`
+   idempotent (rejected as a duplicate) or a second payment?
+8. Which `make_payment` response codes guarantee that no money moved (safe to
+   refund immediately)? Today only an explicit non-000/202 response code is
+   treated that way.
+9. Is there a sandbox (host, credentials, test numbers) and does it send
+   callbacks?
+10. Do callback URLs need registering with Bridge, per environment?
 
 
 Account & Usage

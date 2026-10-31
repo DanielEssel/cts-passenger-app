@@ -10,6 +10,7 @@ import '../../payment/models/payment_method.dart';
 import '../providers/drivers_nearby_provider.dart';
 import '../providers/ride_request_provider.dart';
 import '../providers/wallet_provider.dart';
+import '../services/last_vehicle_store.dart';
 import '../services/payment_method_service.dart';
 import '../services/ride_options_service.dart';
 import '../constants/ride_constants.dart';
@@ -56,6 +57,8 @@ class RideOptionsList extends ConsumerWidget {
                 onTap: () {
                   HapticFeedback.selectionClick();
                   ref.read(rideRequestProvider.notifier).selectRide(ride);
+                  // Remembered for saved-place shortcuts.
+                  ref.read(lastVehicleStoreProvider).save(ride.serviceType);
                 },
                 distance: state.estimatedDistance ??
                     RideConstants.defaultDistanceKm,

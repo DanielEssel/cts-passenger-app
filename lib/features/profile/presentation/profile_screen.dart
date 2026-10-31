@@ -3,20 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/routes/app_routes.dart';
+import '../../../core/theme/cts_theme.dart';
+import '../../../core/widgets/cts_ui.dart';
 import '../../auth/providers/auth_providers.dart';
 
-// ── Tokens ────────────────────────────────────────────────────────────────────
-const _kPrimary = Color(0xFF16A34A);
-const _kPrimaryDim = Color(0xFFDCFCE7);
-const _kBg = Color(0xFFF8FAF9);
-const _kSurface = Colors.white;
-const _kBorder = Color(0xFFE5E7EB);
-const _kBorderLight = Color(0xFFF3F4F6);
-const _kError = Color(0xFFDC2626);
-const _kErrorLight = Color(0xFFFEE2E2);
-const _kTextPrimary = Color(0xFF111827);
-const _kTextSecond = Color(0xFF6B7280);
-const _kTextTertiary = Color(0xFF9CA3AF);
+// ── Tokens (CTSGo design system) ─────────────────────────────────────────────
+const _kBg = CtsTheme.background;
+const _kSurface = CtsTheme.surface;
+const _kBorder = CtsTheme.border;
+const _kError = CtsTheme.error;
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 final userStreamProvider = StreamProvider.autoDispose<UserData?>((ref) {
@@ -34,30 +29,40 @@ class ProfileScreen extends ConsumerWidget {
   final ScrollController scrollController;
   const ProfileScreen({super.key, required this.scrollController});
 
-  static const _menuItems = [
+  // Everyday account settings first; privacy, help and app information
+  // after. Routes are unchanged.
+  static const _account = [
     (
-      icon: Icons.edit_rounded,
+      icon: Icons.person_rounded,
       label: 'Edit Profile',
+      sub: 'Name, photo and email',
       route: AppRoutes.editProfile
     ),
     (
       icon: Icons.location_on_rounded,
       label: 'Saved Places',
+      sub: 'Home, work and favourite addresses',
       route: AppRoutes.savedPlaces
     ),
+  ];
+
+  static const _more = [
     (
-      icon: Icons.lock_rounded,
+      icon: Icons.shield_rounded,
       label: 'Privacy & Security',
+      sub: 'Biometrics, permissions and your data',
       route: AppRoutes.privacySecurity
     ),
     (
-      icon: Icons.help_rounded,
+      icon: Icons.support_agent_rounded,
       label: 'Help & Support',
+      sub: 'FAQs, contact us and trip issues',
       route: AppRoutes.helpSupport
     ),
     (
       icon: Icons.info_rounded,
-      label: 'About CTSTransport',
+      label: 'About CTSGo',
+      sub: 'Version, terms and privacy policy',
       route: AppRoutes.about
     ),
   ];
@@ -68,33 +73,47 @@ class ProfileScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: _kBg,
-      body: SingleChildScrollView(
-        controller: scrollController,
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          children: [
-            userAsync.when(
-              data: (u) => _ProfileHeader(user: u),
-              loading: () => const _ProfileHeader(user: null),
-              error: (_, __) => const _ProfileHeader(user: null),
-            ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _MenuCard(items: _menuItems),
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _LogoutButton(
-                onTap: () => _confirmLogout(context, ref),
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          controller: scrollController,
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const CtsPageTitle('Profile'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+                child: userAsync.when(
+                  data: (u) => _IdentityCard(user: u, loading: false),
+                  loading: () => const _IdentityCard(user: null, loading: true),
+                  error: (_, __) =>
+                      const _IdentityCard(user: null, loading: false),
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Text('CTSTransport v1.0.0',
-                style: TextStyle(fontSize: 11, color: _kTextTertiary)),
-            const SizedBox(height: 40),
-          ],
+              const SizedBox(height: 28),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+                child: _MenuCard(title: 'Account', items: _account),
+              ),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+                child: _MenuCard(title: 'Privacy and support', items: _more),
+              ),
+              const SizedBox(height: 32),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: ctsGutter),
+                child: _LogoutButton(
+                  onTap: () => _confirmLogout(context, ref),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('CTSGo v1.0.0',
+                  textAlign: TextAlign.center, style: CtsText.caption),
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );
@@ -104,9 +123,7 @@ class ProfileScreen extends ConsumerWidget {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Log out?',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text('Log out?'),
         content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
@@ -124,7 +141,8 @@ class ProfileScreen extends ConsumerWidget {
                     .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
               }
             },
-            style: FilledButton.styleFrom(backgroundColor: _kError),
+            style: FilledButton.styleFrom(
+                backgroundColor: _kError, foregroundColor: Colors.white),
             child: const Text('Log Out'),
           ),
         ],
@@ -133,10 +151,13 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-// ── Profile header ────────────────────────────────────────────────────────────
-class _ProfileHeader extends StatelessWidget {
+// ── Identity card ─────────────────────────────────────────────────────────────
+// Avatar, full name and contact details. The phone number is the one the
+// passenger signed in with, marked Verified as on Edit Profile.
+class _IdentityCard extends StatelessWidget {
   final UserData? user;
-  const _ProfileHeader({required this.user});
+  final bool loading;
+  const _IdentityCard({required this.user, required this.loading});
 
   String get _displayName {
     if (user?.displayName?.isNotEmpty == true) return user!.displayName!;
@@ -156,198 +177,199 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.of(context).padding.top;
-    return Container(
-      width: double.infinity,
-      color: _kSurface,
-      padding: EdgeInsets.fromLTRB(20, top + 24, 20, 28),
-      child: Column(
+    final large = ctsLargeText(context);
+    final phone = user?.phoneNumber;
+    final email = user?.email;
+
+    final avatar = SizedBox(
+      width: 76,
+      height: 76,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          // Avatar
-          Stack(
-            children: [
-              Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _kBorder, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.07),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: user?.photoURL?.isNotEmpty == true
-                      ? Image.network(
-                          user!.photoURL!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _fallback(),
-                        )
+          Container(
+            width: 72,
+            height: 72,
+            padding: const EdgeInsets.all(3),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: CtsTheme.appleSoft,
+            ),
+            child: ClipOval(
+              child: user?.photoURL?.isNotEmpty == true
+                  ? Image.network(
+                      user!.photoURL!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _fallback(),
+                    )
+                  : loading
+                      ? const ColoredBox(color: CtsTheme.surface)
                       : _fallback(),
-                ),
-              ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: GestureDetector(
-                  onTap: () =>
-                      Navigator.pushNamed(context, AppRoutes.editProfile),
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: _kPrimary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: const Icon(Icons.camera_alt_rounded,
-                        size: 13, color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-
-          const SizedBox(height: 14),
-
-          // Name
-          user == null
-              ? _Skeleton(width: 140, height: 18)
-              : Text(_displayName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: _kTextPrimary,
-                  )),
-
-          const SizedBox(height: 6),
-
-          // Phone / email
-          user == null
-              ? _Skeleton(width: 110, height: 13)
-              : Text(
-                  user!.phoneNumber ?? user!.email ?? '',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _kTextSecond,
+          Positioned(
+            right: -10,
+            bottom: -10,
+            child: Semantics(
+              button: true,
+              label: 'Edit profile photo',
+              excludeSemantics: true,
+              onTap: () => Navigator.pushNamed(context, AppRoutes.editProfile),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () =>
+                    Navigator.pushNamed(context, AppRoutes.editProfile),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Center(
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: CtsTheme.vivid,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(Icons.camera_alt_rounded,
+                          size: 14, color: CtsTheme.onVivid),
+                    ),
                   ),
                 ),
+              ),
+            ),
+          ),
         ],
       ),
+    );
+
+    final details = loading
+        ? const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CtsSkeleton(width: 150, height: 20),
+              SizedBox(height: 10),
+              CtsSkeleton(width: 110, height: 13),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(_displayName,
+                    maxLines: large ? null : 3,
+                    overflow: large ? null : TextOverflow.ellipsis,
+                    style: CtsText.title2),
+              ),
+              if (phone?.isNotEmpty == true) ...[
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(phone!,
+                        style: CtsText.bodySmall
+                            .copyWith(color: CtsTheme.textPrimary)),
+                    const _VerifiedMark(),
+                  ],
+                ),
+              ],
+              if (email?.isNotEmpty == true) ...[
+                const SizedBox(height: 4),
+                // One line: an address split mid-word is hard to read.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(email!, maxLines: 1, style: CtsText.bodySmall),
+                ),
+              ],
+            ],
+          );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(CtsTheme.radiusXl),
+        border: Border.all(color: _kBorder),
+        boxShadow: CtsTheme.cardShadow,
+      ),
+      child: large
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [avatar, const SizedBox(height: 16), details],
+            )
+          : Row(
+              children: [
+                avatar,
+                const SizedBox(width: 18),
+                Expanded(child: details),
+              ],
+            ),
     );
   }
 
   Widget _fallback() => Container(
-        color: _kPrimaryDim,
+        color: CtsTheme.surface,
         child: Center(
           child: Text(_initials,
-              style: const TextStyle(
-                fontSize: 32,
+              style: CtsText.title2.copyWith(
                 fontWeight: FontWeight.w800,
-                color: _kPrimary,
+                color: CtsTheme.primaryDeep,
               )),
         ),
       );
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
-class _Skeleton extends StatelessWidget {
-  final double width;
-  final double height;
-  const _Skeleton({required this.width, required this.height});
+class _VerifiedMark extends StatelessWidget {
+  const _VerifiedMark();
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: _kBorder,
-          borderRadius: BorderRadius.circular(4),
+  Widget build(BuildContext context) => Semantics(
+        label: 'Verified',
+        excludeSemantics: true,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+          decoration: BoxDecoration(
+            color: CtsTheme.appleSoft,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.verified_rounded,
+                  size: 13, color: CtsTheme.primaryDeep),
+              const SizedBox(width: 4),
+              Text('Verified',
+                  style: CtsText.caption.copyWith(
+                      color: CtsTheme.primaryDeep,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
         ),
       );
 }
 
-// ── Menu card ─────────────────────────────────────────────────────────────────
+// ── Menu group ────────────────────────────────────────────────────────────────
 class _MenuCard extends StatelessWidget {
-  final List<({IconData icon, String label, String route})> items;
-  const _MenuCard({required this.items});
+  final String title;
+  final List<({IconData icon, String label, String sub, String route})> items;
+  const _MenuCard({required this.title, required this.items});
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          color: _kSurface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+  Widget build(BuildContext context) => CtsListGroup(
+        title: title,
+        children: [
+          for (final item in items)
+            CtsListRow(
+              icon: item.icon,
+              title: item.label,
+              subtitle: item.sub,
+              onTap: () => Navigator.pushNamed(context, item.route),
             ),
-          ],
-        ),
-        child: Column(
-          children: items.asMap().entries.map((e) {
-            final i = e.key;
-            final item = e.value;
-            final isFirst = i == 0;
-            final isLast = i == items.length - 1;
-            return Column(
-              children: [
-                InkWell(
-                  onTap: () => Navigator.pushNamed(context, item.route),
-                  borderRadius: BorderRadius.only(
-                    topLeft: isFirst ? const Radius.circular(16) : Radius.zero,
-                    topRight: isFirst ? const Radius.circular(16) : Radius.zero,
-                    bottomLeft:
-                        isLast ? const Radius.circular(16) : Radius.zero,
-                    bottomRight:
-                        isLast ? const Radius.circular(16) : Radius.zero,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 13),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: _kPrimaryDim,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(item.icon, size: 18, color: _kPrimary),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(item.label,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: _kTextPrimary,
-                              )),
-                        ),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: _kTextTertiary, size: 18),
-                      ],
-                    ),
-                  ),
-                ),
-                if (!isLast)
-                  const Divider(
-                    height: 0.5,
-                    thickness: 0.5,
-                    indent: 66,
-                    color: _kBorderLight,
-                  ),
-              ],
-            );
-          }).toList(),
-        ),
+        ],
       );
 }
 
@@ -357,29 +379,12 @@ class _LogoutButton extends StatelessWidget {
   const _LogoutButton({required this.onTap});
 
   @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: _kErrorLight,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _kError.withValues(alpha: 0.2)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.logout_rounded, color: _kError, size: 20),
-              SizedBox(width: 12),
-              Text('Log Out',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _kError,
-                  )),
-            ],
-          ),
-        ),
+  Widget build(BuildContext context) => CtsSecondaryButton(
+        label: 'Log Out',
+        icon: Icons.logout_rounded,
+        destructive: true,
+        expand: true,
+        onPressed: onTap,
       );
 }
 
