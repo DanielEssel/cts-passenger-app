@@ -15,6 +15,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/cts_theme.dart';
 import '../../../core/widgets/cts_booking.dart';
+import '../../../core/widgets/cts_photo_header.dart';
 import '../../../core/widgets/cts_ui.dart';
 import '../../ride/models/place_result.dart';
 import '../../ride/repositories/google_places_repository.dart';
@@ -340,10 +341,13 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
-  // Step 1 of 2. Forest header, then numbered sections in the order the
-  // journey reads (route → parcel → receiver → optional extras), and a
-  // pinned bar with the next step. The bar is part of the page column, so
-  // it rises above the keyboard and never covers a field or its error.
+  // Step 1 of 2. Two areas: a compact header with the parcel photo that
+  // never scrolls (it condenses to its title row while the keyboard is
+  // open), and under it the numbered sections, scrolling on their own, in
+  // the order the journey reads (route → parcel → receiver → optional
+  // extras). A pinned bar holds the next step; it is part of the page
+  // column, so it rises above the keyboard and never covers a field or its
+  // error.
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -358,19 +362,22 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
           body: Column(
             children: [
               const CtsStatusBarStrip(),
+              CtsPhotoHeader(
+                image: 'assets/images/services/package.jpeg',
+                imageAspectRatio: 1376 / 768,
+                // The parcels on the right of the photo.
+                imageAlignment: Alignment.centerRight,
+                eyebrow: 'Step 1 of 2 · Route & parcel',
+                title: 'Send a parcel',
+                subtitle: 'Picked up from you and delivered across town.',
+                condensed: MediaQuery.viewInsetsOf(context).bottom > 0,
+              ),
               Expanded(
                 child: ListView(
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: const EdgeInsets.only(bottom: 24),
                   children: [
-                    const CtsBrandHeader(
-                      eyebrow: 'Step 1 of 2 · Route & parcel',
-                      title: 'Send a parcel',
-                      subtitle: 'Picked up from you and delivered across '
-                          'town, tracked all the way.',
-                      icon: Icons.inventory_2_rounded,
-                    ),
                     const SizedBox(height: 18),
                     _padded(CtsFormSection(
                       number: '1',

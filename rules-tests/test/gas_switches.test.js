@@ -48,8 +48,10 @@ describe("gas supplier switches", () => {
   });
 
   it("GSW-04 an active super admin may switch them on and off and set the response deadline", async () => {
+    // Supplier payouts switch on only with their withdrawal limits (test values, not approved amounts).
+    const ON = { enabled: true, minWithdrawalPesewas: 1000, maxWithdrawalPesewas: 50000, dailyWithdrawalLimitPesewas: 100000 };
     for (const p of SWITCHES) {
-      await assertSucceeds(updateDoc(doc(h.db(SUPER), p), { enabled: true }));
+      await assertSucceeds(updateDoc(doc(h.db(SUPER), p), p === SWITCHES[1] ? ON : { enabled: true }));
       await assertSucceeds(updateDoc(doc(h.db(SUPER), p), { enabled: false }));
     }
     await assertSucceeds(updateDoc(doc(h.db(SUPER), SWITCHES[0]), { supplierResponseMinutes: 10 }));

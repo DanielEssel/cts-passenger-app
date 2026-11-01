@@ -14,6 +14,7 @@ import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
 import 'package:cts_transport_app/features/gas/domain/gas_pricing.dart';
 import 'package:cts_transport_app/features/wallet/presentation/providers/wallet_providers.dart';
 import 'package:cts_transport_app/features/wallet/presentation/widgets/bridge_momo_sheet.dart';
+import '../../../../core/utils/cedi_format.dart';
 
 /// Slides up before placing a gas order.
 /// Returns `true`  when payment succeeds (caller should proceed to create order).
@@ -350,7 +351,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                         .copyWith(color: CtsTheme.textSecondary)),
                 const SizedBox(height: 3),
                 Text(
-                  'GHS ${balance.toStringAsFixed(2)}',
+                  formatCedis(balance),
                   style: AppColors.titleMedium.copyWith(
                     fontWeight: FontWeight.w800,
                     color: hasFunds ? CtsTheme.primary : Colors.orange,
@@ -367,7 +368,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                     style: AppColors.labelSmall
                         .copyWith(color: CtsTheme.textSecondary)),
                 Text(
-                  'GHS ${(widget.total - balance).toStringAsFixed(2)}',
+                  formatCedis(widget.total - balance),
                   style: AppColors.bodyMedium.copyWith(
                     color: Colors.orange,
                     fontWeight: FontWeight.w700,
@@ -430,7 +431,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                       strokeWidth: 2, color: CtsTheme.onVivid),
                 )
               : Text(
-                  'Pay GHS ${widget.total.toStringAsFixed(2)}',
+                  'Pay ${formatCedis(widget.total)}',
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w800),
                 ),
@@ -450,7 +451,7 @@ class _GasPaymentSheetState extends ConsumerState<GasPaymentSheet> {
                       strokeWidth: 2, color: CtsTheme.onVivid),
                 )
               : Text(
-                  'Top Up & Pay GHS ${widget.total.toStringAsFixed(2)}',
+                  'Top Up & Pay ${formatCedis(widget.total)}',
                   style: const TextStyle(
                       fontSize: 15, fontWeight: FontWeight.w800),
                 ),
@@ -519,7 +520,7 @@ class _SummaryRow extends StatelessWidget {
         const SizedBox(width: 12),
         Flexible(
           child: Text(
-            'GHS ${amount.toStringAsFixed(2)}',
+            formatCedis(amount),
             textAlign: TextAlign.end,
             style: isTotal
                 ? AppColors.titleLarge.copyWith(

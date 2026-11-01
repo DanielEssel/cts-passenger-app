@@ -14,17 +14,18 @@ import '../../domain/gas_pricing.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/cts_theme.dart';
 import '../../../../core/widgets/cts_booking.dart';
+import '../../../../core/widgets/cts_photo_header.dart';
 import '../../../../core/widgets/cts_ui.dart';
-import '../../../home/widgets/service_tile.dart';
-import '../../../ride/models/service_type.dart';
 import '../../theme/gas_theme.dart';
 import '../../models/gas_refill_request.dart';
 import '../../providers/gas_order_providers.dart' hide authStateProvider;
 import '../../presentation/widgets/address_picker_sheet.dart';
 import 'gas_order_tracking_screen.dart';
 import '../../presentation/widgets/gas_payment_sheet.dart';
+import '../../presentation/widgets/gas_booking_widgets.dart';
 import '../../../../features/auth/providers/auth_providers.dart';
 import 'dart:math' as math;
+import '../../../../core/utils/cedi_format.dart';
 
 class GasOrderScreen extends ConsumerStatefulWidget {
   /// Outside calls; the defaults are the real services.
@@ -119,11 +120,13 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   // ─────────────────────────────────────────────
   // BUILD
   //
-  // Forest header with progress, then numbered sections: service → cylinder
-  // (and provider) → address → safety → payment, the price panel, and a
-  // pinned "Place gas order" bar. Only fields relevant to the chosen service
-  // are shown. Sections live in a lazily built SliverList and render at full
-  // opacity with the page transition (no fade-in: it cost ~500 ms frames).
+  // Two areas: a compact service header with the gas photo and progress
+  // that never scrolls, and under it the stepped sections, scrolling on
+  // their own: service → cylinder (and provider) → address → safety →
+  // payment, the price panel. A pinned "Place gas order" bar sits below.
+  // Only fields relevant to the chosen service are shown. Sections live in a
+  // lazily built SliverList and render at full opacity with the page
+  // transition (no fade-in: it cost ~500 ms frames).
   // ─────────────────────────────────────────────
 
   @override
@@ -137,9 +140,11 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
       _gap,
       _buildSafetySection(),
       _gap,
-      CtsFormSection(
-        number: '5',
+      GasSection(
+        step: 5,
+        icon: Icons.account_balance_wallet_rounded,
         title: 'Payment',
+        caption: 'How you will pay for this order',
         child: _buildPaymentSelector(),
       ),
       _gap,
@@ -156,38 +161,30 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
         body: Column(
           children: [
             const CtsStatusBarStrip(),
+            CtsPhotoHeader(
+              image: 'assets/images/services/gas.jpeg',
+              imageAspectRatio: 1,
+              // The cylinder stands a little right of the photo's centre.
+              imageAlignment: const Alignment(0.1, 0),
+              eyebrow: 'Cooking gas · LPG',
+              title: 'Gas to your door',
+              subtitle: 'Exchange, refill or buy a cylinder, brought to you.',
+              trailing: CtsHeaderIconButton(
+                icon: Icons.support_agent_rounded,
+                label: 'Help and support',
+                onTap: _showHelp,
+              ),
+              footer: CtsHeaderProgress(
+                steps: const ['Order', 'Delivery', 'Review'],
+                current: _currentStep,
+              ),
+            ),
             Expanded(
               child: CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: CtsBrandHeader(
-                      eyebrow: 'Cooking gas · LPG',
-                      title: 'Gas to your door',
-                      subtitle:
-                          'Exchange, refill or buy a cylinder. A driver brings '
-                          'it to you.',
-                      visual: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: const SizedBox(
-                          width: 72,
-                          child: ServiceImage(
-                              service: ServiceType.gas, aspectRatio: 1),
-                        ),
-                      ),
-                      trailing: CtsHeaderIconButton(
-                        icon: Icons.support_agent_rounded,
-                        label: 'Help and support',
-                        onTap: _showHelp,
-                      ),
-                      footer: CtsHeaderProgress(
-                        steps: const ['Order', 'Delivery', 'Review'],
-                        current: _currentStep,
-                      ),
-                    ),
-                  ),
                   SliverPadding(
                     padding:
-                        const EdgeInsets.fromLTRB(ctsGutter, 18, ctsGutter, 0),
+                        const EdgeInsets.fromLTRB(ctsGutter, 20, ctsGutter, 0),
                     sliver: SliverList.list(children: sections),
                   ),
                 ],
@@ -203,7 +200,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
               action: CtsPrimaryButton(
                 label: 'Place gas order',
                 trailingText:
-                    _priceKnown ? 'GHS ${_total.toStringAsFixed(2)}' : null,
+                    _priceKnown ? formatCedis(_total) : null,
                 icon: Icons.local_fire_department_rounded,
                 loading: _isSubmitting,
                 onPressed: canSubmit ? _placeOrder : null,
@@ -215,7 +212,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
     );
   }
 
-  static const Widget _gap = SizedBox(height: 16);
+  static const Widget _gap = SizedBox(height: 18);
 
   void _toggleBrand(GasBrand brand) {
     HapticFeedback.selectionClick();
@@ -242,82 +239,139 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
 
   Widget _typeCard(GasRefillType type) {
     final selected = type == _selectedType;
-    return CtsSelectableCard(
+    final onDark = selected;
+    return Semantics(
+      button: true,
       selected: selected,
-      semanticLabel: '${type.displayName}. ${_typeDescription(type)}. '
+      inMutuallyExclusiveGroup: true,
+      label: '${type.displayName}. ${_typeDescription(type)}. '
           'About ${_formatDuration(type.estimatedDuration)}',
-      showCheck: false,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      onTap: () {
-        HapticFeedback.selectionClick();
-        setState(() => _selectedType = type);
-      },
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: selected ? CtsTheme.forest : CtsTheme.mint,
-              borderRadius: BorderRadius.circular(14),
+      excludeSemantics: true,
+      onTap: () => _selectType(type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          gradient: selected ? GasPalette.selectedGradient : null,
+          color: selected ? null : GasPalette.idleFill,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: selected ? GasPalette.selectedGlow : null,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => _selectType(type),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              child: Row(
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: onDark
+                          ? Colors.white.withValues(alpha: 0.14)
+                          : CtsTheme.surface,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Icon(type.icon,
+                        size: 23,
+                        color: onDark ? GasPalette.mint : GasPalette.greenDeep),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(type.displayName,
+                            style: CtsText.cardTitle.copyWith(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w800,
+                              color:
+                                  onDark ? Colors.white : CtsTheme.textPrimary,
+                            )),
+                        const SizedBox(height: 2),
+                        Text(_typeDescription(type),
+                            style: CtsText.bodySmall.copyWith(
+                              fontSize: 13.5,
+                              height: 1.3,
+                              color: onDark
+                                  ? GasPalette.mint
+                                  : CtsTheme.textSecondary,
+                            )),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: onDark
+                                ? Colors.white.withValues(alpha: 0.14)
+                                : GasPalette.mint,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.schedule_rounded,
+                                  size: 13,
+                                  color: onDark
+                                      ? Colors.white
+                                      : GasPalette.greenDeep),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                    'About ${_formatDuration(type.estimatedDuration)}',
+                                    style: CtsText.caption.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: onDark
+                                          ? Colors.white
+                                          : GasPalette.greenDeep,
+                                    )),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  GasCheckBadge(selected: selected, onDark: onDark),
+                ],
+              ),
             ),
-            child: Icon(type.icon,
-                size: 22, color: selected ? Colors.white : CtsTheme.forest),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(type.displayName,
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w800,
-                      color: CtsTheme.charcoal,
-                    )),
-                const SizedBox(height: 2),
-                Text(_typeDescription(type),
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      height: 1.3,
-                      color: CtsTheme.textSecondary,
-                    )),
-                const SizedBox(height: 2),
-                Text('About ${_formatDuration(type.estimatedDuration)}',
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: CtsTheme.forest,
-                    )),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _RadioDot(selected: selected),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildServiceTypeSection() => CtsFormSection(
-        number: '1',
+  void _selectType(GasRefillType type) {
+    HapticFeedback.selectionClick();
+    setState(() => _selectedType = type);
+  }
+
+  Widget _buildServiceTypeSection() => GasSection(
+        step: 1,
+        icon: Icons.local_fire_department_rounded,
         title: 'Service',
         caption: 'How would you like your gas?',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const CtsSubheading('Delivered to you'),
+            const GasGroupLabel('Delivered to you'),
             for (final type in const [
               GasRefillType.exchangeEmpty,
               GasRefillType.newCylinder,
               GasRefillType.commercialBulk,
             ]) ...[
               _typeCard(type),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
             ],
             const SizedBox(height: 8),
-            const CtsSubheading('Refill my own cylinder'),
+            const GasGroupLabel('Refill my own cylinder'),
             _typeCard(GasRefillType.pickupAndReturn),
           ],
         ),
@@ -334,13 +388,76 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
           ? size.fullCylinderPrice
           : size.refillPrice;
 
-  Widget _buildCylinderSection() => CtsFormSection(
-        number: '2',
+  // The tank icon grows with the cylinder, so sizes read at a glance.
+  static double _tankIconSize(CylinderSize s) =>
+      16 + 14 * (math.min(s.weight, 19) - 3) / 16;
+
+  Widget _sizeTile(CylinderSize size) {
+    final selected = size == _selectedSize;
+    return GasOptionSurface(
+      selected: selected,
+      semanticLabel:
+          '${size.displayName}, ${formatCedis(_unitPriceFor(size), decimals: 0)}',
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _selectedSize = size);
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Icon(Icons.propane_tank_rounded,
+                      size: _tankIconSize(size),
+                      color: selected
+                          ? GasPalette.greenDeep
+                          : CtsTheme.textTertiary),
+                ),
+              ),
+              const Spacer(),
+              if (selected)
+                const Icon(Icons.check_circle_rounded,
+                    size: 18, color: GasPalette.green),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(size.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: CtsText.cardTitle.copyWith(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: CtsTheme.textPrimary,
+              )),
+          const SizedBox(height: 1),
+          Text(formatCedis(_unitPriceFor(size), decimals: 0),
+              maxLines: 1,
+              style: CtsText.price.copyWith(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w800,
+                color: GasPalette.greenDeep,
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCylinderSection() => GasSection(
+        step: 2,
+        icon: Icons.propane_tank_rounded,
         title: 'Cylinder',
+        caption: 'Choose a size for your cylinder',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            CtsSubheading('Cylinder size',
+            GasGroupLabel('Cylinder size',
                 caption: _selectedType == GasRefillType.newCylinder
                     ? 'Price per new cylinder'
                     : 'Price per refill'),
@@ -352,58 +469,18 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
                 runSpacing: spacing,
                 children: [
                   for (final size in CylinderSize.values)
-                    SizedBox(
-                      width: w,
-                      child: CtsSelectableCard(
-                        selected: size == _selectedSize,
-                        semanticLabel:
-                            '${size.displayName}, GHS ${_unitPriceFor(size).toStringAsFixed(0)}',
-                        padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() => _selectedSize = size);
-                        },
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(Icons.propane_tank_rounded,
-                                size: 22,
-                                color: size == _selectedSize
-                                    ? CtsTheme.forest
-                                    : CtsTheme.textSecondary),
-                            const SizedBox(height: 8),
-                            Text(size.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                  color: CtsTheme.textPrimary,
-                                )),
-                            Text('GHS ${_unitPriceFor(size).toStringAsFixed(0)}',
-                                maxLines: 1,
-                                style: const TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: CtsTheme.forest,
-                                )),
-                          ],
-                        ),
-                      ),
-                    ),
+                    SizedBox(width: w, child: _sizeTile(size)),
                 ],
               );
             }),
             if (_selectedType == GasRefillType.commercialBulk) ...[
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               _buildQuantitySection(),
             ],
             // Pickup & Return refills the customer's own cylinder, so no
             // provider is chosen.
             if (!_isRoundTrip) ...[
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
               _buildBrandSection(),
             ],
           ],
@@ -431,7 +508,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   Widget _buildBrandSection() => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CtsSubheading('Gas provider',
+          GasGroupLabel('Gas provider',
               caption: _selectedBrand == null
                   ? 'Optional · standard price unless marked'
                   : 'Tap again to clear'),
@@ -465,62 +542,72 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   // ─────────────────────────────────────────────
 
   Widget _buildQuantitySection() => Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         decoration: BoxDecoration(
-          color: CtsTheme.mint,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: CtsTheme.mintBorder),
+          color: GasPalette.mint,
+          borderRadius: BorderRadius.circular(18),
         ),
         child: Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Quantity',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: CtsTheme.textPrimary,
+                      style: CtsText.cardTitle.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: GasPalette.forest,
                       )),
                   Text('Number of cylinders',
-                      style: TextStyle(
-                          fontSize: 12, color: CtsTheme.textSecondary)),
+                      style: CtsText.caption
+                          .copyWith(color: CtsTheme.textSecondary)),
                 ],
               ),
             ),
-            _QtyBtn(
-              icon: Icons.remove_rounded,
-              label: 'Fewer cylinders',
-              onTap: _quantity > 1
-                  ? () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _quantity--);
-                    }
-                  : null,
-            ),
-            SizedBox(
-              width: 44,
-              child: Text('$_quantity',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: CtsTheme.textPrimary,
-                  )),
-            ),
-            _QtyBtn(
-              icon: Icons.add_rounded,
-              label: 'More cylinders',
-              // The server prices at most GasPricing.maxQuantity cylinders.
-              onTap: _quantity < GasPricing.maxQuantity
-                  ? () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _quantity++);
-                    }
-                  : null,
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: CtsTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: CtsTheme.cardShadow,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _QtyBtn(
+                    icon: Icons.remove_rounded,
+                    label: 'Fewer cylinders',
+                    onTap: _quantity > 1
+                        ? () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _quantity--);
+                          }
+                        : null,
+                  ),
+                  SizedBox(
+                    width: 40,
+                    child: Text('$_quantity',
+                        textAlign: TextAlign.center,
+                        style: CtsText.price.copyWith(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: CtsTheme.textPrimary,
+                        )),
+                  ),
+                  _QtyBtn(
+                    icon: Icons.add_rounded,
+                    label: 'More cylinders',
+                    // The server prices at most GasPricing.maxQuantity
+                    // cylinders.
+                    onTap: _quantity < GasPricing.maxQuantity
+                        ? () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _quantity++);
+                          }
+                        : null,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -532,8 +619,9 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
 
   Widget _buildAddressSection() {
     final hasAddress = _deliveryAddress != null;
-    return CtsFormSection(
-      number: '3',
+    return GasSection(
+      step: 3,
+      icon: _isRoundTrip ? Icons.sync_rounded : Icons.location_on_rounded,
       title: _isRoundTrip ? 'Collection & return address' : 'Delivery address',
       caption: _isRoundTrip
           ? 'We collect your cylinder here, refill it at a station and bring '
@@ -549,81 +637,98 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
                 : 'Set your delivery location',
             excludeSemantics: true,
             onTap: _selectAddress,
-            child: Material(
-              color: hasAddress ? CtsTheme.mint : CtsTheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(
-                  color: hasAddress ? CtsTheme.primary : CtsTheme.cardEdge,
-                  width: hasAddress ? 1.5 : 1,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              decoration: BoxDecoration(
+                color: hasAddress ? CtsTheme.primaryTint : GasPalette.idleFill,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: hasAddress ? GasPalette.green : Colors.transparent,
+                  width: 1.5,
                 ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: _selectAddress,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: hasAddress
-                              ? CtsTheme.primaryTint
-                              : CtsTheme.surfaceAlt,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(Icons.location_on_rounded,
-                            size: 20,
+              child: Material(
+                type: MaterialType.transparency,
+                borderRadius: BorderRadius.circular(18),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: _selectAddress,
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
                             color: hasAddress
-                                ? CtsTheme.primaryDeep
-                                : CtsTheme.textSecondary),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
+                                ? GasPalette.green
+                                : CtsTheme.surface,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
                               hasAddress
-                                  ? (_isRoundTrip
-                                      ? 'Collect from'
-                                      : 'Deliver to')
-                                  : 'Where are you?',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: CtsTheme.forest,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _deliveryAddress ?? 'Tap to set your location',
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 15,
-                                fontWeight: hasAddress
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: hasAddress
-                                    ? CtsTheme.textPrimary
-                                    : CtsTheme.textTertiary,
-                              ),
-                            ),
-                          ],
+                                  ? Icons.location_on_rounded
+                                  : Icons.add_location_alt_rounded,
+                              size: 22,
+                              color: hasAddress
+                                  ? Colors.white
+                                  : GasPalette.greenDeep),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(hasAddress ? 'Change' : 'Set',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: CtsTheme.forest,
-                          )),
-                    ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                hasAddress
+                                    ? (_isRoundTrip
+                                        ? 'Collect from'
+                                        : 'Deliver to')
+                                    : 'Where are you?',
+                                style: CtsText.caption.copyWith(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: GasPalette.greenDeep,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _deliveryAddress ?? 'Tap to set your location',
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: CtsText.cardTitle.copyWith(
+                                  fontWeight: hasAddress
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: hasAddress
+                                      ? CtsTheme.textPrimary
+                                      : CtsTheme.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: hasAddress
+                                ? CtsTheme.surface
+                                : GasPalette.greenDeep,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(hasAddress ? 'Change' : 'Set',
+                              style: CtsText.label.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: hasAddress
+                                    ? GasPalette.greenDeep
+                                    : Colors.white,
+                              )),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -632,32 +737,24 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
           // Estimates only once an address is set and measured.
           if (_deliveryGeoPoint != null) ...[
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: CtsTheme.canvas,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _InfoPair(
-                      icon: Icons.access_time_rounded,
-                      label: 'Est. delivery',
-                      value: _etaText,
-                    ),
+            Row(
+              children: [
+                Expanded(
+                  child: _InfoPair(
+                    icon: Icons.access_time_rounded,
+                    label: 'Est. delivery',
+                    value: _etaText,
                   ),
-                  Container(width: 1, height: 28, color: CtsTheme.border),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _InfoPair(
-                      icon: Icons.local_shipping_rounded,
-                      label: _pricing.deliveryLabel,
-                      value: 'GHS ${_deliveryFee.toStringAsFixed(2)}',
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _InfoPair(
+                    icon: Icons.local_shipping_rounded,
+                    label: _pricing.deliveryLabel,
+                    value: formatCedis(_deliveryFee),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ],
@@ -669,91 +766,105 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   // SAFETY CHECKLIST
   // ─────────────────────────────────────────────
 
-  Widget _buildSafetySection() => CtsFormSection(
-        number: '4',
+  Widget _buildSafetySection() => GasSection(
+        step: 4,
+        icon: Icons.health_and_safety_rounded,
         title: 'Safety check',
         caption: 'Please confirm before we send a driver',
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
-          decoration: BoxDecoration(
-            color: _safetyAccepted ? CtsTheme.mint : CtsTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _safetyAccepted ? CtsTheme.primary : CtsTheme.cardEdge,
-              width: _safetyAccepted ? 1.5 : 1,
-            ),
-          ),
-          child: Column(
-            children: [
-              // A new cylinder needs no empty one; the others hand over
-              // the customer's own cylinder.
-              if (_selectedType != GasRefillType.newCylinder) ...[
-                _SafetyItem(
-                    _isRoundTrip
-                        ? 'Your cylinder is ready for collection'
-                        : 'Valid empty cylinder ready for exchange',
-                    'Ensure cylinder is not expired and has valid certification'),
-                const SizedBox(height: 10),
-                const _SafetyItem(
-                    'Cylinder in good condition — no leaks or damage',
-                    'Check for rust, dents, or damaged valves'),
-                const SizedBox(height: 10),
-              ],
-              const _SafetyItem('I understand gas safety guidelines',
-                  'Keep upright, away from heat, in ventilated area'),
-              const Divider(height: 20, color: CtsTheme.border),
-              Semantics(
-                checked: _safetyAccepted,
-                label: 'I confirm all safety requirements are met',
-                excludeSemantics: true,
-                onTap: _toggleSafety,
-                child: InkWell(
-                  onTap: _toggleSafety,
-                  borderRadius: BorderRadius.circular(10),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 48),
-                    child: Row(
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            color: _safetyAccepted
-                                ? CtsTheme.primary
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: _safetyAccepted
-                                  ? CtsTheme.primary
-                                  : CtsTheme.textTertiary,
-                              width: 1.5,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // A new cylinder needs no empty one; the others hand over
+            // the customer's own cylinder.
+            if (_selectedType != GasRefillType.newCylinder) ...[
+              _SafetyItem(
+                  Icons.verified_rounded,
+                  _isRoundTrip
+                      ? 'Your cylinder is ready for collection'
+                      : 'Valid empty cylinder ready for exchange',
+                  'Ensure cylinder is not expired and has valid certification'),
+              const SizedBox(height: 12),
+              const _SafetyItem(
+                  Icons.build_circle_rounded,
+                  'Cylinder in good condition — no leaks or damage',
+                  'Check for rust, dents, or damaged valves'),
+              const SizedBox(height: 12),
+            ],
+            const _SafetyItem(
+                Icons.local_fire_department_rounded,
+                'I understand gas safety guidelines',
+                'Keep upright, away from heat, in ventilated area'),
+            const SizedBox(height: 16),
+            Semantics(
+              checked: _safetyAccepted,
+              label: 'I confirm all safety requirements are met',
+              excludeSemantics: true,
+              onTap: _toggleSafety,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  gradient:
+                      _safetyAccepted ? GasPalette.selectedGradient : null,
+                  color: _safetyAccepted ? null : GasPalette.idleFill,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: _safetyAccepted ? GasPalette.selectedGlow : null,
+                ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  borderRadius: BorderRadius.circular(16),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: _toggleSafety,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 56),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        child: Row(
+                          children: [
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: _safetyAccepted
+                                    ? GasPalette.mint
+                                    : CtsTheme.surface,
+                                borderRadius: BorderRadius.circular(7),
+                                border: Border.all(
+                                  color: _safetyAccepted
+                                      ? GasPalette.mint
+                                      : CtsTheme.textDisabled,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: _safetyAccepted
+                                  ? const Icon(Icons.check_rounded,
+                                      color: GasPalette.forest, size: 16)
+                                  : null,
                             ),
-                          ),
-                          child: _safetyAccepted
-                              ? const Icon(Icons.check_rounded,
-                                  color: Colors.white, size: 15)
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'I confirm all safety requirements are met',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w700,
-                              color: CtsTheme.textPrimary,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'I confirm all safety requirements are met',
+                                style: CtsText.cardTitle.copyWith(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _safetyAccepted
+                                      ? Colors.white
+                                      : CtsTheme.textPrimary,
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
 
@@ -765,18 +876,20 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
         lines: [
           CtsPriceLine(
             '${_pricing.unitLabel} · ${_selectedSize.displayName} × $_quantity',
-            'GHS ${_basePrice.toStringAsFixed(2)}',
+            formatCedis(_basePrice),
           ),
           if (_brandPremium > 0)
             CtsPriceLine('${_selectedBrand!.displayName} premium',
-                'GHS ${_brandPremium.toStringAsFixed(2)}'),
+                formatCedis(_brandPremium)),
           CtsPriceLine(
             _pricing.deliveryLabel,
-            _priceKnown ? 'GHS ${_deliveryFee.toStringAsFixed(2)}' : 'After address',
+            _priceKnown
+                ? formatCedis(_deliveryFee)
+                : 'After address',
           ),
         ],
         totalLabel: 'Total',
-        total: _priceKnown ? 'GHS ${_total.toStringAsFixed(2)}' : null,
+        total: _priceKnown ? formatCedis(_total) : null,
         pendingText: 'Set your address',
         note: _priceKnown
             ? null
@@ -868,8 +981,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
   Future<double> _nearestDriverKm(GeoPoint dest) async {
     final snap = await FirebaseFirestore.instance
         .collection('driver_map')
-        .where('serviceType', whereIn: const ['delivery', 'gas'])
-        .get();
+        .where('serviceType', whereIn: const ['delivery', 'gas']).get();
 
     double? nearest;
     var matched = 0;
@@ -905,49 +1017,62 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
     Widget option(String value, IconData icon, String label, String sub) {
       final selected = _paymentMethod == value;
       return Expanded(
-        child: CtsSelectableCard(
+        child: GasOptionSurface(
           selected: selected,
           semanticLabel: '$label, $sub',
-          showCheck: false,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          onTap: () => setState(() => _paymentMethod = value),
-          child: Row(children: [
-            Icon(icon,
-                size: 18,
-                color:
-                    selected ? CtsTheme.primaryDeep : CtsTheme.textSecondary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.all(12),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() => _paymentMethod = value);
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Text(label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: CtsTheme.textPrimary,
-                      )),
-                  Text(sub,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 12, color: CtsTheme.textSecondary)),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: selected ? GasPalette.green : CtsTheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon,
+                        size: 19,
+                        color: selected ? Colors.white : GasPalette.greenDeep),
+                  ),
+                  const Spacer(),
+                  GasCheckBadge(selected: selected),
                 ],
               ),
-            ),
-          ]),
+              const SizedBox(height: 10),
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: CtsText.cardTitle.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: CtsTheme.textPrimary,
+                  )),
+              Text(sub,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      CtsText.caption.copyWith(color: CtsTheme.textSecondary)),
+            ],
+          ),
         ),
       );
     }
 
-    return Row(children: [
-      option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
-          'Pay from balance'),
-      const SizedBox(width: 10),
-      option('cash', Icons.payments_rounded, 'Cash', 'Pay driver directly'),
-    ]);
+    return IntrinsicHeight(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        option('wallet', Icons.account_balance_wallet_rounded, 'Wallet',
+            'Pay from balance'),
+        const SizedBox(width: 10),
+        option('cash', Icons.payments_rounded, 'Cash', 'Pay driver directly'),
+      ]),
+    );
   }
 
   Future<void> _placeOrder() async {
@@ -979,7 +1104,8 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
     if (_pricingProblem != null) {
       setState(() => _isSubmitting = false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Gas prices are being updated. Please try again shortly.'),
+        content:
+            Text('Gas prices are being updated. Please try again shortly.'),
       ));
       return;
     }
@@ -1042,7 +1168,7 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
           setState(() => _isSubmitting = false);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(escrowResult.shortfall != null
-                ? 'Need GHS ${escrowResult.shortfall!.toStringAsFixed(2)} more. Top up wallet.'
+                ? 'Need ${formatCedis(escrowResult.shortfall!)} more. Top up wallet.'
                 : escrowResult.error ?? 'Payment hold failed.'),
             backgroundColor: const Color(0xFFDC2626),
             action: SnackBarAction(
@@ -1167,21 +1293,20 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
     }
   }
 
-  Future<bool?> _confirmPriceChange(double was, double now) =>
-      showDialog<bool>(
+  Future<bool?> _confirmPriceChange(double was, double now) => showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Gas price updated'),
           content: Text(
               'The price changed while you were ordering. The total is now '
-              'GHS ${now.toStringAsFixed(2)} (was GHS ${was.toStringAsFixed(2)}).'),
+              '${formatCedis(now)} (was ${formatCedis(was)}).'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancel')),
             TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Pay GHS ${now.toStringAsFixed(2)}')),
+                child: Text('Pay ${formatCedis(now)}')),
           ],
         ),
       );
@@ -1201,29 +1326,6 @@ class _GasOrderScreenState extends ConsumerState<GasOrderScreen> {
 // PRIVATE WIDGETS
 // ─────────────────────────────────────────────
 
-class _RadioDot extends StatelessWidget {
-  final bool selected;
-  const _RadioDot({required this.selected});
-
-  @override
-  Widget build(BuildContext context) => AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: selected ? CtsTheme.primary : Colors.transparent,
-          border: Border.all(
-            color: selected ? CtsTheme.primary : CtsTheme.textTertiary,
-            width: 1.5,
-          ),
-        ),
-        child: selected
-            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
-            : null,
-      );
-}
-
 class _QtyBtn extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1238,7 +1340,7 @@ class _QtyBtn extends StatelessWidget {
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
-          color: onTap != null ? CtsTheme.primaryTint : CtsTheme.surfaceAlt,
+          color: onTap != null ? GasPalette.green : CtsTheme.surfaceAlt,
           borderRadius: BorderRadius.circular(12),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -1248,15 +1350,14 @@ class _QtyBtn extends StatelessWidget {
               height: 44,
               child: Icon(icon,
                   size: 20,
-                  color: onTap != null
-                      ? CtsTheme.primaryDeep
-                      : CtsTheme.textTertiary),
+                  color: onTap != null ? Colors.white : CtsTheme.textDisabled),
             ),
           ),
         ),
       );
 }
 
+/// A small estimate tile under the address: icon, label, value.
 class _InfoPair extends StatelessWidget {
   final IconData icon;
   final String label, value;
@@ -1264,69 +1365,79 @@ class _InfoPair extends StatelessWidget {
       {required this.icon, required this.label, required this.value});
 
   @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          Icon(icon, color: CtsTheme.primaryDeep, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 12, color: CtsTheme.textSecondary)),
-                Text(value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: CtsTheme.textPrimary,
-                    )),
-              ],
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: GasPalette.idleFill,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: GasPalette.mint,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: GasPalette.greenDeep, size: 17),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: CtsText.caption
+                          .copyWith(color: CtsTheme.textSecondary)),
+                  Text(value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: CtsText.label.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: CtsTheme.textPrimary,
+                      )),
+                ],
+              ),
+            ),
+          ],
+        ),
       );
 }
 
 class _SafetyItem extends StatelessWidget {
+  final IconData icon;
   final String title, subtitle;
-  const _SafetyItem(this.title, this.subtitle);
+  const _SafetyItem(this.icon, this.title, this.subtitle);
 
   @override
   Widget build(BuildContext context) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 20,
-            height: 20,
-            margin: const EdgeInsets.only(top: 1),
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: CtsTheme.primaryTint,
-              shape: BoxShape.circle,
+              color: GasPalette.mint,
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: const Icon(Icons.check_rounded,
-                color: CtsTheme.primaryDeep, size: 12),
+            child: Icon(icon, color: GasPalette.greenDeep, size: 18),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style: const TextStyle(
+                    style: CtsText.label.copyWith(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: CtsTheme.charcoal,
+                      color: CtsTheme.textPrimary,
                     )),
-                const SizedBox(height: 1),
-                Text(subtitle,
-                    style: const TextStyle(
-                        fontSize: 13, color: CtsTheme.textSecondary)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: CtsText.bodySmall.copyWith(fontSize: 13)),
               ],
             ),
           ),
@@ -1382,9 +1493,8 @@ class _BrandChip extends StatelessWidget {
                         fontFamily: 'Inter',
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: selected
-                            ? CtsTheme.primaryDeep
-                            : CtsTheme.charcoal,
+                        color:
+                            selected ? CtsTheme.primaryDeep : CtsTheme.charcoal,
                       )),
                   if (badge != null)
                     Container(

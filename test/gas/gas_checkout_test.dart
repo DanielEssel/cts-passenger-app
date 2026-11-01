@@ -166,7 +166,7 @@ double _totalAtKm(double km) {
   ).total;
 }
 
-String _money(double v) => 'GHS ${v.toStringAsFixed(2)}';
+String _money(double v) => 'GH₵ ${v.toStringAsFixed(2)}';
 
 void main() {
   tearDown(() => PricingService.instance.debugSetSettings(null));

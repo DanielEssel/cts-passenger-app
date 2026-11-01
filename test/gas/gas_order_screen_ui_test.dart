@@ -25,7 +25,7 @@ Future<void> _pump(WidgetTester tester,
   await tester.pump();
 }
 
-String _price(double v) => 'GHS ${v.toStringAsFixed(0)}';
+String _price(double v) => 'GH₵ ${v.toStringAsFixed(0)}';
 
 /// Drags the page until [f] is on screen and tappable (the branded header
 /// pushes later sections below the first viewport).

@@ -7,6 +7,7 @@ import '../../../core/services/escrow_service.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/cts_theme.dart';
 import '../../../core/widgets/cts_booking.dart';
+import '../../../core/widgets/cts_photo_header.dart';
 import '../../../core/widgets/cts_ui.dart';
 import '../../home/widgets/service_tile.dart';
 import '../../ride/models/service_type.dart';
@@ -240,8 +241,9 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
 
   double get _totalFare => _selectedFare.total;
 
-  // Step 2 of 2: what is being sent, the vehicles that can carry it with
-  // their fares (from PricingService), payment, and the total. The action
+  // Step 2 of 2, in two areas: the compact delivery header, which never
+  // scrolls, and under it what is being sent, the vehicles that can carry
+  // it with their fares (from PricingService), payment, and the total. The action
   // stays disabled until the route is measured, so no price is shown or
   // charged before it is known.
   @override
@@ -253,17 +255,21 @@ class _DeliveryVehicleScreenState extends ConsumerState<DeliveryVehicleScreen> {
         body: Column(
           children: [
             const CtsStatusBarStrip(),
+            // Permanent header; only the list below scrolls.
+            const CtsPhotoHeader(
+              image: 'assets/images/services/package.jpeg',
+              imageAspectRatio: 1376 / 768,
+              // The parcels on the right of the photo.
+              imageAlignment: Alignment.centerRight,
+              eyebrow: 'Step 2 of 2 · Vehicle & price',
+              title: 'Choose a vehicle',
+              subtitle: 'Check your delivery, pick a vehicle and '
+                  'confirm the price.',
+            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 24),
                 children: [
-                  const CtsBrandHeader(
-                    eyebrow: 'Step 2 of 2 · Vehicle & price',
-                    title: 'Choose a vehicle',
-                    subtitle: 'Check your delivery, pick a vehicle and '
-                        'confirm the price.',
-                    icon: Icons.local_shipping_rounded,
-                  ),
                   const SizedBox(height: 18),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: ctsGutter),

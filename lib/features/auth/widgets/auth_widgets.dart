@@ -1,8 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/theme/cts_theme.dart';
+import '../domain/phone_number.dart';
 
 // =============================================================================
 // Country model
@@ -385,16 +387,18 @@ class AuthCtaButton extends StatelessWidget {
 
 class PhoneInputField extends StatefulWidget {
   final TextEditingController controller;
-  final String? Function(String?) validator;
   final bool enabled;
   final ValueChanged<Country>? onCountryChanged;
+
+  /// Pressed "done" on the keyboard.
+  final VoidCallback? onSubmitted;
 
   const PhoneInputField({
     super.key,
     required this.controller,
-    required this.validator,
     required this.enabled,
     this.onCountryChanged,
+    this.onSubmitted,
   });
 
   @override
@@ -421,19 +425,9 @@ class PhoneInputFieldState extends State<PhoneInputField> {
 
   Country get selectedCountry => _selected;
 
-  /// Returns a clean E.164 number: dial code + digits only from the field.
-  ///
-  /// ✅ Fixed: previously used a regex that could strip valid leading digits.
-  /// Now simply removes all non-digit characters from the typed value,
-  /// then prepends the dial code (without the '+' duplication issue).
-  String get fullNumber {
-    final digitsOnly =
-        widget.controller.text.trim().replaceAll(RegExp(r'\D'), '');
-    // Remove leading zeros common in local format (e.g. 0244... → 244...)
-    final local =
-        digitsOnly.startsWith('0') ? digitsOnly.substring(1) : digitsOnly;
-    return '${_selected.dial}$local'; // e.g. +233244123456
-  }
+  /// The typed number in E.164 (e.g. +233244123456), or null when invalid.
+  /// Accepts 0244…, 244…, 233244… and +233 24… (see phone_number.dart).
+  String? get e164 => toE164(widget.controller.text, dialCode: _selected.dial);
 
   void _openPicker() {
     showModalBottomSheet<void>(
@@ -455,16 +449,24 @@ class PhoneInputFieldState extends State<PhoneInputField> {
   Widget build(BuildContext context) {
     return TextFormField(
       controller: widget.controller,
-      validator: widget.validator,
+      validator: (value) => validatePhoneInput(value, dialCode: _selected.dial),
       enabled: widget.enabled,
       keyboardType: TextInputType.phone,
+      textInputAction: TextInputAction.done,
+      onFieldSubmitted: (_) => widget.onSubmitted?.call(),
+      autofillHints: const [AutofillHints.telephoneNumber],
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+        LengthLimitingTextInputFormatter(17),
+      ],
       style: AppTextStyles.bodyLarge.copyWith(
         color: AppColors.textPrimary,
         fontWeight: FontWeight.w500,
         letterSpacing: 0.8,
       ),
       decoration: InputDecoration(
-        hintText: 'XX XXX XXXX',
+        hintText:
+            _selected.dial == ghanaDialCode ? '024 412 3456' : 'Phone number',
         hintStyle: AppTextStyles.bodyLarge.copyWith(
           color: AppColors.textTertiary,
           fontWeight: FontWeight.w400,
@@ -737,6 +739,52 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
             ),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Auth feedback
+// =============================================================================
+
+/// Shows an auth error as an announced, dismissible snack bar.
+void showAuthError(BuildContext context, String message) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Semantics(liveRegion: true, child: Text(message)),
+      backgroundColor: AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+    ),
+  );
+}
+
+/// Shown under the button while a code is being requested. Firebase may
+/// open a browser security check (reCAPTCHA) when it can't verify the device.
+class OtpRequestStatus extends StatelessWidget {
+  final bool visible;
+
+  const OtpRequestStatus({super.key, required this.visible});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          'Requesting your code. This can take a few seconds, and you may be '
+          'asked to complete a quick security check.',
+          textAlign: TextAlign.center,
+          style: AppTextStyles.bodySmall
+              .copyWith(color: AppColors.textSecondary, height: 1.4),
         ),
       ),
     );

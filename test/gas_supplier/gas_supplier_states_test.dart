@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:cts_transport_app/features/gas_supplier/domain/gas_supplier_models.dart';
+import 'package:cts_transport_app/features/gas_supplier/domain/gas_supplier_tracking.dart';
 import 'package:cts_transport_app/features/gas_supplier/presentation/gas_supplier_tracking_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,7 +22,7 @@ void main() {
     test('ST-02 cancelled and refunded by the server: the amount is back in the wallet', () {
       final o = order({'status': 'cancelled', 'payment': {'status': 'refunded'}, 'refundPending': false});
       expect(o.paymentStatus, 'refunded');
-      expect(supplierPaymentNote(o), 'GH₵117.00 has been returned to your wallet.');
+      expect(supplierPaymentNote(o), 'GH₵ 117.00 has been returned to your wallet.');
     });
 
     test('ST-03 a refund still pending is "being processed", never "returned"', () {
@@ -38,13 +39,13 @@ void main() {
     });
 
     test('ST-05 delivered says paid only once the server captured the payment', () {
-      expect(supplierPaymentNote(order({'status': 'delivered', 'payment': {'status': 'captured'}})), 'Paid GH₵117.00 from your wallet');
-      expect(supplierPaymentNote(order({'status': 'delivered', 'payment': {'status': 'held'}})), 'Total GH₵117.00');
+      expect(supplierPaymentNote(order({'status': 'delivered', 'payment': {'status': 'captured'}})), 'Paid GH₵ 117.00 from your wallet');
+      expect(supplierPaymentNote(order({'status': 'delivered', 'payment': {'status': 'held'}})), 'Total GH₵ 117.00');
     });
 
     test('ST-06 in progress: the total, and "paid" only once held', () {
-      expect(supplierPaymentNote(order({'status': 'confirmed', 'payment': {'status': 'held'}})), 'Total GH₵117.00 · paid from your wallet');
-      expect(supplierPaymentNote(order({'status': 'awaiting_payment'})), 'Total GH₵117.00 · not paid yet');
+      expect(supplierPaymentNote(order({'status': 'confirmed', 'payment': {'status': 'held'}})), 'Total GH₵ 117.00 · paid from your wallet');
+      expect(supplierPaymentNote(order({'status': 'awaiting_payment'})), 'Total GH₵ 117.00 · not paid yet');
     });
   });
 
@@ -55,17 +56,28 @@ void main() {
     expect(supplierOrderStatusLabelFor('outForDelivery', 'supplier_rider'), 'On the way to you');
   });
 
-  testWidgets('ST-20 every server status renders its label, address and payment line on the tracking screen', (tester) async {
+  testWidgets('ST-20 every server status renders on the shared tracking screen with its own state, address and payment line', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(400, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final c = StreamController<GasSupplierOrderView?>.broadcast();
     await tester.pumpWidget(MaterialApp(home: GasSupplierTrackingScreen(orderId: 'o1', stream: c.stream)));
     for (final s in [...supplierOrderStatusLabels.keys]) {
       final paid = s != 'awaiting_payment' && s != 'cancelled';
-      c.add(order({'status': s, 'deliveryAddress': '12 Palm St', if (paid) 'payment': {'status': s == 'delivered' ? 'captured' : 'held'}}));
+      final o = order({'status': s, 'deliveryAddress': '12 Palm St', 'driverId': 'd1',
+        if (paid) 'payment': {'status': s == 'delivered' ? 'captured' : 'held'}});
+      c.add(o);
       await tester.pump();
       await tester.pump();
-      expect(tester.widget<Text>(find.byKey(const Key('gs-status'))).data, supplierOrderStatusLabel(s), reason: s);
-      expect(find.text('Deliver to 12 Palm St'), findsOneWidget, reason: s);
-      expect(find.byKey(const Key('gs-payment-note')), findsOneWidget, reason: s);
+      expect(tester.takeException(), isNull, reason: s);
+      final view = gasSupplierTrackingView(o);
+      expect(find.text(view.headline, skipOffstage: false), findsOneWidget, reason: s);
+      if (s == 'cancelled') {
+        // The ended screen: the payment line is part of its detail.
+        expect(find.textContaining(supplierPaymentNote(o), skipOffstage: false), findsOneWidget, reason: s);
+      } else {
+        expect(find.text('12 Palm St', skipOffstage: false), findsOneWidget, reason: s);
+        expect(find.text('Payment: ${supplierPaymentNote(o)}', skipOffstage: false), findsOneWidget, reason: s);
+      }
     }
     await c.close();
     await tester.pumpWidget(const SizedBox());
@@ -76,9 +88,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: GasSupplierTrackingScreen(orderId: 'o1', stream: c.stream)));
     c.add(order({'status': 'cancelled', 'cancelReason': 'supplier_no_response', 'payment': {'status': 'refunded'}}));
     await tester.pump();
-    expect(find.text('Reason: The supplier did not respond in time.'), findsOneWidget);
-    expect(find.text('GH₵117.00 has been returned to your wallet.'), findsOneWidget);
+    await tester.pump();
+    expect(find.textContaining('Reason: The supplier did not respond in time.'), findsOneWidget);
+    expect(find.textContaining('GH₵ 117.00 has been returned to your wallet.'), findsOneWidget);
     c.add(order({'status': 'cancelled', 'payment': {'status': 'held'}, 'refundPending': true, 'refundReview': 'escrow_captured'}));
+    await tester.pump();
     await tester.pump();
     expect(find.textContaining('returned to your wallet'), findsNothing);
     expect(find.textContaining('reviewed by CTSGo support'), findsOneWidget);

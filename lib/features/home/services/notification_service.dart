@@ -11,6 +11,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../../core/routes/deep_link.dart';
 import 'push_token_cleanup.dart';
 import 'push_token_store.dart';
+import '../../../core/logging/auth_log.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -85,7 +86,7 @@ class NotificationService {
       debugPrint('NotificationService ready');
     } catch (e) {
       _initialized = false;
-      debugPrint('NotificationService failed: $e');
+      authLog('NotificationService failed: ${describeError(e)}');
     }
   }
 
@@ -172,7 +173,7 @@ class NotificationService {
       final token = await _fcm.getToken();
       if (token != null) await _persistToken(token);
     } catch (e) {
-      debugPrint('FCM token fetch failed: $e');
+      authLog('FCM token fetch failed: ${describeError(e)}');
     }
   }
 
@@ -196,7 +197,7 @@ class NotificationService {
           ? 'FCM token saved'
           : 'FCM token not saved: no passenger profile yet');
     } catch (e) {
-      debugPrint('FCM token save failed: $e');
+      authLog('FCM token save failed: ${describeError(e)}');
     }
   }
 

@@ -188,13 +188,23 @@ function holdMatchesSnapshot(order, escrowAmount) {
   return isMoney(total) && total > 0 && isMoney(escrowAmount) && Math.round(total * 100) === Math.round(escrowAmount * 100);
 }
 
+/**
+ * The names a passenger sees for a supplier and station: in options and
+ * quotes, and snapshotted onto the order so a reopened order still shows
+ * them. Public names only, as in publicOption.
+ */
+function displayNames(supplier, station) {
+  return { supplierName: supplier.tradingName || supplier.legalName, stationName: station.name };
+}
+
 /** The public view of an option: no contacts, notes, registration or addresses. */
 function publicOption({ supplierId, supplier, stationId, station, productId, product }, location) {
+  const names = displayNames(supplier, station);
   return {
     supplierId,
-    supplierName: supplier.tradingName || supplier.legalName,
+    supplierName: names.supplierName,
     stationId,
-    stationName: station.name,
+    stationName: names.stationName,
     productId,
     orderType: product.orderType,
     cylinderSize: product.cylinderSize,
@@ -429,6 +439,9 @@ async function createOrder(uid, data) {
       deliveryLocation: quoteData.location,
       deliveryAddress: quoteData.address,
       priceSnapshot: snapshot,
+      // Who the order is with, as the passenger was shown it, read in this
+      // transaction (the order holds only ids otherwise).
+      supplierSnapshot: displayNames(selection.supplier, selection.station),
       status: "awaiting_payment",
       createdAt: FieldValue.serverTimestamp(),
     });

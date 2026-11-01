@@ -468,6 +468,7 @@ match /app_config/mobile {
         && request.resource.data.get('isApproved', false) == false
         && request.resource.data.get('uid', driverId) == driverId
         && ownerDocumentsChangeAllowed()
+        && ownerDriverRoleAllowed()
       );
 
       // Update: the OWNER may only touch profile / location / device fields —
@@ -496,6 +497,7 @@ match /app_config/mobile {
   && ownerDocumentsChangeAllowed()
   && ownerEligibilityChangeAllowed()
   && ownerCurrentJobChangeAllowed()
+  && ownerDriverRoleAllowed()
 );
 
       // currentTripId is server-owned (see legacyClientClaimsOpen). While
@@ -577,6 +579,18 @@ match /app_config/mobile {
       // not change it at all while suspended or rejected. Moving from
       // 'approved' to an onboarding step (document re-upload) stays allowed:
       // it grants nothing, since isApproved is admin-only.
+      // A driver picks one of the driver roles (role_selection_screen.dart)
+      // or none yet. Never another kind of account ("admin", "passenger",
+      // ...), even before approval. An unchanged value is not checked.
+      function ownerDriverRoleAllowed() {
+        return !('role' in request.resource.data)
+          || (resource != null
+              && !request.resource.data.diff(resource.data).affectedKeys()
+                    .hasAny(['role']))
+          || request.resource.data.role == null
+          || request.resource.data.role in ['driver_hailing', 'driver_delivery'];
+      }
+
       function ownerSignupStepChangeAllowed() {
         return !request.resource.data.diff(resource.data).affectedKeys()
                   .hasAny(['signupStep'])
@@ -616,7 +630,64 @@ match /app_config/mobile {
 
     // ── Users (passengers) ────────────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+
+      // Owner writes are limited to the fields the Passenger app writes
+      // (USR-S*). role is the passenger's own account type: an owner may
+      // only ever make it 'passenger' (a new profile, or completing an
+      // older build's role-less push-token stub), never change it. Admin
+      // privilege comes from admins/{uid}, but nothing a client writes here
+      // may claim another role, an approval or a suspension. Admins (and
+      // Cloud Functions, via the Admin SDK) are not limited.
+      function passengerOwnerFields() {
+        return ['uid', 'role', 'firstName', 'lastName', 'displayName',
+                'phoneNumber', 'email', 'photoURL',
+                'hasSeenWelcome', 'termsAcceptedAt', 'termsVersion',
+                'createdAt', 'lastLoginAt', 'updatedAt',
+                // push_token_store.dart, and older builds' token saver
+                'fcmToken', 'fcmTokenUpdatedAt', 'platform',
+                // privacy_security_screen.dart
+                'biometricsEnabled', 'marketingEmails',
+                'isDeactivated', 'deactivatedAt', 'deletionRequestedAt'];
+      }
+      // The verified number from the sign-in token, never another one.
+      function ownerPhoneAllowed() {
+        return !('phoneNumber' in request.resource.data)
+          || (resource != null
+              && resource.data.get('phoneNumber', null)
+                   == request.resource.data.phoneNumber)
+          || request.resource.data.phoneNumber
+               == request.auth.token.get('phone_number', null);
+      }
+      // Deactivating (and requesting deletion) is self-service; undoing it
+      // is not.
+      function ownerDeactivationAllowed() {
+        return request.resource.data.get('isDeactivated', false) == true
+          || (resource == null ? false : resource.data.get('isDeactivated', false)) == false;
+      }
+      function ownerUserWriteAllowed() {
+        return isOwner(userId)
+          && request.resource.data.get('uid', userId) == userId
+          && request.resource.data.get('role', 'passenger') == 'passenger'
+          && ownerPhoneAllowed()
+          && ownerDeactivationAllowed();
+      }
+
+      allow create: if isAdmin() || (
+        ownerUserWriteAllowed()
+        && request.resource.data.keys().hasOnly(passengerOwnerFields())
+      );
+      allow update: if isAdmin() || (
+        ownerUserWriteAllowed()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(passengerOwnerFields())
+        // An existing role is never changed by its owner; a role-less stub
+        // may only become a passenger (checked above).
+        && (resource.data.get('role', null) == null
+            || request.resource.data.get('role', null)
+                 == resource.data.get('role', null))
+      );
 
       match /saved_places/{placeId} {
         allow read, write: if isOwner(userId) || isAdmin();
@@ -1038,7 +1109,21 @@ match /gas_orders/{orderId} {
         && (docId != 'gas_supplier_fulfilment'
             || d.get('riderAcceptMinutes', 5) is int
                 && d.get('riderAcceptMinutes', 5) >= 1
-                && d.get('riderAcceptMinutes', 5) <= 60);
+                && d.get('riderAcceptMinutes', 5) <= 60)
+        && (docId != 'gas_supplier_payouts' || gasPayoutLimitsOk(d));
+    }
+    // Supplier withdrawal limits (gas_supplier_wallet.js withdrawalLimits):
+    // whole pesewas, 1 <= minimum <= maximum <= daily; all three while
+    // payouts are enabled, none or all three while they are off.
+    function gasPayoutLimitsOk(d) {
+      return (d.get('enabled', false) == false
+                && !d.keys().hasAny(['minWithdrawalPesewas', 'maxWithdrawalPesewas', 'dailyWithdrawalLimitPesewas']))
+             || (d.get('minWithdrawalPesewas', null) is int
+                 && d.get('maxWithdrawalPesewas', null) is int
+                 && d.get('dailyWithdrawalLimitPesewas', null) is int
+                 && d.minWithdrawalPesewas >= 1
+                 && d.maxWithdrawalPesewas >= d.minWithdrawalPesewas
+                 && d.dailyWithdrawalLimitPesewas >= d.maxWithdrawalPesewas);
     }
 
     // ── Promotions ────────────────────────────────────────────────────────
@@ -1455,6 +1540,33 @@ match /gas_orders/{orderId} {
     match /gas_settlement_statements/{statementId} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+    // ── Gas supplier wallets (gas_supplier_wallet.js) ─────────────────────
+    // Balances and withdrawals are written by Cloud Functions only; admins
+    // read them for operations. Suppliers see their
+    // own through the supplier portal's server, never by direct reads.
+    match /gas_supplier_wallets/{supplierId} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /withdrawals/{withdrawalId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+    // The wallet's own audit trail (gas_supplier_wallet.js walletAudit):
+    // admins read these entries only; every other audit entry stays closed.
+    // Written by Cloud Functions only.
+    match /audit_log/{entryId} {
+      allow read: if isAdmin() && resource.data.get('action', '') in gasWalletAuditActions();
+      allow write: if false;
+    }
+    function gasWalletAuditActions() {
+      return ['gas_supplier_withdrawal_requested', 'gas_supplier_withdrawal_approved',
+              'gas_supplier_withdrawal_sent', 'gas_supplier_withdrawal_not_sent',
+              'gas_supplier_withdrawal_bridge_accepted', 'gas_supplier_withdrawal_bridge_unknown',
+              'gas_supplier_withdrawal_rejected', 'gas_supplier_withdrawal_paid',
+              'gas_supplier_withdrawal_failed',
+              'gas_supplier_payout_preference_changed', 'gas_supplier_statement_credited'];
     }
     match /gas_commission_terms/{termsId} {
       allow read: if isAdmin();

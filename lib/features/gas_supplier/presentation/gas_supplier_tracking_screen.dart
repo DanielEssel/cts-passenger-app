@@ -1,14 +1,39 @@
-// Tracks one Gas supplier order from the passenger's own order document.
+// Tracks one Gas supplier order (gas_supplier_orders/{id}, which its
+// passenger may read) in the shared Gas tracking experience
+// (GasTrackingBody), the same one the original gas_orders flow uses.
+// gasSupplierTrackingView decides what is said from the order's server
+// state; this screen adapts the rest.
+//
+// Supplier orders carry no driver name, phone or position a passenger may
+// read, so there is no driver card or call action (an info line says a
+// driver has accepted) and the map shows the delivery point only. Passengers cannot write these orders,
+// so a delivered order is not sent to the driver-rating screen (which
+// writes the rating onto the order); it ends on the completed state here.
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../../core/constants/app_colors.dart';
+import '../../../core/routes/app_routes.dart';
+import '../../../core/widgets/cts_ui.dart';
+import '../../gas/presentation/widgets/gas_tracking_body.dart';
+import '../../tracking/domain/tracking_view.dart';
+import '../../tracking/widgets/passenger_tracking_panel.dart';
 import '../data/gas_supplier_repository.dart';
 import '../domain/gas_supplier_models.dart';
+import '../domain/gas_supplier_tracking.dart';
 
 class GasSupplierTrackingScreen extends StatefulWidget {
   final String orderId;
   final GasSupplierRepository? repository;
   final Stream<GasSupplierOrderView?>? stream;
-  const GasSupplierTrackingScreen({super.key, required this.orderId, this.repository, this.stream});
+
+  /// Who the order is with, from the server's quote, when opened straight
+  /// after payment ("Tema Gas · Tema Station"). Only a fallback: the order's
+  /// own server snapshot (supplierSnapshot) is shown first, also when the
+  /// order is reopened; orders created before it existed have only this.
+  final String? supplier;
+
+  const GasSupplierTrackingScreen({super.key, required this.orderId, this.repository, this.stream, this.supplier});
 
   @override
   State<GasSupplierTrackingScreen> createState() => _GasSupplierTrackingScreenState();
@@ -16,82 +41,113 @@ class GasSupplierTrackingScreen extends StatefulWidget {
 
 class _GasSupplierTrackingScreenState extends State<GasSupplierTrackingScreen> {
   late final GasSupplierRepository repo = widget.repository ?? GasSupplierRepository();
-  late final Stream<GasSupplierOrderView?> stream = widget.stream ?? repo.watch(widget.orderId);
-  String? error;
-  bool busy = false;
+  late Stream<GasSupplierOrderView?> stream = _open();
 
-  Future<void> _cancel() async {
-    final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-      title: const Text('Cancel this order?'),
-      content: const Text('Any payment for it is returned to your wallet.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep order')),
-        FilledButton(key: const Key('gs-cancel-confirm'), onPressed: () => Navigator.pop(c, true), child: const Text('Cancel order'))],
-    ));
-    if (ok != true) return;
-    setState(() { busy = true; error = null; });
-    try {
-      await repo.cancel(widget.orderId);
-    } on GasSupplierFailure catch (e) {
-      setState(() => error = e.message);
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
+  Stream<GasSupplierOrderView?> _open() => widget.stream ?? repo.watch(widget.orderId);
+
+  void _goHome() => Navigator.of(context, rootNavigator: true)
+      .pushNamedAndRemoveUntil(AppRoutes.shell, (_) => false);
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Your Gas order')),
+      backgroundColor: AppColors.background,
       body: StreamBuilder<GasSupplierOrderView?>(
         stream: stream,
         builder: (context, snap) {
+          if (snap.hasError) {
+            return CtsErrorState(
+              title: "Can't load your gas order",
+              message: 'Check your connection. Your order is not affected.',
+              onRetry: () => setState(() => stream = _open()),
+              onBack: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            );
+          }
           final o = snap.data;
-          if (o == null) return const Center(child: CircularProgressIndicator());
-          final steps = supplierOrderStepsFor(o.deliveryMode);
-          final reached = steps.indexOf(o.status);
-          return ListView(padding: const EdgeInsets.all(16), children: [
-            Text(supplierOrderStatusLabelFor(o.status, o.deliveryMode), key: const Key('gs-status'), style: t.textTheme.titleLarge),
-            if (o.cylinderSize != null && o.orderType != null)
-              Text('${o.quantity ?? 1} × ${gasLabel(o.cylinderSize!)} · ${gasLabel(o.orderType!)}${o.brand != null ? ' · ${o.brand}' : ''}',
-                  key: const Key('gs-track-product')),
-            if (o.deliveryAddress != null && o.deliveryAddress!.isNotEmpty) Text('Deliver to ${o.deliveryAddress}', key: const Key('gs-track-address')),
-            if (o.deliveryFee != null)
-              Text('Delivery GH₵${o.deliveryFee!.toStringAsFixed(2)}${o.routeDistanceKm != null ? ' · ${o.routeDistanceKm!.toStringAsFixed(1)} km by road' : ''}'),
-            // Payment and refund wording from the order's server state only (supplierPaymentNote).
-            if (supplierPaymentNote(o).isNotEmpty) Text(supplierPaymentNote(o), key: const Key('gs-payment-note')),
-            // The server's estimate (payment time + quoted ETA); never shown once finished.
-            if (o.estimatedDeliveryAt != null && !const ['delivered', 'cancelled'].contains(o.status))
-              Text('Estimated delivery by ${TimeOfDay.fromDateTime(o.estimatedDeliveryAt!).format(context)}', key: const Key('gs-track-eta')),
-            Text('Order ${o.id}', key: const Key('gs-order-ref'), style: t.textTheme.bodySmall),
-            const SizedBox(height: 16),
-            if (o.status != 'cancelled')
-              for (var i = 0; i < steps.length; i++)
-                ListTile(
-                  dense: true,
-                  leading: Icon(i <= reached ? Icons.check_circle : Icons.radio_button_unchecked, color: i <= reached ? t.colorScheme.primary : null),
-                  title: Text(supplierOrderStatusLabel(steps[i])),
-                ),
-            if (showCompletionCode(o.status) && o.completionCode != null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(children: [
-                    const Text('Give this code to the driver when you receive your Gas'),
-                    Text(o.completionCode!, key: const Key('gs-code'), style: t.textTheme.displaySmall),
-                  ]),
-                ),
+          if (o == null) {
+            if (snap.connectionState == ConnectionState.waiting || snap.connectionState == ConnectionState.none) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return TrackingEndedScreen(
+              view: const TrackingView(
+                phase: TrackingPhase.ended,
+                icon: Icons.search_off_rounded,
+                headline: 'Order not found',
+                detail: 'This order may have been removed. You can check '
+                    'your past orders in History.',
               ),
-            if (o.status == 'cancelled' && o.cancelReason != null) Text('Reason: ${supplierCancelReasonLabel(o.cancelReason!)}'),
-            if (passengerCanCancel(o.status))
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: OutlinedButton(key: const Key('gs-cancel'), onPressed: busy ? null : _cancel, child: const Text('Cancel order')),
-              ),
-            if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: TextStyle(color: t.colorScheme.error))),
-          ]);
+              onHome: _goHome,
+            );
+          }
+          return GasTrackingBody(data: _data(o));
         },
       ),
+    );
+  }
+
+  GasTrackingData _data(GasSupplierOrderView o) {
+    // The code is the server's, shown once a driver or rider is bringing the order.
+    final code = showCompletionCode(o.status) ? o.completionCode : null;
+    final view = gasSupplierTrackingView(o, hasCode: (code ?? '').isNotEmpty);
+    final note = supplierPaymentNote(o);
+    final over = const ['delivered', 'cancelled'].contains(o.status);
+    final km = o.routeDistanceKm == null ? '' : ' · ${o.routeDistanceKm!.toStringAsFixed(1)} km by road';
+    final product = o.cylinderSize != null && o.orderType != null
+        ? '${o.quantity ?? 1} × ${gasLabel(o.cylinderSize!)}'
+        : 'Gas order';
+    final type = [if (o.orderType != null) gasLabel(o.orderType!), if (o.brand != null) o.brand!].join(' · ');
+
+    return GasTrackingData(
+      orderId: o.id,
+      view: view,
+      statusKey: o.status,
+      customer: o.deliveryLatitude == null || o.deliveryLongitude == null
+          ? null
+          : LatLng(o.deliveryLatitude!, o.deliveryLongitude!),
+      // No driver name, phone or position is readable for supplier orders,
+      // so no driver card (it would name no one): an info line says a
+      // driver has accepted, by the server's driverId.
+      showDriverCard: false,
+      canContactDriver: false,
+      code: code,
+      info: [
+        if ((o.supplierLabel ?? widget.supplier) != null)
+          (icon: Icons.storefront_rounded, label: 'Supplier', value: (o.supplierLabel ?? widget.supplier)!),
+        if (view.hasDriver && o.hasDriver && !over)
+          (
+            icon: Icons.person_pin_circle_rounded,
+            label: o.deliveryMode == 'linked_rider' ? 'Rider' : 'Driver',
+            value: 'Accepted your order'
+          ),
+        // The server's estimate (payment time + quoted ETA); never shown once finished.
+        if (o.estimatedDeliveryAt != null && !over)
+          (
+            icon: Icons.schedule_rounded,
+            label: 'Estimated delivery',
+            value: 'by ${TimeOfDay.fromDateTime(o.estimatedDeliveryAt!).format(context)}'
+          ),
+        // Payment and refund wording from the order's server state only.
+        if (note.isNotEmpty) (icon: Icons.account_balance_wallet_rounded, label: 'Payment', value: note),
+        (icon: Icons.tag_rounded, label: 'Order', value: o.id),
+      ],
+      deliveryAddress: o.deliveryAddress ?? '',
+      summary: GasTrackingSummary(
+        title: product,
+        subtitle: type,
+        lines: [
+          if (o.productAmount != null) ('Gas', o.productAmount!),
+          if ((o.handlingFee ?? 0) > 0) ('Handling', o.handlingFee!),
+          if (o.deliveryFee != null) ('Delivery fee$km', o.deliveryFee!),
+        ],
+        total: o.total,
+      ),
+      cancel: GasTrackingCancel(
+        title: 'Cancel this gas order?',
+        message: 'Any payment for it is returned to your wallet.',
+        run: () => repo.cancel(o.id),
+        errorText: (e) => e is GasSupplierFailure ? e.message : "Couldn't cancel. Check your connection and try again.",
+      ),
+      completedAction: TrackingAction(label: 'Back to home', icon: Icons.home_rounded, onTap: _goHome),
     );
   }
 }

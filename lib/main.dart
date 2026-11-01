@@ -56,14 +56,18 @@ Future<void> main() async {
   // (called again after Firebase init)
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await PricingService.instance.fetch();
 
+  // App Check before any other Firebase call (AUTH-13). Enforcement is off
+  // in the console; this only attaches tokens. Phone-auth app verification
+  // (Play Integrity, then the SDK's reCAPTCHA fallback) is separate from it.
   await FirebaseAppCheck.instance.activate(
     providerAndroid:
         kDebugMode ? AndroidDebugProvider() : AndroidPlayIntegrityProvider(),
     providerApple:
         kDebugMode ? AppleDebugProvider() : AppleDeviceCheckProvider(),
   );
+
+  await PricingService.instance.fetch();
 
   await NotificationService.instance.initialize(appNavigatorKey); // ← ADD
 

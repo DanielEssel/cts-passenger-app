@@ -3,6 +3,7 @@
 
 import 'dart:math' as math;
 
+import 'package:cts_transport_app/features/auth/widgets/otp_code_field.dart';
 import 'package:cts_transport_app/core/constants/app_colors.dart';
 import 'package:cts_transport_app/core/theme/cts_theme.dart';
 import 'package:cts_transport_app/features/auth/presentation/login_screen.dart';
@@ -158,11 +159,11 @@ void main() {
     testWidgets('OTP digit boxes fit without overflowing', (tester) async {
       await _pumpSmall(tester, const OtpVerificationScreen());
       expect(tester.takeException(), isNull);
-      expect(find.byType(TextField), findsNWidgets(6));
-      final first = tester.getRect(find.byType(TextField).first);
-      final last = tester.getRect(find.byType(TextField).last);
-      expect(first.left, greaterThanOrEqualTo(0));
-      expect(last.right, lessThanOrEqualTo(320));
+      // One input behind six boxes (paste and SMS autofill need a single
+      // field); the boxes must still fit the screen.
+      final field = tester.getRect(find.byType(OtpCodeField));
+      expect(field.left, greaterThanOrEqualTo(0));
+      expect(field.right, lessThanOrEqualTo(320));
     });
 
     testWidgets('login lays out and keeps its actions', (tester) async {

@@ -102,6 +102,9 @@ void main() {
       await open(tester, s);
       expect(selected(tester, 'gs-type-exchangeEmpty'), isTrue);
       expect(selected(tester, 'gs-size-kg6'), isTrue);
+      // The address comes first, so the service tiles are below the fold here.
+      await tester.ensureVisible(find.byKey(const Key('gs-type-newCylinder')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('gs-type-newCylinder')));
       await tester.pumpAndSettle();
       expect(selected(tester, 'gs-size-kg12_5'), isTrue);

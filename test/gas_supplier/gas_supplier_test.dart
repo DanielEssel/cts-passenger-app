@@ -233,19 +233,24 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Tema Gas'));
       await tester.pump();
-      expect(find.textContaining('Confirm and pay GH₵164.50'), findsOneWidget);
+      expect(find.textContaining('Confirm and pay GH₵ 164.50'), findsOneWidget);
       await tester.tap(find.byKey(const Key('gs-pay')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.byType(GasSupplierTrackingScreen), findsOneWidget);
       s.controller.add(const GasSupplierOrderView(id: 'q1', status: 'pendingApproval', total: 164.5, completionCode: '4821'));
       await tester.pump();
-      expect(find.byKey(const Key('gs-cancel')), findsOneWidget);
-      expect(find.byKey(const Key('gs-code')), findsNothing);
+      // The shared Gas tracking: cancel while waiting, no code before a driver.
+      expect(find.text('Cancel order', skipOffstage: false), findsOneWidget);
+      expect(find.byKey(const Key('gas-tracking-code'), skipOffstage: false), findsNothing);
       s.controller.add(const GasSupplierOrderView(id: 'q1', status: 'outForDelivery', total: 164.5, completionCode: '4821'));
       await tester.pump();
-      expect(find.text('4821'), findsOneWidget);
-      expect(find.byKey(const Key('gs-cancel')), findsNothing);
+      expect(find.byKey(const Key('gas-tracking-code'), skipOffstage: false), findsOneWidget);
+      for (final digit in '4821'.split('')) {
+        expect(find.descendant(of: find.byKey(const Key('gas-tracking-code'), skipOffstage: false),
+            matching: find.text(digit, skipOffstage: false)), findsOneWidget);
+      }
+      expect(find.text('Cancel order', skipOffstage: false), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -387,13 +392,16 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: GasSupplierTrackingScreen(orderId: 'o1', repository: s.repo())));
       s.controller.add(view('outForDelivery'));
       await tester.pump();
-      expect(find.text('1 × 6 kg · Exchange empty cylinder · goil'), findsOneWidget);
-      expect(find.text('Delivery GH₵12.00 · 7.9 km by road'), findsOneWidget);
-      expect(find.text('Estimated delivery by 2:05 PM'), findsOneWidget);
+      // In the shared order summary and info lines.
+      expect(find.text('1 × 6 kg', skipOffstage: false), findsOneWidget);
+      expect(find.text('Exchange empty cylinder · goil', skipOffstage: false), findsOneWidget);
+      expect(find.text('Delivery fee · 7.9 km by road', skipOffstage: false), findsOneWidget);
+      expect(find.text('GH₵ 12.00', skipOffstage: false), findsOneWidget);
+      expect(find.text('Estimated delivery: by 2:05 PM', skipOffstage: false), findsOneWidget);
       s.controller.add(view('delivered'));
       await tester.pump();
-      expect(find.byKey(const Key('gs-track-eta')), findsNothing);
-      expect(find.text('Paid GH₵117.00 from your wallet'), findsOneWidget);
+      expect(find.textContaining('Estimated delivery', skipOffstage: false), findsNothing);
+      expect(find.text('Paid GH₵ 117.00 from your wallet', skipOffstage: false), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -408,7 +416,7 @@ void main() {
       expect(find.byType(GasSupplierTrackingScreen), findsOneWidget);
       s.controller.add(const GasSupplierOrderView(id: 'o9', status: 'confirmed', total: 164.5));
       await tester.pump();
-      expect(find.text('Order o9'), findsOneWidget);
+      expect(find.text('Order: o9', skipOffstage: false), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -468,10 +476,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       s.controller.add(const GasSupplierOrderView(id: 'o7', status: 'pendingApproval', total: 164.5));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('gs-cancel')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('gs-cancel-confirm')));
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Cancel order'));
+      await tester.pump();
+      await tester.tap(find.text('Cancel order'));
+      // The shared tracking animates while searching: pump, never settle.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      // The shared confirmation's own "Cancel order" button.
+      await tester.tap(find.text('Cancel order').last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(s.calls['cancelGasSupplierOrder'], {'orderId': 'o7'});
       await tester.pumpWidget(const SizedBox());
     });

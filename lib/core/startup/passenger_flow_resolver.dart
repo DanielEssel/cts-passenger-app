@@ -12,6 +12,11 @@ import 'route_destination.dart';
 class PassengerFlowResolver {
   const PassengerFlowResolver._();
 
+  /// Debug builds only, never a UID (AUTH-11).
+  static void _log(String message) {
+    if (kDebugMode) debugPrint('🚦 PassengerFlowResolver: $message');
+  }
+
   static Future<RouteDestination> resolve(
     String uid, {
     String? phoneNumber,
@@ -37,10 +42,7 @@ class PassengerFlowResolver {
       // Send them to Signup, not the passenger shell.
       // ─────────────────────────────────────────────────────────────────────
       if (!doc.exists || doc.data() == null) {
-        debugPrint(
-          '⚠️ Firebase user $uid has no CTSGo profile. '
-          'Redirecting to signup.',
-        );
+        _log('no CTSGo profile; redirecting to signup');
 
         await NotificationService.instance.clearToken();
         await FirebaseAuth.instance.signOut();
@@ -65,9 +67,7 @@ class PassengerFlowResolver {
       final role = data['role'] as String? ?? '';
 
       if (role != 'passenger') {
-        debugPrint(
-          '⚠️ User $uid has role "$role", not passenger.',
-        );
+        _log('role "$role" is not passenger; signed out');
 
         await NotificationService.instance.clearToken();
         await FirebaseAuth.instance.signOut();
@@ -94,9 +94,7 @@ class PassengerFlowResolver {
       // EXISTING PASSENGER — NORMAL LOGIN
       // ─────────────────────────────────────────────────────────────────────
 
-      debugPrint(
-        '✅ Existing passenger profile found for $uid.',
-      );
+      _log('existing passenger profile found');
 
       return const RouteDestination(
         AppRoutes.shell,
@@ -104,10 +102,8 @@ class PassengerFlowResolver {
     } catch (e, stackTrace) {
       // NEVER allow a user into the passenger app when we cannot verify
       // their Firestore profile.
-      debugPrint(
-        '❌ PassengerFlowResolver error: $e',
-      );
-      debugPrintStack(stackTrace: stackTrace);
+      _log('profile check failed (${e.runtimeType}); signed out');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
 
       try {
         // Likely offline here: keep the splash delay short.

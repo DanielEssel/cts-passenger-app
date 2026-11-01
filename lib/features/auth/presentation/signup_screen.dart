@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/cts_theme.dart';
@@ -77,6 +76,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
   // ---------------------------------------------------------------------------
 
   Future<void> _signup() async {
+    if (ref.read(authProvider).isLoading) return;
     if (!_formKey.currentState!.validate()) return;
     if (!_agreeToTerms) {
       _showError('Please accept the Terms & Conditions to continue');
@@ -88,34 +88,22 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
     final lastName = _lastNameController.text.trim();
     final email = _emailController.text.trim();
 
-    // ✅ E.164 number with country code from PhoneInputField
-    final phone =
-        _phoneKey.currentState?.fullNumber ?? _phoneController.text.trim();
+    final phone = _phoneKey.currentState?.e164;
+    if (phone == null) return;
+    FocusScope.of(context).unfocus();
 
-    // ── Check if phone number already registered ──
-    try {
-      final existing = await FirebaseFirestore.instance
-          .collection('users')
-          .where('phoneNumber', isEqualTo: phone)
-          .limit(1)
-          .get();
-
-      if (existing.docs.isNotEmpty) {
-        _showError(
-            'This number is already registered. Please sign in instead.');
-        return;
-      }
-    } catch (e) {
-      // Non-fatal — let the flow continue if check fails
-      debugPrint('Phone existence check failed: $e');
-    }
-
+    // Whether the number is already registered is decided after the phone
+    // is verified, from the server copy of users/{uid}: an existing
+    // passenger is signed in (never overwritten), another role is refused.
+    // (A pre-verification lookup by phone number is denied by the rules.)
     await ref.read(authProvider.notifier).signUp(
           firstName: firstName,
           lastName: lastName,
           phone: phone,
           email: email,
+          // Only after Firebase confirms the SMS was sent.
           onCodeSent: () {
+            if (!mounted) return;
             Navigator.pushNamed(
               context,
               AppRoutes.otpVerification,
@@ -128,21 +116,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
               },
             );
           },
-          onAuthenticated: () {
-            if (!context.mounted) return;
-
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.welcome,
-              (_) => false,
-            );
+          onAuthenticated: (route) {
+            if (!mounted) return;
+            Navigator.of(context).pushNamedAndRemoveUntil(route, (_) => false);
           },
           onError: (msg) {
-            if (!context.mounted) return;
-
-            // Keep your existing error UI.
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(msg)),
-            );
+            if (!mounted) return;
+            showAuthError(context, msg);
           },
         );
   }
@@ -166,15 +146,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
   String? _validateName(String? value) {
     if (value == null || value.trim().isEmpty) return 'This field is required';
     if (value.trim().length < 2) return 'Must be at least 2 characters';
-    return null;
-  }
-
-  String? _validatePhone(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
-    }
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length < 9) return 'Enter a valid phone number';
     return null;
   }
 
@@ -289,7 +260,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                           child: PhoneInputField(
                             key: _phoneKey,
                             controller: _phoneController,
-                            validator: _validatePhone,
                             enabled: !isLoading,
                           ),
                         ),
@@ -320,6 +290,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen>
                           isLoading: isLoading,
                           onTap: _signup,
                         ),
+                        OtpRequestStatus(visible: isLoading),
                         const SizedBox(height: 24),
 
                         // Premium Sign in link

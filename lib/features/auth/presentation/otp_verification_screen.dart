@@ -8,8 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/theme/cts_theme.dart';
+import '../domain/phone_number.dart';
 import '../widgets/auth_widgets.dart';
-import '../../../core/routes/app_routes.dart';
+import '../widgets/otp_code_field.dart';
 import '../providers/auth_providers.dart';
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
@@ -25,12 +26,10 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   // Firebase phone OTP is always 6 digits
   static const int _otpLength = 6;
   static const int _resendSeconds = 60;
-  bool _verificationSubmitted = false;
 
-  final List<TextEditingController> _controllers =
-      List.generate(_otpLength, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes =
-      List.generate(_otpLength, (_) => FocusNode());
+  final _codeController = TextEditingController();
+  bool _hasError = false;
+  bool _argsRead = false;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
@@ -39,10 +38,8 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   Timer? _resendTimer;
   int _countdown = _resendSeconds;
 
-  // Arguments passed from login / signup screens
-  late String _phone;
-  bool _isSignUp = false;
-  Map<String, dynamic>? _pendingProfile;
+  // Arguments passed from login / signup screens (read once).
+  String _phone = '';
 
   @override
   void initState() {
@@ -66,6 +63,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
     _animController.forward();
 
     _startResendTimer();
+    _codeController.addListener(() {
+      if (_hasError) setState(() => _hasError = false);
+    });
 
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarBrightness: Brightness.dark,
@@ -76,30 +76,16 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_argsRead) return;
+    _argsRead = true;
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-
     _phone = args?['phone'] as String? ?? '';
-    _isSignUp = args?['isSignUp'] as bool? ?? false;
-
-    if (_isSignUp) {
-      _pendingProfile = {
-        'firstName': args?['firstName'],
-        'lastName': args?['lastName'],
-        'phone': _phone,
-        'email': args?['email'] ?? '',
-      };
-    }
   }
 
   @override
   void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    for (final n in _focusNodes) {
-      n.dispose();
-    }
+    _codeController.dispose();
     _resendTimer?.cancel();
     _animController.dispose();
     super.dispose();
@@ -126,84 +112,50 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
   }
 
   // ── OTP logic ──────────────────────────────────────────────────────────────
-
-  String get _currentOtp => _controllers.map((c) => c.text).join();
+  // Duplicate submissions (auto-submit on the last digit plus a button tap,
+  // or automatic verification racing a typed code) are refused by the
+  // notifier; the screen only reflects its isLoading state.
 
   Future<void> _verifyOtp() async {
-    if (_verificationSubmitted) {
-      debugPrint('⚠️ OTP SCREEN: duplicate verification prevented');
-      return;
-    }
+    if (ref.read(authProvider).isLoading) return;
 
-    final code = _currentOtp;
-
+    final code = _codeController.text;
     if (code.length < _otpLength) {
-      _showError('Please enter the complete $_otpLength-digit code');
+      setState(() => _hasError = true);
+      _showError('Enter the $_otpLength-digit code from the SMS.');
       return;
     }
-
-    _verificationSubmitted = true;
 
     HapticFeedback.mediumImpact();
-
-    final success = await ref.read(authProvider.notifier).verifyOtp(
+    await ref.read(authProvider.notifier).verifyOtp(
           smsCode: code,
-          pendingProfile: _pendingProfile,
-          onAuthenticated: () {
-            if (!mounted) return;
-
-            HapticFeedback.heavyImpact();
-
-            if (_isSignUp) {
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                AppRoutes.welcome,
-                (_) => false,
-              );
-            } else {
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                AppRoutes.shell,
-                (_) => false,
-              );
-            }
-          },
+          onAuthenticated: _openDestination,
           onError: (msg) {
-            if (mounted) {
-              _showError(msg);
-            }
+            if (!mounted) return;
+            setState(() => _hasError = true);
+            _showError(msg);
           },
         );
+  }
 
+  void _openDestination(String route) {
     if (!mounted) return;
-
-    if (!success) {
-      // Allow the user to try the same current session again if the
-      // authentication attempt itself did not complete.
-      _verificationSubmitted = false;
-    }
+    HapticFeedback.heavyImpact();
+    Navigator.of(context).pushNamedAndRemoveUntil(route, (_) => false);
   }
 
   Future<void> _resendOtp() async {
-    if (_countdown > 0) return;
-
-    final authState = ref.read(authProvider);
-
-    if (authState.isLoading) {
-      return;
-    }
+    if (_countdown > 0 || ref.read(authProvider).isLoading) return;
 
     HapticFeedback.selectionClick();
-
     await ref.read(authProvider.notifier).resendOtp(
           phone: _phone,
-          pendingProfile: _isSignUp ? _pendingProfile : null,
+          // Only after Firebase confirms the new SMS.
           onCodeSent: () {
             if (!mounted) return;
-
-            _verificationSubmitted = false;
-
             _startResendTimer();
-            _clearFields();
-
+            _codeController.clear();
+            setState(() => _hasError = false);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: const Text('A new code has been sent'),
@@ -216,45 +168,15 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
               ),
             );
           },
-          onAuthenticated: () {
-            if (!mounted) return;
-
-            _verificationSubmitted = true;
-
-            HapticFeedback.heavyImpact();
-
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              _isSignUp ? AppRoutes.welcome : AppRoutes.shell,
-              (_) => false,
-            );
-          },
+          onAuthenticated: _openDestination,
           onError: (msg) {
             if (!mounted) return;
-
-            _verificationSubmitted = false;
             _showError(msg);
           },
         );
   }
 
-  void _clearFields() {
-    for (final c in _controllers) {
-      c.clear();
-    }
-    _focusNodes.first.requestFocus();
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      ),
-    );
-  }
+  void _showError(String message) => showAuthError(context, message);
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -341,7 +263,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
                                     'We sent a 6-digit verification code to\n',
                               ),
                               TextSpan(
-                                text: _phone,
+                                text: formatPhoneForDisplay(_phone),
                                 style: AppTextStyles.bodyMedium.copyWith(
                                   color: AppColors.textPrimary,
                                   fontWeight: FontWeight.w700,
@@ -354,38 +276,23 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
 
                       const SizedBox(height: 28),
 
-                      // OTP fields
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(
-                          _otpLength,
-                          (i) => Flexible(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 52),
-                                child: _OtpDigitField(
-                                  controller: _controllers[i],
-                                  focusNode: _focusNodes[i],
-                                  enabled: !isLoading,
-                                  onChanged: (val) {
-                                    if (val.isNotEmpty && i < _otpLength - 1) {
-                                      _focusNodes[i + 1].requestFocus();
-                                    } else if (val.isEmpty && i > 0) {
-                                      _focusNodes[i - 1].requestFocus();
-                                    }
-                                    // Auto-submit when last digit entered
-                                    if (i == _otpLength - 1 &&
-                                        val.isNotEmpty &&
-                                        _currentOtp.length == _otpLength) {
-                                      _verifyOtp();
-                                    }
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
+                      // OTP code: paste, SMS autofill and auto-submit.
+                      OtpCodeField(
+                        controller: _codeController,
+                        enabled: !isLoading,
+                        hasError: _hasError,
+                        onCompleted: (_) => _verifyOtp(),
+                      ),
+
+                      const SizedBox(height: 16),
+                      Center(
+                        child: Text(
+                          isLoading
+                              ? 'Verifying…'
+                              : "We'll fill the code in automatically if we can.",
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodySmall
+                              .copyWith(color: AppColors.textSecondary),
                         ),
                       ),
 
@@ -433,66 +340,6 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── OTP digit field ───────────────────────────────────────────────────────────
-
-class _OtpDigitField extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool enabled;
-  final ValueChanged<String> onChanged;
-
-  const _OtpDigitField({
-    required this.controller,
-    required this.focusNode,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 60,
-      child: TextField(
-        controller: controller,
-        focusNode: focusNode,
-        enabled: enabled,
-        keyboardType: TextInputType.number,
-        textAlign: TextAlign.center,
-        maxLength: 1,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: CtsText.title2.copyWith(
-          fontWeight: FontWeight.w700,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-        decoration: InputDecoration(
-          counterText: '',
-          filled: true,
-          fillColor: CtsTheme.surface,
-          isDense: false,
-          contentPadding: EdgeInsets.zero,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
-            borderSide: const BorderSide(color: CtsTheme.border, width: 1.2),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
-            borderSide: const BorderSide(color: CtsTheme.border, width: 1.2),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
-            borderSide: const BorderSide(color: CtsTheme.primary, width: 2),
-          ),
-          disabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(CtsTheme.radiusMd),
-            borderSide: const BorderSide(color: CtsTheme.borderLight),
-          ),
-        ),
-        onChanged: onChanged,
       ),
     );
   }

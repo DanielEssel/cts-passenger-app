@@ -269,6 +269,9 @@ describe("quote and order", () => {
     assert.equal(order.priceSnapshot.productId, PID);
     assert.equal(order.priceSnapshot.quoteId, q.quoteId);
     assert.ok(order.priceSnapshot.snapshotAt && order.createdAt, "server timestamps");
+    // Who the order is with, as the passenger saw it, kept for reopening.
+    assert.deepEqual(order.supplierSnapshot, { supplierName: "Test Gas", stationName: "Tema Station" });
+    assert.equal(order.supplierSnapshot.supplierName, q.selection?.supplierName ?? "Test Gas");
     assert.equal((await h.read(`gas_quotes/${q.quoteId}`)).status, "used");
     assert.equal(await h.read(`gas_orders/${r.orderId}`), null, "never written to the dispatched gas_orders collection");
     // The allocation is created with the order, at the current terms, and is not on the order document.
@@ -282,6 +285,16 @@ describe("quote and order", () => {
     assert.deepEqual(a.settlement, { status: "not_posted", reconciliation: null });
     assert.equal(order.allocation, undefined);
     assert.ok(!JSON.stringify(q).includes("commission"), "the customer's quote shows no commission");
+  });
+
+  test("GSO-E06b the supplier snapshot holds public names only, the legal name when there is no trading name", async () => {
+    await seedCatalog({ sup: { tradingName: "" } });
+    const q = await quoteFor();
+    const { orderId } = await call(g.createGasSupplierOrder, { quoteId: q.quoteId });
+    const order = await h.read(`gas_supplier_orders/${orderId}`);
+    assert.deepEqual(order.supplierSnapshot, { supplierName: "Test Gas Ltd", stationName: "Tema Station" });
+    const json = JSON.stringify(order.supplierSnapshot);
+    for (const secret of ["PRIVATE", "+2332", "LIC-1", "Community 1"]) assert.ok(!json.includes(secret), secret);
   });
 
   test("GSO-E07 retries and duplicate submissions create exactly one order", async () => {

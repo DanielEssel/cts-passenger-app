@@ -1,7 +1,8 @@
 // Gas supplier ordering: values as the server returns them
 // (functions/gas_supplier_orders.js, gas_supplier_fulfilment.js). Prices
 // and totals are never computed here: they are shown as the server quoted.
-import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
+import 'package:cloud_firestore/cloud_firestore.dart' show GeoPoint, Timestamp;
+import '../../../core/utils/cedi_format.dart';
 
 /// Order types a supplier order can be paid for. pickupAndReturn needs a
 /// pickup leg the fulfilment does not support yet, so it is not offered.
@@ -192,9 +193,34 @@ class GasSupplierOrderView {
   /// CTSGo support reviews it.
   final bool refundReview;
   final String? deliveryAddress;
+
+  /// A driver or linked rider has accepted the order: the server wrote
+  /// driverId (acceptJob / acceptOffer). Never inferred from the status.
+  final bool hasDriver;
+
+  /// An admin took a driver off this order (releasedDriverIds), returning it
+  /// to "confirmed" for another driver.
+  final bool driverReleased;
+
+  /// From the order's price snapshot: the product and the supplier's handling fee.
+  final double? productAmount, handlingFee;
+
+  /// The delivery point the server stored (deliveryLocation).
+  final double? deliveryLatitude, deliveryLongitude;
+
+  /// Who the order is with, snapshotted by the server when the order was
+  /// created (supplierSnapshot); null for orders created before it was.
+  final String? supplierName, stationName;
+
+  /// "Tema Gas · Tema Station", or null when the order holds no snapshot.
+  String? get supplierLabel => supplierName == null || supplierName!.isEmpty
+      ? null
+      : '$supplierName${stationName != null && stationName!.isNotEmpty ? ' · $stationName' : ''}';
   const GasSupplierOrderView({required this.id, required this.status, this.total, this.completionCode, this.cancelReason, this.deliveryMode,
     this.refundPending = false, this.deliveryFee, this.routeDistanceKm, this.orderType, this.cylinderSize, this.brand, this.quantity,
-    this.estimatedDeliveryAt, this.paymentStatus, this.refundReview = false, this.deliveryAddress});
+    this.estimatedDeliveryAt, this.paymentStatus, this.refundReview = false, this.deliveryAddress,
+    this.hasDriver = false, this.driverReleased = false, this.productAmount, this.handlingFee,
+    this.deliveryLatitude, this.deliveryLongitude, this.supplierName, this.stationName});
 
   factory GasSupplierOrderView.fromMap(String id, Map<String, dynamic> m) {
     final p = m['priceSnapshot'] is Map ? Map<String, dynamic>.from(m['priceSnapshot'] as Map) : const <String, dynamic>{};
@@ -206,6 +232,13 @@ class GasSupplierOrderView {
       paymentStatus: payment['status'] as String?,
       refundReview: review is String && review.isNotEmpty,
       deliveryAddress: m['deliveryAddress'] as String?,
+      hasDriver: m['driverId'] is String && (m['driverId'] as String).isNotEmpty,
+      driverReleased: m['releasedDriverIds'] is List && (m['releasedDriverIds'] as List).isNotEmpty,
+      productAmount: _num(p['productAmount']), handlingFee: _num(p['handlingFee']),
+      deliveryLatitude: m['deliveryLocation'] is GeoPoint ? (m['deliveryLocation'] as GeoPoint).latitude : null,
+      deliveryLongitude: m['deliveryLocation'] is GeoPoint ? (m['deliveryLocation'] as GeoPoint).longitude : null,
+      supplierName: m['supplierSnapshot'] is Map ? (m['supplierSnapshot'] as Map)['supplierName'] as String? : null,
+      stationName: m['supplierSnapshot'] is Map ? (m['supplierSnapshot'] as Map)['stationName'] as String? : null,
       id: id, status: '${m['status']}',
       total: _num(p['total']), deliveryFee: _num(p['deliveryFee']),
       routeDistanceKm: meters == null ? null : meters / 1000,
@@ -220,11 +253,66 @@ class GasSupplierOrderView {
   }
 }
 
+/// Where an order is in the passenger's journey. Decided by the server's
+/// status, and for the driver stages also by the server's driverId:
+/// "delivering" (live tracking) starts only once a driver has accepted, or,
+/// for the supplier's own rider, once the supplier has handed the cylinder
+/// over (outForDelivery is written only at hand-over).
+enum GasSupplierPhase { payment, processing, delivering, delivered, cancelled }
+
+GasSupplierPhase supplierOrderPhase(GasSupplierOrderView o) => switch (o.status) {
+      'awaiting_payment' => GasSupplierPhase.payment,
+      'pendingApproval' || 'confirmed' => GasSupplierPhase.processing,
+      'driverAssigned' || 'atStation' => o.hasDriver ? GasSupplierPhase.delivering : GasSupplierPhase.processing,
+      'outForDelivery' => GasSupplierPhase.delivering,
+      'delivered' => GasSupplierPhase.delivered,
+      'cancelled' => GasSupplierPhase.cancelled,
+      // A status this app does not know yet: shown by name, never as tracking.
+      _ => GasSupplierPhase.processing,
+    };
+
+/// What is happening and what happens next, for the order's current server
+/// state. Only events the backend records are described
+/// (gas_supplier_fulfilment.js); nothing promises a time it does not set.
+String supplierOrderGuidance(GasSupplierOrderView o) {
+  final ownRider = o.deliveryMode == 'supplier_rider';
+  switch (o.status) {
+    case 'awaiting_payment':
+      return 'Your payment for this order has not been confirmed.';
+    case 'pendingApproval':
+      return 'The supplier is reviewing your order. If they do not confirm it in time, '
+          'it is cancelled and your payment is returned to your wallet.';
+    case 'confirmed':
+      if (o.driverReleased && !ownRider) {
+        return 'Your previous driver was taken off this order. We are finding another driver.';
+      }
+      return switch (o.deliveryMode) {
+        'supplier_rider' => 'The supplier confirmed your order and is preparing it. Their own rider brings it to you; '
+            'tracking starts when it leaves the station.',
+        'linked_rider' => "The supplier confirmed your order and is assigning one of their riders. "
+            'Live tracking starts once a rider accepts.',
+        _ => 'The supplier confirmed your order. We are finding a driver to collect it from the station. '
+            'Live tracking starts once a driver accepts.',
+      };
+    case 'driverAssigned':
+      return 'A driver accepted your order and is on the way to the station.';
+    case 'atStation':
+      return 'The driver is at the station collecting your gas.';
+    case 'outForDelivery':
+      return ownRider ? "The supplier's rider is bringing your gas." : 'Your driver is bringing your gas.';
+    case 'delivered':
+      return 'Your gas has been delivered.';
+    case 'cancelled':
+      return 'This order was cancelled.';
+  }
+  return 'Your order is being processed.';
+}
+
 /// The payment line for an order, from its server state only: a refund is
 /// "returned" only once payment.status is "refunded", and "paid" only once
 /// the server holds or has captured the payment.
 String supplierPaymentNote(GasSupplierOrderView o) {
-  final total = o.total == null ? null : 'GH₵${o.total!.toStringAsFixed(2)}';
+  final total = o.total == null ? null : formatCedis(o.total!);
   if (o.status == 'cancelled') {
     if (o.paymentStatus == null) return 'Nothing was charged for this order.';
     if (o.paymentStatus == 'refunded') return '${total ?? 'Your payment'} has been returned to your wallet.';

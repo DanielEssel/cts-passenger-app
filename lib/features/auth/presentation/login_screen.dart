@@ -66,16 +66,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   // ---------------------------------------------------------------------------
 
   Future<void> _requestOtp() async {
+    if (ref.read(authProvider).isLoading) return;
     if (!_formKey.currentState!.validate()) return;
+    final phone = _phoneKey.currentState?.e164;
+    if (phone == null) return;
+    FocusScope.of(context).unfocus();
     HapticFeedback.mediumImpact();
-
-    // ✅ Use E.164 number from PhoneInputField (includes country code)
-    final phone =
-        _phoneKey.currentState?.fullNumber ?? _phoneController.text.trim();
 
     await ref.read(authProvider.notifier).sendOtp(
           phone: phone,
+          // Only after Firebase confirms the SMS was sent.
           onCodeSent: () {
+            if (!mounted) return;
             Navigator.pushNamed(
               context,
               AppRoutes.otpVerification,
@@ -85,33 +87,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               },
             );
           },
-          onAuthenticated: () {
-            if (!context.mounted) return;
-
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.shell,
-              (_) => false,
-            );
+          // Instant verification or auto-retrieved SMS, possibly while the
+          // OTP screen is open on top of this one.
+          onAuthenticated: (route) {
+            if (!mounted) return;
+            Navigator.of(context).pushNamedAndRemoveUntil(route, (_) => false);
           },
           onError: (msg) {
-            if (!context.mounted) return;
-
-            // Keep your existing error UI here.
-            // For example:
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(msg)),
-            );
+            if (!mounted) return;
+            showAuthError(context, msg);
           },
         );
-  }
-
-  String? _validatePhone(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
-    }
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length < 9) return 'Enter a valid phone number';
-    return null;
   }
 
   // ---------------------------------------------------------------------------
@@ -192,8 +178,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           child: PhoneInputField(
                             key: _phoneKey,
                             controller: _phoneController,
-                            validator: _validatePhone,
                             enabled: !isLoading,
+                            onSubmitted: _requestOtp,
                           ),
                         ),
                         const SizedBox(height: 28),
@@ -204,6 +190,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           isLoading: isLoading,
                           onTap: _requestOtp,
                         ),
+                        OtpRequestStatus(visible: isLoading),
                         const SizedBox(height: 28),
 
                         // Refined Divider

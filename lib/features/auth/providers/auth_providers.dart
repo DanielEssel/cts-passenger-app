@@ -4,8 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import '../../home/services/notification_service.dart';
-import '../data/passenger_profile_check.dart';
+import '../../../core/routes/app_routes.dart';
+import '../data/passenger_account_store.dart';
+import '../domain/auth_error_messages.dart';
+import '../domain/otp_requester.dart';
+import '../domain/phone_number.dart';
 
 // ── Firebase instances ────────────────────────────────────────────────────────
 
@@ -120,7 +123,63 @@ class AuthState {
   }
 }
 
+// ── Sign-in dependencies (overridden in tests) ────────────────────────────────
+
+final passengerAccountStoreProvider = Provider<PassengerAccountStore>(
+  (ref) => FirestorePassengerAccountStore(ref.watch(firestoreProvider)),
+);
+
+final passengerSessionHooksProvider =
+    Provider<PassengerSessionHooks>((_) => const PassengerSessionHooks());
+
+/// Firebase verifyPhoneNumber behind the request gate. No forced reCAPTCHA:
+/// the Passenger app relies on the SDK's own fallback when Play Integrity
+/// can't verify the device.
+final otpRequesterProvider =
+    Provider<OtpRequester<PhoneAuthCredential>>((ref) {
+  final auth = ref.watch(firebaseAuthProvider);
+  final requester = OtpRequester<PhoneAuthCredential>(
+    start: ({
+      required String phoneNumber,
+      int? resendToken,
+      required void Function(String, int?) codeSent,
+      required void Function(PhoneAuthCredential) verificationCompleted,
+      required void Function(String) verificationFailed,
+    }) async {
+      try {
+        await auth.verifyPhoneNumber(
+          phoneNumber: phoneNumber,
+          forceResendingToken: resendToken,
+          timeout: const Duration(seconds: 60),
+          codeSent: codeSent,
+          verificationCompleted: verificationCompleted,
+          verificationFailed: (e) => verificationFailed(e.code),
+          // Auto-retrieval stopped; the verificationId stays valid for
+          // manual entry, so nothing changes here.
+          codeAutoRetrievalTimeout: (_) {},
+        );
+      } on FirebaseAuthException catch (e) {
+        verificationFailed(e.code);
+      }
+    },
+  );
+  ref.onDispose(requester.cancel);
+  return requester;
+});
+
 // ── Auth notifier ─────────────────────────────────────────────────────────────
+//
+//   request code (OtpRequester) → codeSent → OTP screen
+//   credential (auto-verified or typed) → signInWithCredential
+//   → users/{uid} from the server → route (welcome or shell)
+//
+// Firebase Auth decides "signed in". Any failure after the Firebase sign-in
+// (no profile, another role, Firestore unreachable) signs the user back out,
+// so the app is never left half-authenticated. Existing profiles are never
+// overwritten: signing up with a registered passenger number signs them in.
+
+/// Called with the route to open once the passenger is signed in.
+typedef AuthenticatedCallback = void Function(String route);
 
 class AuthNotifier extends Notifier<AuthState> {
   @override
@@ -128,700 +187,353 @@ class AuthNotifier extends Notifier<AuthState> {
 
   FirebaseAuth get _auth => ref.read(firebaseAuthProvider);
   FirebaseFirestore get _firestore => ref.read(firestoreProvider);
+  PassengerAccountStore get _accounts =>
+      ref.read(passengerAccountStoreProvider);
+  PassengerSessionHooks get _hooks => ref.read(passengerSessionHooksProvider);
+  OtpRequester<PhoneAuthCredential> get _requester =>
+      ref.read(otpRequesterProvider);
 
-  // ── Send OTP (login flow) ─────────────────────────────────────────────────
-  // Called from LoginScreen. Stores verificationId internally; screen
-  // navigates to OTP screen and calls verifyOtp() when code is entered.
+  /// E.164 number being verified. A Firebase user only counts as this
+  /// sign-in when its phone number matches.
+  String? _phone;
 
+  /// Set by signUp; null for a login.
+  PassengerSignupDetails? _signup;
+
+  // ── Request a code ────────────────────────────────────────────────────────
+
+  /// Login. [phone] must be E.164.
   Future<void> sendOtp({
     required String phone,
     required VoidCallback onCodeSent,
-    required VoidCallback onAuthenticated,
+    required AuthenticatedCallback onAuthenticated,
     required void Function(String) onError,
   }) async {
-    // Prevent accidental duplicate requests from the login UI.
-    if (state.isLoading) {
-      debugPrint(
-          '🔥 OTP request ignored: verification request already running');
-      return;
-    }
-
-    state = state.copyWith(
-      isLoading: true,
-      clearError: true,
-      clearVerificationId: true,
-      clearResendToken: true,
-      verificationInProgress: false,
+    _request(
+      phone: phone,
+      signup: null,
+      isResend: false,
+      onCodeSent: onCodeSent,
+      onAuthenticated: onAuthenticated,
+      onError: onError,
     );
-
-    debugPrint('📱 FIREBASE PHONE AUTH: requesting OTP for $phone');
-
-    try {
-      await _auth.verifyPhoneNumber(
-        phoneNumber: phone,
-        timeout: const Duration(seconds: 60),
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          debugPrint(
-              '📱 FIREBASE PHONE AUTH: automatic verification completed');
-
-          await _completeAutomaticVerification(
-            credential: credential,
-            onCodeSent: onCodeSent,
-            onAuthenticated: onAuthenticated,
-            onError: onError,
-          );
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          debugPrint(
-            '🔥 FIREBASE PHONE AUTH FAILED: ${e.code} - ${e.message}',
-          );
-
-          final msg = _phoneErrorMessage(e.code, e.message);
-
-          state = state.copyWith(
-            isLoading: false,
-            error: msg,
-            clearVerificationId: true,
-            clearResendToken: true,
-            verificationInProgress: false,
-          );
-
-          onError(msg);
-        },
-        codeSent: (String verificationId, int? resendToken) {
-          debugPrint(
-            '📨 FIREBASE PHONE AUTH: codeSent '
-            'verificationId=${verificationId.isNotEmpty ? "received" : "EMPTY"} '
-            'resendToken=$resendToken',
-          );
-
-          state = state.copyWith(
-            isLoading: false,
-            verificationId: verificationId,
-            resendToken: resendToken,
-            verificationInProgress: false,
-          );
-
-          onCodeSent();
-        },
-        codeAutoRetrievalTimeout: (String verificationId) {
-          debugPrint(
-            '⏱️ FIREBASE PHONE AUTH: auto retrieval timeout',
-          );
-
-          // IMPORTANT:
-          // Do NOT clear verificationId here.
-          //
-          // The timeout only means Android automatic SMS retrieval stopped.
-          // The user can still manually enter the SMS code.
-        },
-      );
-    } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '🔥 FIREBASE PHONE AUTH REQUEST ERROR: ${e.code} - ${e.message}',
-      );
-
-      final msg = _phoneErrorMessage(e.code, e.message);
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        clearVerificationId: true,
-        clearResendToken: true,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    } catch (e) {
-      debugPrint('🔥 FIREBASE PHONE AUTH REQUEST ERROR: $e');
-
-      const msg = 'Unable to send verification code. Please try again.';
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        clearVerificationId: true,
-        clearResendToken: true,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    }
   }
 
-  // ── Sign up (new passenger) ───────────────────────────────────────────────
-
+  /// New passenger. The profile is created after the phone is verified.
   Future<void> signUp({
     required String firstName,
     required String lastName,
     required String phone,
     required String email,
     required VoidCallback onCodeSent,
-    required VoidCallback onAuthenticated,
+    required AuthenticatedCallback onAuthenticated,
     required void Function(String) onError,
   }) async {
-    if (state.isLoading) {
-      debugPrint(
-          '🔥 SIGN-UP OTP ignored: verification request already running');
-      return;
-    }
-
-    state = state.copyWith(
-      isLoading: true,
-      clearError: true,
-      clearVerificationId: true,
-      clearResendToken: true,
-      verificationInProgress: false,
-    );
-
-    debugPrint('📱 FIREBASE SIGN-UP: requesting OTP for $phone');
-
-    try {
-      await _auth.verifyPhoneNumber(
+    _request(
+      phone: phone,
+      signup: PassengerSignupDetails(
+        firstName: firstName,
+        lastName: lastName,
         phoneNumber: phone,
-        timeout: const Duration(seconds: 60),
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          debugPrint('📱 FIREBASE SIGN-UP: automatic verification completed');
-
-          await _completeAutomaticVerification(
-            credential: credential,
-            pendingProfile: {
-              'firstName': firstName,
-              'lastName': lastName,
-              'phone': phone,
-              'email': email,
-            },
-            onCodeSent: onCodeSent,
-            onAuthenticated: onAuthenticated,
-            onError: onError,
-          );
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          debugPrint(
-            '🔥 FIREBASE SIGN-UP FAILED: ${e.code} - ${e.message}',
-          );
-
-          final msg = _phoneErrorMessage(e.code, e.message);
-
-          state = state.copyWith(
-            isLoading: false,
-            error: msg,
-            clearVerificationId: true,
-            clearResendToken: true,
-            verificationInProgress: false,
-          );
-
-          onError(msg);
-        },
-        codeSent: (String verificationId, int? resendToken) {
-          debugPrint(
-            '📨 FIREBASE SIGN-UP: codeSent '
-            'resendToken=$resendToken',
-          );
-
-          state = state.copyWith(
-            isLoading: false,
-            verificationId: verificationId,
-            resendToken: resendToken,
-            verificationInProgress: false,
-          );
-
-          onCodeSent();
-        },
-        codeAutoRetrievalTimeout: (String verificationId) {
-          debugPrint(
-            '⏱️ FIREBASE SIGN-UP: auto retrieval timeout',
-          );
-
-          // Keep verificationId. Manual OTP remains valid.
-        },
-      );
-    } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '🔥 FIREBASE SIGN-UP REQUEST ERROR: ${e.code} - ${e.message}',
-      );
-
-      final msg = _phoneErrorMessage(e.code, e.message);
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        clearVerificationId: true,
-        clearResendToken: true,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    } catch (e) {
-      debugPrint('🔥 FIREBASE SIGN-UP REQUEST ERROR: $e');
-
-      const msg = 'Unable to send verification code. Please try again.';
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        clearError: false,
-        clearVerificationId: true,
-        clearResendToken: true,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    }
+        email: email,
+      ),
+      isResend: false,
+      onCodeSent: onCodeSent,
+      onAuthenticated: onAuthenticated,
+      onError: onError,
+    );
   }
 
-  Future<void> _completeAutomaticVerification({
-    required PhoneAuthCredential credential,
-    Map<String, dynamic>? pendingProfile,
+  /// Resends to the number being verified, with Firebase's resend token.
+  Future<void> resendOtp({
+    required String phone,
     required VoidCallback onCodeSent,
-    required VoidCallback onAuthenticated,
+    required AuthenticatedCallback onAuthenticated,
     required void Function(String) onError,
   }) async {
-    // Only one completion path may consume the verification session.
-    if (state.verificationInProgress) {
-      debugPrint(
-        '⚠️ AUTO VERIFICATION ignored: another verification is already running',
-      );
+    _request(
+      phone: _phone ?? phone,
+      signup: _signup,
+      isResend: true,
+      onCodeSent: onCodeSent,
+      onAuthenticated: onAuthenticated,
+      onError: onError,
+    );
+  }
+
+  void _request({
+    required String phone,
+    required PassengerSignupDetails? signup,
+    required bool isResend,
+    required VoidCallback onCodeSent,
+    required AuthenticatedCallback onAuthenticated,
+    required void Function(String) onError,
+  }) {
+    if (state.isLoading || state.verificationInProgress) {
+      _log('request ignored: another one is running');
       return;
     }
-
+    _phone = phone;
+    _signup = signup;
     state = state.copyWith(
       isLoading: true,
-      verificationInProgress: true,
       clearError: true,
+      clearVerificationId: !isResend,
+      clearResendToken: !isResend,
     );
+    _log('${isResend ? 'resending' : 'requesting'} code for ${maskPhone(phone)}');
 
-    try {
-      final result = await _auth.signInWithCredential(credential);
-      final user = result.user;
-
-      if (user == null) {
+    final started = _requester.request(
+      phoneNumber: phone,
+      resendToken: isResend ? state.resendToken : null,
+      onCodeSent: (verificationId, resendToken) {
+        _log('code sent');
         state = state.copyWith(
           isLoading: false,
-          verificationInProgress: false,
+          verificationId: verificationId,
+          resendToken: resendToken,
         );
-
-        onError('Authentication failed. Please try again.');
-        return;
-      }
-
-      debugPrint(
-        '✅ AUTO VERIFICATION: Firebase user authenticated ${user.uid}',
-      );
-
-      state = state.copyWith(
-        isLoading: true,
-        user: user,
-        clearVerificationId: true,
-        clearResendToken: true,
-      );
-
-      final success = await _finishAfterCredential(
-        user,
-        pendingProfile,
-        onError,
-      );
-
-      if (!success) {
-        state = const AuthState();
-        return;
-      }
-
-      state = state.copyWith(
-        isLoading: false,
-        user: user,
-        verificationInProgress: false,
-      );
-
-      onAuthenticated();
-    } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '🔥 AUTO VERIFICATION ERROR: ${e.code} - ${e.message}',
-      );
-
-      state = state.copyWith(
-        isLoading: false,
-        verificationInProgress: false,
-      );
-
-      onError(_phoneErrorMessage(e.code, e.message));
-    } catch (e) {
-      debugPrint('🔥 AUTO VERIFICATION ERROR: $e');
-
-      state = state.copyWith(
-        isLoading: false,
-        verificationInProgress: false,
-      );
-
-      onError(
-        'Unable to complete verification. Please request a new code.',
-      );
-    }
+        onCodeSent();
+      },
+      onAutoVerified: (credential) {
+        _log('verified automatically');
+        _complete(
+          credential,
+          onAuthenticated: onAuthenticated,
+          onError: onError,
+        );
+      },
+      onFailed: (code) {
+        _log('code request failed: $code');
+        final message = phoneAuthErrorMessage(code);
+        // A failed resend keeps the earlier session: its code still works.
+        state = state.copyWith(
+          isLoading: false,
+          error: message,
+          clearVerificationId: !isResend,
+          clearResendToken: !isResend,
+        );
+        onError(message);
+      },
+    );
+    if (!started) state = state.copyWith(isLoading: false);
   }
 
-  // ── Verify OTP ────────────────────────────────────────────────────────────
+  // ── Verify a typed code ───────────────────────────────────────────────────
 
   Future<bool> verifyOtp({
     required String smsCode,
-    Map<String, dynamic>? pendingProfile,
-    required VoidCallback onAuthenticated,
+    required AuthenticatedCallback onAuthenticated,
     required void Function(String) onError,
   }) async {
     final code = smsCode.trim();
-
-    if (code.length != 6) {
-      onError('Please enter the complete 6-digit verification code.');
-      return false;
-    }
-
-    // Prevent:
-    //
-    // final digit -> verifyOtp()
-    // Verify button -> verifyOtp()
-    //
-    // from consuming the same verification session twice.
-    if (state.verificationInProgress) {
-      debugPrint(
-        '⚠️ MANUAL OTP ignored: another verification is already running',
-      );
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+      onError('Enter the 6-digit code from the SMS.');
       return false;
     }
 
     final verificationId = state.verificationId;
-
     if (verificationId == null || verificationId.isEmpty) {
-      final currentUser = _auth.currentUser;
-
-      if (currentUser != null) {
-        debugPrint(
-          '✅ MANUAL OTP: Firebase already authenticated '
-          '${currentUser.uid}',
-        );
-
-        final success = await _finishAfterCredential(
-          currentUser,
-          pendingProfile,
-          onError,
-        );
-
-        if (success) {
-          state = state.copyWith(
-            isLoading: false,
-            user: currentUser,
-            verificationInProgress: false,
-          );
-
-          onAuthenticated();
-        }
-
-        return success;
+      // Automatic verification may already have used this session.
+      final user = _auth.currentUser;
+      if (user != null && _isThisSignIn(user) && !state.verificationInProgress) {
+        state = state.copyWith(isLoading: true, verificationInProgress: true);
+        return _finishSignedIn(user,
+            onAuthenticated: onAuthenticated, onError: onError);
       }
-
-      onError(
-        'Your verification session is no longer available. '
-        'Please request a new code.',
-      );
-
+      onError(phoneAuthErrorMessage('invalid-verification-id'));
       return false;
     }
 
+    return _complete(
+      PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: code,
+      ),
+      onAuthenticated: onAuthenticated,
+      onError: onError,
+    );
+  }
+
+  // ── Completion (automatic and manual share it) ────────────────────────────
+
+  Future<bool> _complete(
+    PhoneAuthCredential credential, {
+    required AuthenticatedCallback onAuthenticated,
+    required void Function(String) onError,
+  }) async {
+    // One completion at a time: auto-verification and a typed code must not
+    // consume the same session twice.
+    if (state.verificationInProgress) {
+      _log('verification ignored: another one is running');
+      return false;
+    }
     state = state.copyWith(
       isLoading: true,
       verificationInProgress: true,
       clearError: true,
     );
 
+    User? user;
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: verificationId,
-        smsCode: code,
-      );
-
-      debugPrint('📲 MANUAL OTP: submitting verification code');
-
-      final result = await _auth.signInWithCredential(credential);
-      final user = result.user;
-
-      if (user == null) {
-        state = state.copyWith(
-          isLoading: false,
-          verificationInProgress: false,
-        );
-
-        onError('Authentication failed. Please try again.');
-        return false;
-      }
-
-      debugPrint(
-        '✅ MANUAL OTP: Firebase user authenticated ${user.uid}',
-      );
-
-      state = state.copyWith(
-        isLoading: true,
-        user: user,
-        clearVerificationId: true,
-        clearResendToken: true,
-      );
-
-      final success = await _finishAfterCredential(
-        user,
-        pendingProfile,
-        onError,
-      );
-
-      if (!success) {
-        state = const AuthState();
-        return false;
-      }
-
-      state = state.copyWith(
-        isLoading: false,
-        user: user,
-        verificationInProgress: false,
-      );
-
-      onAuthenticated();
-
-      return true;
+      user = (await _auth.signInWithCredential(credential)).user;
     } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '🔥 MANUAL OTP ERROR: ${e.code} - ${e.message}',
-      );
-
-      // Do NOT automatically sign the user out here unless Firebase
-      // actually authenticated them and our post-auth flow rejected them.
-      //
-      // In particular, session-expired should not be treated as proof
-      // that the SMS itself expired.
-      final currentUser = _auth.currentUser;
-
-      if (currentUser != null) {
-        debugPrint(
-          'ℹ️ MANUAL OTP error occurred but Firebase has an authenticated user. '
-          'Continuing with ${currentUser.uid}',
-        );
-
-        state = state.copyWith(
-          isLoading: true,
-          user: currentUser,
-          clearVerificationId: true,
-          clearResendToken: true,
-        );
-
-        final success = await _finishAfterCredential(
-          currentUser,
-          pendingProfile,
-          onError,
-        );
-
-        if (success) {
-          state = state.copyWith(
-            isLoading: false,
-            user: currentUser,
-            verificationInProgress: false,
-          );
-
-          onAuthenticated();
-        }
-
-        return success;
+      // When both paths race, the loser gets session-expired although the
+      // winner has signed this number in.
+      final current = _auth.currentUser;
+      if (current != null && _isThisSignIn(current)) {
+        user = current;
+      } else {
+        _log('sign-in failed: ${e.code}');
+        return _failBeforeSignIn(phoneAuthErrorMessage(e.code), onError);
       }
-
-      state = state.copyWith(
-        isLoading: false,
-        verificationInProgress: false,
-      );
-
-      onError(_phoneErrorMessage(e.code, e.message));
-
-      return false;
-    } catch (e) {
-      debugPrint('🔥 MANUAL OTP ERROR: $e');
-
-      state = state.copyWith(
-        isLoading: false,
-        verificationInProgress: false,
-      );
-
-      onError(
-        'Unable to complete verification. Please request a new code.',
-      );
-
-      return false;
+    } catch (_) {
+      return _failBeforeSignIn(phoneAuthErrorMessage('unknown'), onError);
     }
+    if (user == null) {
+      return _failBeforeSignIn(phoneAuthErrorMessage('unknown'), onError);
+    }
+    return _finishSignedIn(user,
+        onAuthenticated: onAuthenticated, onError: onError);
   }
 
-  Future<void> resendOtp({
-    required String phone,
-    Map<String, dynamic>? pendingProfile,
-    required VoidCallback onCodeSent,
-    required VoidCallback onAuthenticated,
+  /// Wrong or expired code: nothing is signed in and the session is kept,
+  /// so the user can correct the code or request a new one.
+  bool _failBeforeSignIn(String message, void Function(String) onError) {
+    state = state.copyWith(
+      isLoading: false,
+      verificationInProgress: false,
+      error: message,
+    );
+    onError(message);
+    return false;
+  }
+
+  Future<bool> _finishSignedIn(
+    User user, {
+    required AuthenticatedCallback onAuthenticated,
     required void Function(String) onError,
   }) async {
-    if (state.isLoading) {
-      debugPrint('⚠️ RESEND ignored: authentication operation already running');
-      return;
-    }
-
-    final previousResendToken = state.resendToken;
-
+    // This request is done: a late auto-retrieval must not complete it again.
+    _requester.cancel();
     state = state.copyWith(
-      isLoading: true,
-      clearError: true,
+      user: user,
+      clearVerificationId: true,
+      clearResendToken: true,
+    );
+
+    final outcome = await _resolveAccount(user);
+    final route = outcome.route;
+    if (route == null) {
+      _log('signed back out: ${outcome.reason}');
+      await _signOutQuietly();
+      _phone = null;
+      _signup = null;
+      state = AuthState(error: outcome.message);
+      onError(outcome.message!);
+      return false;
+    }
+
+    _phone = null;
+    _signup = null;
+    state = state.copyWith(
+      isLoading: false,
       verificationInProgress: false,
+      user: user,
     );
-
-    debugPrint(
-      '🔄 FIREBASE PHONE AUTH: resending OTP '
-      '(token=${previousResendToken != null ? "available" : "unavailable"})',
-    );
-
-    try {
-      await _auth.verifyPhoneNumber(
-        phoneNumber: phone,
-        timeout: const Duration(seconds: 60),
-        forceResendingToken: previousResendToken,
-        verificationCompleted: (PhoneAuthCredential credential) async {
-          debugPrint(
-            '📱 FIREBASE RESEND: automatic verification completed',
-          );
-
-          await _completeAutomaticVerification(
-            credential: credential,
-            pendingProfile: pendingProfile,
-            onCodeSent: onCodeSent,
-            onAuthenticated: onAuthenticated,
-            onError: onError,
-          );
-        },
-        verificationFailed: (FirebaseAuthException e) {
-          debugPrint(
-            '🔥 FIREBASE RESEND FAILED: ${e.code} - ${e.message}',
-          );
-
-          final msg = _phoneErrorMessage(e.code, e.message);
-
-          state = state.copyWith(
-            isLoading: false,
-            error: msg,
-            verificationInProgress: false,
-          );
-
-          onError(msg);
-        },
-        codeSent: (String verificationId, int? resendToken) {
-          debugPrint(
-            '📨 FIREBASE RESEND: new verification session received '
-            '(resendToken=$resendToken)',
-          );
-
-          state = state.copyWith(
-            isLoading: false,
-            verificationId: verificationId,
-            resendToken: resendToken,
-            verificationInProgress: false,
-          );
-
-          onCodeSent();
-        },
-        codeAutoRetrievalTimeout: (String verificationId) {
-          debugPrint(
-            '⏱️ FIREBASE RESEND: auto retrieval timeout',
-          );
-
-          // Keep the verificationId for manual entry.
-        },
-      );
-    } on FirebaseAuthException catch (e) {
-      debugPrint(
-        '🔥 FIREBASE RESEND ERROR: ${e.code} - ${e.message}',
-      );
-
-      final msg = _phoneErrorMessage(e.code, e.message);
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    } catch (e) {
-      debugPrint('🔥 FIREBASE RESEND ERROR: $e');
-
-      const msg = 'Unable to resend the code. Please try again.';
-
-      state = state.copyWith(
-        isLoading: false,
-        error: msg,
-        verificationInProgress: false,
-      );
-
-      onError(msg);
-    }
-  }
-
-  // Shared by the manual verifyOtp path and its session-expired recovery:
-  // either creates the passenger profile (signup) or checks/finishes login.
-  Future<bool> _finishAfterCredential(
-    User user,
-    Map<String, dynamic>? pendingProfile,
-    void Function(String) onError,
-  ) async {
-    if (pendingProfile != null) {
-      return await _createPassengerProfile(
-        user: user,
-        firstName: pendingProfile['firstName'] as String? ?? '',
-        lastName: pendingProfile['lastName'] as String? ?? '',
-        phone: pendingProfile['phone'] as String? ?? user.phoneNumber ?? '',
-        email: pendingProfile['email'] as String? ?? '',
-        onError: onError,
-      );
-    }
-    return _finishLogin(user, onError);
-  }
-
-  // Role-checks an existing user doc and bumps lastLoginAt. Returns false
-  // (and signs out) if there's no passenger account for this number.
-  Future<bool> _finishLogin(User user, void Function(String) onError) async {
-    final docRef = _firestore.collection('users').doc(user.uid);
-
-    // Server copy only: right after sign-in the cache may hold just the
-    // push-token write, which has no role (see passenger_profile_check.dart).
-    final PassengerProfileRead profile;
-    try {
-      profile = await readPassengerProfile(docRef);
-    } catch (e) {
-      debugPrint('⚠️ LOGIN: could not read profile from server: $e');
-      state = state.copyWith(isLoading: false, verificationInProgress: false);
-      onError("Couldn't confirm your account. Check your connection and try again.");
-      return false;
-    }
-
-    if (profile.status != PassengerProfileStatus.passenger) {
-      debugPrint('⚠️ LOGIN: rejected (${profile.status.name})');
-      await NotificationService.instance.clearToken();
-      await _auth.signOut();
-      state = const AuthState();
-      onError(
-          'No passenger account found for this number. Please sign up first.');
-      return false;
-    }
-
-    await docRef.update({'lastLoginAt': FieldValue.serverTimestamp()});
-    ref.invalidate(currentUserProvider);
-
-    state = state.copyWith(isLoading: false, user: user);
+    onAuthenticated(route);
     return true;
+  }
+
+  /// Decides where a Firebase-signed-in user goes, from the server copy of
+  /// users/{uid}. Creates the profile for a new sign-up.
+  Future<_AccountOutcome> _resolveAccount(User user) async {
+    final PassengerAccount account;
+    try {
+      account = await _accounts.read(user.uid);
+    } catch (_) {
+      return const _AccountOutcome.rejected(
+        'profile unreachable',
+        "We couldn't confirm your account. Check your connection and try again.",
+      );
+    }
+
+    if (account.isOtherRole) {
+      return const _AccountOutcome.rejected(
+        'other role',
+        'This number is registered to a CTSGo driver or staff account, so it '
+            "can't be used in the passenger app.",
+      );
+    }
+
+    if (account.isPassenger) {
+      try {
+        await _accounts.recordLogin(user.uid);
+      } catch (_) {
+        _log('lastLoginAt not recorded');
+      }
+      ref.invalidate(currentUserProvider);
+      return _AccountOutcome.route(
+          account.hasSeenWelcome ? AppRoutes.shell : AppRoutes.welcome);
+    }
+
+    final signup = _signup;
+    if (signup == null) {
+      return const _AccountOutcome.rejected(
+        'no passenger account',
+        'No passenger account found for this number. Please sign up first.',
+      );
+    }
+
+    try {
+      await _accounts.createPassenger(
+        user.uid,
+        PassengerSignupDetails(
+          firstName: signup.firstName,
+          lastName: signup.lastName,
+          // The number Firebase verified, not just the one typed.
+          phoneNumber: user.phoneNumber ?? signup.phoneNumber,
+          email: signup.email,
+        ),
+        stampCreation: !account.hasCreatedAt,
+      );
+    } catch (_) {
+      return const _AccountOutcome.rejected(
+        'profile not created',
+        "We couldn't finish creating your account. Check your connection "
+            'and try again.',
+      );
+    }
+    // currentUserProvider only re-runs on auth changes; pick up the new doc.
+    ref.invalidate(currentUserProvider);
+    // The sign-in token save was skipped (no profile yet); save it now.
+    // Wallets are created by a Cloud Function on users/{uid} create.
+    await _hooks.savePushToken();
+    return const _AccountOutcome.route(AppRoutes.welcome);
+  }
+
+  bool _isThisSignIn(User user) =>
+      _phone != null && user.phoneNumber == _phone;
+
+  Future<void> _signOutQuietly() async {
+    try {
+      await _hooks.clearPushToken();
+    } catch (_) {}
+    try {
+      await _auth.signOut();
+    } catch (_) {}
   }
 
   // ── Sign out ──────────────────────────────────────────────────────────────
 
   Future<void> signOut() async {
+    _requester.cancel();
+    _phone = null;
+    _signup = null;
     state = state.copyWith(isLoading: true);
     // Detach this device from the account's pushes while still signed in;
     // never blocks sign-out (bounded, does not throw).
-    await NotificationService.instance.clearToken();
+    await _hooks.clearPushToken();
     await _auth.signOut();
     state = const AuthState();
   }
@@ -856,78 +568,22 @@ class AuthNotifier extends Notifier<AuthState> {
 
   void clearError() => state = state.copyWith(clearError: true);
 
-  // Returns false (and calls onError) instead of throwing, so callers can
-  // decide whether to sign the half-created user back out.
-  Future<bool> _createPassengerProfile({
-    required User user,
-    required String firstName,
-    required String lastName,
-    required String phone,
-    required String email,
-    required void Function(String) onError,
-  }) async {
-    // Reload to ensure the auth token is fully settled after OTP sign-in
-    await user.reload();
-    final freshUser = _auth.currentUser;
-    if (freshUser == null) return false;
-
-    final docRef = _firestore.collection('users').doc(freshUser.uid);
-    final docSnap = await docRef.get();
-
-    if (docSnap.exists) {
-      final existingRole = docSnap.data()?['role'];
-      if (existingRole != null && existingRole != 'passenger') {
-        onError('This phone number is already registered as a driver.');
-        return false;
-      }
-    }
-    final isNewDoc = !docSnap.exists;
-
-    await docRef.set({
-      'uid': freshUser.uid,
-      'firstName': firstName,
-      'lastName': lastName,
-      'displayName': '$firstName $lastName',
-      'phoneNumber': phone,
-      'email': email.isNotEmpty ? email : null,
-      'role': 'passenger',
-      'hasSeenWelcome': false,
-      // Only stamp these on first creation -- merge:true on a retry or a
-      // second auto-verify callback would otherwise silently reset the
-      // user's original signup date every time this runs.
-      if (isNewDoc) 'termsAcceptedAt': FieldValue.serverTimestamp(),
-      if (isNewDoc) 'createdAt': FieldValue.serverTimestamp(),
-      'termsVersion': '1.0',
-      'lastLoginAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    // currentUserProvider only re-runs when authStateProvider changes; the
-    // Firestore doc just written wouldn't otherwise be picked up until the
-    // next auth state change, so nudge it explicitly.
-    ref.invalidate(currentUserProvider);
-
-    // The sign-in token save was skipped (no profile yet); save it now.
-    await NotificationService.instance.saveCurrentToken();
-
-    state = state.copyWith(isLoading: false, user: freshUser);
-
-    // Wallet is created by a Cloud Function triggered on users/{uid} onCreate.
-    // Do NOT write to /wallets from the client — rules block it.
-    return true;
+  /// Debug builds only, and never a full phone number, a UID or a code
+  /// (AUTH-11: debugPrint is not stripped from release builds).
+  void _log(String message) {
+    if (kDebugMode) debugPrint('📱 AUTH: $message');
   }
 }
 
-String _phoneErrorMessage(String code, String? message) {
-  return switch (code) {
-    'invalid-phone-number' =>
-      'Invalid phone number. Include country code (e.g. +233).',
-    'too-many-requests' => 'Too many attempts. Please try again later.',
-    'session-expired' => 'Code expired. Please request a new one.',
-    'invalid-verification-code' => 'Incorrect code. Please try again.',
-    'quota-exceeded' => 'SMS quota exceeded. Please try again later.',
-    'missing-phone-number' => 'Please enter a phone number.',
-    _ => 'Verification failed: ${message ?? code}',
-  };
+class _AccountOutcome {
+  const _AccountOutcome.route(this.route)
+      : reason = null,
+        message = null;
+  const _AccountOutcome.rejected(this.reason, this.message) : route = null;
+
+  final String? route;
+  final String? reason;
+  final String? message;
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
