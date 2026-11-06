@@ -4,9 +4,13 @@
 // gasSupplierTrackingView decides what is said from the order's server
 // state; this screen adapts the rest.
 //
-// Supplier orders carry no driver name, phone or position a passenger may
-// read, so there is no driver card or call action (an info line says a
-// driver has accepted) and the map shows the delivery point only. Passengers cannot write these orders,
+// The driver's live position comes from a separate document,
+// gas_supplier_tracking/{orderId} (watchTracking), never from the order: it is
+// shown on the map only while the order is in a driver stage and the
+// position is from the driver now on the order (liveDriverFix). Status and
+// progress always come from the order. Supplier orders carry no driver name
+// or phone a passenger may read, so there is no driver card or call action
+// (an info line says a driver has accepted). Passengers cannot write these orders,
 // so a delivered order is not sent to the driver-rating screen (which
 // writes the rating onto the order); it ends on the completed state here.
 import 'package:flutter/material.dart';
@@ -26,6 +30,8 @@ class GasSupplierTrackingScreen extends StatefulWidget {
   final String orderId;
   final GasSupplierRepository? repository;
   final Stream<GasSupplierOrderView?>? stream;
+  /// The driver's live position; the repository's watchTracking when null.
+  final Stream<GasSupplierTrackingFix?>? trackingStream;
 
   /// Who the order is with, from the server's quote, when opened straight
   /// after payment ("Tema Gas · Tema Station"). Only a fallback: the order's
@@ -33,7 +39,7 @@ class GasSupplierTrackingScreen extends StatefulWidget {
   /// order is reopened; orders created before it existed have only this.
   final String? supplier;
 
-  const GasSupplierTrackingScreen({super.key, required this.orderId, this.repository, this.stream, this.supplier});
+  const GasSupplierTrackingScreen({super.key, required this.orderId, this.repository, this.stream, this.trackingStream, this.supplier});
 
   @override
   State<GasSupplierTrackingScreen> createState() => _GasSupplierTrackingScreenState();
@@ -42,6 +48,7 @@ class GasSupplierTrackingScreen extends StatefulWidget {
 class _GasSupplierTrackingScreenState extends State<GasSupplierTrackingScreen> {
   late final GasSupplierRepository repo = widget.repository ?? GasSupplierRepository();
   late Stream<GasSupplierOrderView?> stream = _open();
+  late Stream<GasSupplierTrackingFix?> tracking = widget.trackingStream ?? repo.watchTracking(widget.orderId);
 
   Stream<GasSupplierOrderView?> _open() => widget.stream ?? repo.watch(widget.orderId);
 
@@ -79,13 +86,18 @@ class _GasSupplierTrackingScreenState extends State<GasSupplierTrackingScreen> {
               onHome: _goHome,
             );
           }
-          return GasTrackingBody(data: _data(o));
+          // The position is optional: a missing, late or failed tracking read shows the order without it.
+          return StreamBuilder<GasSupplierTrackingFix?>(
+            stream: tracking,
+            builder: (context, t) => GasTrackingBody(data: _data(o, t.hasError ? null : t.data)),
+          );
         },
       ),
     );
   }
 
-  GasTrackingData _data(GasSupplierOrderView o) {
+  GasTrackingData _data(GasSupplierOrderView o, GasSupplierTrackingFix? tracked) {
+    final fix = liveDriverFix(o, tracked);
     // The code is the server's, shown once a driver or rider is bringing the order.
     final code = showCompletionCode(o.status) ? o.completionCode : null;
     final view = gasSupplierTrackingView(o, hasCode: (code ?? '').isNotEmpty);
@@ -104,6 +116,9 @@ class _GasSupplierTrackingScreenState extends State<GasSupplierTrackingScreen> {
       customer: o.deliveryLatitude == null || o.deliveryLongitude == null
           ? null
           : LatLng(o.deliveryLatitude!, o.deliveryLongitude!),
+      driver: fix == null ? null : LatLng(fix.latitude!, fix.longitude!),
+      driverHeading: fix?.heading ?? 0,
+      driverLocationAt: fix?.at,
       // No driver name, phone or position is readable for supplier orders,
       // so no driver card (it would name no one): an info line says a
       // driver has accepted, by the server's driverId.

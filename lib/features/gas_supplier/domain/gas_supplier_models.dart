@@ -198,6 +198,10 @@ class GasSupplierOrderView {
   /// driverId (acceptJob / acceptOffer). Never inferred from the status.
   final bool hasDriver;
 
+  /// The server's driverId, used only to match the live tracking document
+  /// (gas_supplier_tracking) to the driver now on the order.
+  final String? driverId;
+
   /// An admin took a driver off this order (releasedDriverIds), returning it
   /// to "confirmed" for another driver.
   final bool driverReleased;
@@ -219,7 +223,7 @@ class GasSupplierOrderView {
   const GasSupplierOrderView({required this.id, required this.status, this.total, this.completionCode, this.cancelReason, this.deliveryMode,
     this.refundPending = false, this.deliveryFee, this.routeDistanceKm, this.orderType, this.cylinderSize, this.brand, this.quantity,
     this.estimatedDeliveryAt, this.paymentStatus, this.refundReview = false, this.deliveryAddress,
-    this.hasDriver = false, this.driverReleased = false, this.productAmount, this.handlingFee,
+    this.hasDriver = false, this.driverId, this.driverReleased = false, this.productAmount, this.handlingFee,
     this.deliveryLatitude, this.deliveryLongitude, this.supplierName, this.stationName});
 
   factory GasSupplierOrderView.fromMap(String id, Map<String, dynamic> m) {
@@ -233,6 +237,7 @@ class GasSupplierOrderView {
       refundReview: review is String && review.isNotEmpty,
       deliveryAddress: m['deliveryAddress'] as String?,
       hasDriver: m['driverId'] is String && (m['driverId'] as String).isNotEmpty,
+      driverId: m['driverId'] is String && (m['driverId'] as String).isNotEmpty ? m['driverId'] as String : null,
       driverReleased: m['releasedDriverIds'] is List && (m['releasedDriverIds'] as List).isNotEmpty,
       productAmount: _num(p['productAmount']), handlingFee: _num(p['handlingFee']),
       deliveryLatitude: m['deliveryLocation'] is GeoPoint ? (m['deliveryLocation'] as GeoPoint).latitude : null,

@@ -12,6 +12,7 @@
 // The original flow's refilling and returning legs have no supplier
 // equivalent and are never used here.
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../tracking/domain/tracking_view.dart';
@@ -117,4 +118,50 @@ TrackingView gasSupplierTrackingView(GasSupplierOrderView o, {bool hasCode = fal
     detail: 'Its status ("${o.status}") is not recognised by this version of the app. '
         'Your order is not affected.',
   );
+}
+
+// ── Live driver position (gas_supplier_tracking/{orderId}) ──────────────────
+// A separate document (functions/gas_supplier_tracking.js) the passenger may
+// read: the assigned driver, the status, and the driver's last position. The
+// order itself stays the source of the status and progress shown; this
+// document only supplies the position.
+
+/// Statuses in which the assigned driver shares their position (the rules allow it only then).
+const gasSupplierTrackingStatuses = {'driverAssigned', 'atStation', 'outForDelivery'};
+
+/// One read of gas_supplier_tracking/{orderId}.
+class GasSupplierTrackingFix {
+  final String? driverId, status;
+  final double? latitude, longitude;
+  final double heading;
+  final DateTime? at;
+
+  const GasSupplierTrackingFix({this.driverId, this.status, this.latitude, this.longitude, this.heading = 0, this.at});
+
+  factory GasSupplierTrackingFix.fromMap(Map<String, dynamic> m) {
+    final loc = m['driverCurrentLocation'];
+    final heading = m['driverHeading'];
+    final at = m['driverLocationUpdatedAt'] ?? m['lastLocationUpdate'];
+    return GasSupplierTrackingFix(
+      driverId: m['driverId'] is String && (m['driverId'] as String).isNotEmpty ? m['driverId'] as String : null,
+      status: m['status'] as String?,
+      latitude: loc is GeoPoint ? loc.latitude : null,
+      longitude: loc is GeoPoint ? loc.longitude : null,
+      heading: heading is num && heading >= 0 ? heading.toDouble() : 0,
+      at: at is Timestamp ? at.toDate() : null,
+    );
+  }
+
+  bool get hasPosition => latitude != null && longitude != null;
+}
+
+/// The driver position to show for [o], or null. Only a position from the
+/// driver now on the order (the order's own driverId), while the order is in
+/// a driver stage, with a real location: never a released driver's, an ended
+/// order's, or a guessed one.
+GasSupplierTrackingFix? liveDriverFix(GasSupplierOrderView o, GasSupplierTrackingFix? t) {
+  if (t == null || !t.hasPosition) return null;
+  if (!gasSupplierTrackingStatuses.contains(o.status) || o.driverId == null) return null;
+  if (t.driverId != o.driverId) return null;
+  return t;
 }

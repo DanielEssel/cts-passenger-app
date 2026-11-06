@@ -72,6 +72,36 @@ describe("gas supplier wallet rules", () => {
     for (const uid of [h.ADMIN, SUPER, OWNER]) await assertFails(setDoc(doc(h.db(uid), "audit_log/x"), { action: "gas_supplier_withdrawal_paid", supplierId: S }));
   });
 
+  it("WR-03b admins read wallet-credit reconciliation records, adjustments, the hold queue and credit audit entries; nobody writes them", async () => {
+    const REC = "gas_settlement_reconciliations/2026-11-05", ADJ = `${REC}/adjustments/credit__gas_supplier_credit_o1`, Q = "gas_supplier_credit_queue/o1";
+    await h.env().withSecurityRulesDisabled(async (ctx) => {
+      const fs = ctx.firestore();
+      await setDoc(doc(fs, REC), { businessDate: "2026-11-05", creditedPesewas: 190, includedStatementIds: [] });
+      await setDoc(doc(fs, ADJ), { type: "credit", amountPesewas: 95 });
+      await setDoc(doc(fs, Q), { orderId: "o1", supplierId: S, status: "waiting" });
+      await setDoc(doc(fs, "audit_log/a3"), { action: "gas_supplier_credited_on_delivery", supplierId: S });
+      await setDoc(doc(fs, "audit_log/a4"), { action: "gas_supplier_wallet_credit_reversed", supplierId: S });
+    });
+    for (const uid of [h.ADMIN, SUPER]) {
+      await assertSucceeds(getDoc(doc(h.db(uid), REC)));
+      await assertSucceeds(getDocs(collection(h.db(uid), `${REC}/adjustments`)));
+      await assertSucceeds(getDoc(doc(h.db(uid), Q)));
+      await assertSucceeds(getDocs(query(collection(h.db(uid), "audit_log"), where("action", "in", ["gas_supplier_credited_on_delivery", "gas_supplier_wallet_credit_reversed"]))));
+      await assertFails(updateDoc(doc(h.db(uid), REC), { creditedPesewas: 1 }));
+      await assertFails(setDoc(doc(h.db(uid), `${REC}/adjustments/x`), { type: "credit", amountPesewas: 1 }));
+      await assertFails(deleteDoc(doc(h.db(uid), ADJ)));
+      await assertFails(updateDoc(doc(h.db(uid), Q), { status: "credited" }));
+      await assertFails(setDoc(doc(h.db(uid), "gas_supplier_credit_queue/o2"), { status: "waiting" }));
+    }
+    for (const uid of [OWNER, STAFF, OTHER_OWNER, h.PAX, h.DRIVER, null]) {
+      await assertFails(getDoc(doc(h.db(uid), REC)));
+      await assertFails(getDoc(doc(h.db(uid), ADJ)));
+      await assertFails(getDoc(doc(h.db(uid), Q)));
+      await assertFails(getDoc(doc(h.db(uid), "audit_log/a3")));
+      await assertFails(setDoc(doc(h.db(uid), REC), { creditedPesewas: 1 }));
+    }
+  });
+
   it("WR-04 only a super admin enables payouts or changes limits; ordinary admins and suppliers cannot", async () => {
     for (const uid of [h.ADMIN, OWNER, STAFF]) {
       await assertFails(updateDoc(doc(h.db(uid), PAYOUTS), { enabled: true, ...LIMITS }));

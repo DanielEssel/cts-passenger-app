@@ -99,6 +99,7 @@ class ActiveRequestBanner extends StatelessWidget {
         TripRequestWrapper()    => 'ACTIVE RIDE',
         DeliveryRequestWrapper() => 'ACTIVE DELIVERY',
         GasRefillRequestWrapper() => 'GAS ORDER',
+        GasSupplierRequestWrapper() => 'GAS ORDER',
       };
 }
 

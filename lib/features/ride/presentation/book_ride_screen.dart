@@ -625,6 +625,10 @@ class _BookRideScreenState extends ConsumerState<BookRideScreen>
         Navigator.of(context, rootNavigator: true).pushNamed(
             AppRoutes.gasTracking,
             arguments: {'orderId': request.id});
+      case GasSupplierRequestWrapper():
+        Navigator.of(context, rootNavigator: true).pushNamed(
+            AppRoutes.gasSupplierTracking,
+            arguments: {'orderId': request.id});
     }
   }
 

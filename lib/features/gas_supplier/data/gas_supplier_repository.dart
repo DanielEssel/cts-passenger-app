@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../core/services/escrow_service.dart';
 import '../domain/gas_supplier_models.dart';
+import '../domain/gas_supplier_tracking.dart';
 
 /// One callable invocation; Firebase in the app, a fake in tests.
 typedef GasSupplierCall = Future<Map<String, dynamic>> Function(String name, Map<String, dynamic> data);
@@ -41,17 +42,22 @@ typedef WatchOrder = Stream<GasSupplierOrderView?> Function(String orderId);
 /// The signed-in passenger's orders still in progress; Firestore in the app, a fake in tests.
 typedef ActiveOrders = Future<List<GasSupplierOrderView>> Function();
 
+/// Live driver position of one order (gas_supplier_tracking); Firestore in the app, a fake in tests.
+typedef WatchTracking = Stream<GasSupplierTrackingFix?> Function(String orderId);
+
 class GasSupplierRepository {
   final GasSupplierCall call;
   final HoldFunds hold;
   final WatchOrder? _watch;
   final ActiveOrders? _active;
+  final WatchTracking? _watchTracking;
 
-  GasSupplierRepository({GasSupplierCall? call, HoldFunds? hold, WatchOrder? watch, ActiveOrders? activeOrders})
+  GasSupplierRepository({GasSupplierCall? call, HoldFunds? hold, WatchOrder? watch, ActiveOrders? activeOrders, WatchTracking? watchTracking})
       : call = call ?? firebaseGasSupplierCall,
         hold = hold ?? escrowHold,
         _watch = watch,
-        _active = activeOrders;
+        _active = activeOrders,
+        _watchTracking = watchTracking;
 
   /// Whether supplier ordering is switched on (settings/gas_supplier_fulfilment).
   /// Any failure, including the callable not being deployed, counts as off.
@@ -164,6 +170,23 @@ class GasSupplierRepository {
     if (injected != null) return injected(orderId);
     return FirebaseFirestore.instance.collection('gas_supplier_orders').doc(orderId).snapshots()
         .map((s) => s.exists ? GasSupplierOrderView.fromMap(s.id, s.data()!) : null);
+  }
+
+  /// The driver's live position for one order (gas_supplier_tracking/{orderId},
+  /// which the order's passenger may read). Null while there is none; a read
+  /// that fails (no document yet, no connection) also gives null, so the
+  /// order screen keeps working without a position.
+  Stream<GasSupplierTrackingFix?> watchTracking(String orderId) {
+    final injected = _watchTracking;
+    if (injected != null) return injected(orderId);
+    try {
+      return FirebaseFirestore.instance.collection('gas_supplier_tracking').doc(orderId).snapshots()
+          .map<GasSupplierTrackingFix?>((s) => s.exists ? GasSupplierTrackingFix.fromMap(s.data()!) : null)
+          .handleError((Object _) {});
+    } catch (_) {
+      // Firestore unavailable (not initialised): no position, never a failed screen.
+      return Stream.value(null);
+    }
   }
 
   /// The passenger's paid orders that are not finished yet, so they can be

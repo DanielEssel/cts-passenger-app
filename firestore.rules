@@ -1522,6 +1522,31 @@ match /gas_orders/{orderId} {
       }
     }
 
+    // ── Gas supplier live tracking (gas_supplier_tracking.js) ─────────────
+    // Only what live tracking needs: orderId, driverId, status, updatedAt and
+    // the driver's position. Created, assigned and released by Cloud
+    // Functions only. The order's passenger, the currently assigned driver
+    // and admins read it; the assigned driver updates only their position,
+    // and only while the order is active. Drivers still cannot read the
+    // parent order (above), so its completion code stays private.
+    match /gas_supplier_tracking/{orderId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.driverId == request.auth.uid)
+        || (isAuth() && get(/databases/$(database)/documents/gas_supplier_orders/$(orderId)).data.passengerId == request.auth.uid);
+      allow update: if isAuth()
+        && resource.data.driverId == request.auth.uid
+        && resource.data.status in ['driverAssigned', 'atStation', 'outForDelivery']
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['driverCurrentLocation', 'driverHeading', 'lastLocationUpdate', 'driverLocationUpdatedAt'])
+        && request.resource.data.driverCurrentLocation is latlng
+        && (!('driverHeading' in request.resource.data) || request.resource.data.driverHeading == null
+            || request.resource.data.driverHeading is number)
+        && request.resource.data.lastLocationUpdate == request.time
+        && (!('driverLocationUpdatedAt' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.driverLocationUpdatedAt == request.time);
+      allow create, delete: if false;
+    }
+
     // ── Gas supplier settlement (gas_settlement_ledger.js) ────────────────
     // Accounting records written only by Cloud Functions (Admin SDK):
     // append-only entitlement entries, statement claims, daily statements,
@@ -1566,7 +1591,10 @@ match /gas_orders/{orderId} {
               'gas_supplier_withdrawal_bridge_accepted', 'gas_supplier_withdrawal_bridge_unknown',
               'gas_supplier_withdrawal_rejected', 'gas_supplier_withdrawal_paid',
               'gas_supplier_withdrawal_failed',
-              'gas_supplier_payout_preference_changed', 'gas_supplier_statement_credited'];
+              'gas_supplier_payout_preference_changed', 'gas_supplier_statement_credited',
+              'gas_supplier_credited_on_delivery', 'gas_supplier_credited_after_hold',
+              'gas_supplier_credited_by_reconciliation', 'gas_supplier_statement_credited_by_reconciliation',
+              'gas_supplier_wallet_credit_reversed', 'gas_supplier_wallet_reconciled'];
     }
     match /gas_commission_terms/{termsId} {
       allow read: if isAdmin();
@@ -1584,6 +1612,22 @@ match /gas_orders/{orderId} {
       allow read, write: if false;
     }
     match /gas_settlement_debts/{debtId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // Supplier wallet credit reconciliation (gas_settlement_ledger.js): the
+    // daily record of supplier wallet credits and reversals (written once,
+    // never edited), its later adjustments, and the queue of credits held back
+    // until the platform hold expires. Admins read them; no client writes.
+    match /gas_settlement_reconciliations/{businessDate} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /adjustments/{adjustmentId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+    match /gas_supplier_credit_queue/{orderId} {
       allow read: if isAdmin();
       allow write: if false;
     }

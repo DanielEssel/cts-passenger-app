@@ -9,6 +9,8 @@ import 'package:cts_transport_app/features/ride/models/trip_request.dart';
 import 'package:cts_transport_app/features/delivery/models/delivery_request.dart';
 import 'package:cts_transport_app/features/gas/models/gas_refill_request.dart';
 import 'package:cts_transport_app/features/auth/providers/auth_providers.dart';
+import 'package:cts_transport_app/features/gas_supplier/domain/gas_supplier_models.dart';
+import 'package:cts_transport_app/features/gas_supplier/domain/gas_supplier_tracking.dart';
 import '../ride/models/service_type.dart';
 
 
@@ -63,6 +65,21 @@ class ActiveServiceRequest extends _$ActiveServiceRequest {
         );
       }
 
+      // A paid Gas supplier order still in progress (equality filters only;
+      // the passenger may read their own). A failed read shows no banner.
+      try {
+        final supplierSnapshot = await FirebaseFirestore.instance
+            .collection('gas_supplier_orders')
+            .where('passengerId', isEqualTo: passenger.uid)
+            .where('status', whereIn: activeSupplierOrderStatuses)
+            .limit(1)
+            .get();
+        if (supplierSnapshot.docs.isNotEmpty) {
+          final d = supplierSnapshot.docs.first;
+          return ServiceRequestWrapper.gasSupplier(GasSupplierOrderView.fromMap(d.id, d.data()));
+        }
+      } catch (_) {}
+
       return null;
     });
   }
@@ -103,6 +120,7 @@ sealed class ServiceRequestWrapper {
   factory ServiceRequestWrapper.trip(TripRequest trip) = TripRequestWrapper;
   factory ServiceRequestWrapper.delivery(DeliveryRequest delivery) = DeliveryRequestWrapper;
   factory ServiceRequestWrapper.gasRefill(GasRefillRequest gasRefill) = GasRefillRequestWrapper;
+  factory ServiceRequestWrapper.gasSupplier(GasSupplierOrderView order) = GasSupplierRequestWrapper;
 
   String get statusDisplayName => switch (this) {
         TripRequestWrapper(:final request) =>
@@ -111,8 +129,13 @@ sealed class ServiceRequestWrapper {
           request.status.passengerDisplayName,
         GasRefillRequestWrapper(:final request) =>
           request.status.passengerDisplayName,
+        GasSupplierRequestWrapper(:final order) =>
+          gasSupplierTrackingView(order).headline,
       };
 }
+
+/// Paid Gas supplier order statuses that are not finished (supplierOrderSteps less delivered).
+final activeSupplierOrderStatuses = supplierOrderSteps.where((s) => s != 'delivered').toList();
 
 class TripRequestWrapper extends ServiceRequestWrapper {
   final TripRequest request;
@@ -133,6 +156,14 @@ class GasRefillRequestWrapper extends ServiceRequestWrapper {
 
   GasRefillRequestWrapper(this.request)
       : super(id: request.id, serviceType: 'gas');
+}
+
+/// A Gas supplier order (gas_supplier_orders); reopened on its own tracking screen.
+class GasSupplierRequestWrapper extends ServiceRequestWrapper {
+  final GasSupplierOrderView order;
+
+  GasSupplierRequestWrapper(this.order)
+      : super(id: order.id, serviceType: 'gas_supplier');
 }
 
 // ── Trip request creator (manual provider — no codegen needed) ────────────────

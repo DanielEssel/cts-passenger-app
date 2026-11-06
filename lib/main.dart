@@ -21,6 +21,7 @@ import 'package:cts_transport_app/features/home/services/notification_service.da
 
 import 'features/delivery/presentation/delivery_tracking_screen.dart';
 import 'features/gas/presentation/screens/gas_order_tracking_screen.dart';
+import 'features/gas_supplier/presentation/gas_supplier_tracking_screen.dart';
 
 // AUTH FLOW
 import 'features/splash/splash_screen.dart';
@@ -220,6 +221,21 @@ class RiderApp extends StatelessWidget {
               : uri.queryParameters['orderId'] ?? '';
       return MaterialPageRoute(
         builder: (_) => GasOrderTrackingScreen(orderId: orderId),
+        settings: settings,
+      );
+
+    // Supplier Gas notifications open their order's own tracking screen. An
+    // id that is missing or not an id opens nothing (the unknown-route page).
+    case AppRoutes.gasSupplierTracking:
+      final a = settings.arguments;
+      final supplierOrderId = a is String
+          ? a
+          : a is Map
+              ? (a['orderId'] ?? '').toString()
+              : uri.queryParameters['orderId'] ?? '';
+      if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(supplierOrderId)) return null;
+      return MaterialPageRoute(
+        builder: (_) => GasSupplierTrackingScreen(orderId: supplierOrderId),
         settings: settings,
       );
 

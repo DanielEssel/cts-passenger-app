@@ -15,6 +15,8 @@ class AppRoutes {
   static const String deliveryMatching = '/delivery-matching'; // Add this
   static const String gasOrder = '/gas-order'; // Add this
   static const String gasTracking = '/gas-tracking'; // Add this
+  /// A Gas supplier order (gas_supplier_orders); push taps carry ?orderId=.
+  static const String gasSupplierTracking = '/gas-supplier-tracking';
   static const String delivery = '/delivery';
   static const String notifications = '/notifications';
   static const String rideTracking = '/ride-tracking';
